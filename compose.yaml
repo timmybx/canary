@@ -1,0 +1,8 @@
+services:
+  canary:
+    build: .
+    volumes:
+      - .:/app
+    working_dir: /app
+    entrypoint: ["sh", "/app/docker-entrypoint.sh"]
+    command: ["canary", "--help"]
