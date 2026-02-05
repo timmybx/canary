@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+title: "CANARY: Component Anomaly & Near-term Advisory Risk Yardstick"
+message: "If you use this software, please cite it."
+authors:
+  - family-names: Brennan
+    given-names: Timothy
+    affiliation: "George Washington University"
+license: Apache-2.0
+url: "https://github.com/timmybx/canary"
+repository-code: "https://github.com/timmybx/canary"
+version: "0.1.0"
+date-released: "2026-02-05"
+keywords:
+  - "software supply chain"
+  - "dependency risk"
+  - "Jenkins"
+  - "vulnerability advisories"
