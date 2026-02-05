@@ -1,3 +1,5 @@
+![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)
+
 # 🐤 CANARY — Component Anomaly & Near-term Advisory Risk Yardstick
 
 CANARY is a starter scaffold for a research prototype that collects software ecosystem signals (starting with Jenkins advisories) and produces a transparent, explainable “risk” score for components/plugins.
