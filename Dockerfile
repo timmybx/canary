@@ -10,7 +10,7 @@ ENV PIP_NO_CACHE_DIR=1 \
 
 # Install deps first for better caching
 COPY pyproject.toml README.md /app/
-RUN pip install --upgrade pip && \
+RUN pip install --upgrade pip setuptools wheel && \
     pip install -e ".[dev]"
 
 # Copy source

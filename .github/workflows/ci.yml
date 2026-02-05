@@ -35,6 +35,14 @@ jobs:
         run: |
           ruff format . --check
 
+      - name: Bandit (security lint)
+        run: |
+          bandit -r canary -q
+
+      - name: pip-audit (dependency vulnerabilities)
+        run: |
+          pip-audit
+
       - name: Pytest
         run: |
           pytest -ra

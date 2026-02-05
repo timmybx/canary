@@ -13,6 +13,8 @@ dependencies = [
 dev = [
   "pytest>=8.0.0",
   "ruff>=0.6.0",
+  "bandit>=1.7.9",
+  "pip-audit>=2.7.3",
 ]
 
 [project.scripts]
