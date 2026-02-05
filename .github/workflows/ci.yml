@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: ["main"]
@@ -24,7 +27,7 @@ jobs:
 
       - name: Install package (dev deps)
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools wheel
           pip install -e ".[dev]"
 
       - name: Ruff (lint)
@@ -39,9 +42,11 @@ jobs:
         run: |
           bandit -r canary -q
 
-      - name: pip-audit (dependency vulnerabilities)
-        run: |
-          pip-audit
+      - name: pip-audit (runtime deps)
+        run: pip-audit -r requirements.txt
+
+      - name: pip-audit (dev deps)
+        run: pip-audit -r requirements-dev.txt
 
       - name: Pytest
         run: |
