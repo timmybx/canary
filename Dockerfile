@@ -5,14 +5,13 @@ WORKDIR /app
 # Nice-to-have: faster pip + fewer cache writes
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_ROOT_USER_ACTION=ignore
 
 # Install deps first for better caching
 COPY pyproject.toml README.md /app/
 RUN pip install --upgrade pip && \
     pip install -e ".[dev]"
-
-ENV PIP_ROOT_USER_ACTION=ignore
 
 # Copy source
 COPY canary/ /app/canary/
