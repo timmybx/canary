@@ -144,7 +144,7 @@ docker compose build --no-cache canary
 
 ## 📄 License
 
-TBD 
+License: Apache-2.0
 
 ---
 
