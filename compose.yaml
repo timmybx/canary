@@ -4,5 +4,7 @@ services:
     volumes:
       - .:/app
     working_dir: /app
+    environment:
+      - CANARY_DATA_DIR=/app/data
     entrypoint: ["sh", "/app/docker-entrypoint.sh"]
-    command: ["canary", "--help"]
+    command: ["pytest", "-q"]

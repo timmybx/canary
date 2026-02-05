@@ -8,13 +8,18 @@ from pathlib import Path
 from canary.collectors.jenkins_advisories import collect_advisories_sample, collect_advisories_real
 from canary.scoring.baseline import score_plugin_baseline
 
-
 def _cmd_collect_advisories(args: argparse.Namespace) -> int:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    out_path = out_dir / "jenkins_advisories.sample.jsonl"
-    records = collect_advisories_real() if args.real else collect_advisories_sample()
+    suffix = "real" if args.real else "sample"
+    out_path = out_dir / f"jenkins_advisories.{suffix}.jsonl"
+
+    try:
+        records = collect_advisories_real() if args.real else collect_advisories_sample()
+    except Exception as e:
+        print(f"ERROR collecting advisories: {e}", file=sys.stderr)
+        return 2
 
     with out_path.open("w", encoding="utf-8") as f:
         for rec in records:
@@ -28,7 +33,7 @@ def _cmd_score(args: argparse.Namespace) -> int:
     plugin = args.plugin.strip()
     result = score_plugin_baseline(plugin)
 
-    if args.json:
+    if args.json_output:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         print(f"Plugin: {result['plugin']}")
@@ -56,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     score = sub.add_parser("score", help="Score a component/plugin")
     score.add_argument("plugin", help="Plugin short name (e.g., workflow-cps)")
-    score.add_argument("--json", action="store_true", help="Output JSON instead of text")
+    score.add_argument("--json-output", action="store_true", help="Output JSON instead of text")
     score.set_defaults(func=_cmd_score)
 
     return p
