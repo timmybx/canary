@@ -5,8 +5,9 @@ import json
 import sys
 from pathlib import Path
 
-from canary.collectors.jenkins_advisories import collect_advisories_sample, collect_advisories_real
+from canary.collectors.jenkins_advisories import collect_advisories_real, collect_advisories_sample
 from canary.scoring.baseline import score_plugin_baseline
+
 
 def _cmd_collect_advisories(args: argparse.Namespace) -> int:
     out_dir = Path(args.out_dir)
@@ -32,6 +33,7 @@ def _cmd_collect_advisories(args: argparse.Namespace) -> int:
 def _cmd_score(args: argparse.Namespace) -> int:
     plugin = args.plugin.strip()
     result = score_plugin_baseline(plugin)
+    print(json.dumps(result.to_dict(), indent=2))
 
     if args.json_output:
         print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -47,16 +49,18 @@ def _cmd_score(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="canary",
-        description="CANARY: Component Anomaly & Near-term Advisory Risk Yardstick (starter scaffold)",
+        description="CANARY: Component Anomaly & Near-term Advisory Risk Yardstick",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     collect = sub.add_parser("collect", help="Collect raw/processed data")
     collect_sub = collect.add_subparsers(dest="collect_cmd", required=True)
 
-    advisories = collect_sub.add_parser("advisories", help="Collect Jenkins advisories (sample stub)")
+    advisories = collect_sub.add_parser("advisories", help="Collect Jenkins advisories")
     advisories.add_argument("--out-dir", default="data/processed", help="Output directory")
-    advisories.add_argument("--real", action="store_true", help="Fetch live data from Jenkins (network)")
+    advisories.add_argument(
+        "--real", action="store_true", help="Fetch live data from Jenkins (network)"
+    )
     advisories.set_defaults(func=_cmd_collect_advisories)
 
     score = sub.add_parser("score", help="Score a component/plugin")

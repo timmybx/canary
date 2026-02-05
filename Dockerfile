@@ -12,6 +12,8 @@ COPY pyproject.toml README.md /app/
 RUN pip install --upgrade pip && \
     pip install -e ".[dev]"
 
+ENV PIP_ROOT_USER_ACTION=ignore
+
 # Copy source
 COPY canary/ /app/canary/
 COPY tests/ /app/tests/

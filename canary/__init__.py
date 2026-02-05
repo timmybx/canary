@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 from canary.collectors.jenkins_advisories import collect_advisories_sample
@@ -42,14 +41,14 @@ def _cmd_score(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="canary",
-        description="CANARY: Component Anomaly & Near-term Advisory Risk Yardstick (starter scaffold)",
+        description="CANARY: Component Anomaly & Near-term Advisory Risk Yardstick",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     collect = sub.add_parser("collect", help="Collect raw/processed data")
     collect_sub = collect.add_subparsers(dest="collect_cmd", required=True)
 
-    advisories = collect_sub.add_parser("advisories", help="Collect Jenkins advisories (sample stub)")
+    advisories = collect_sub.add_parser("advisories", help="Collect Jenkins advisories")
     advisories.add_argument("--out-dir", default="data/processed", help="Output directory")
     advisories.set_defaults(func=_cmd_collect_advisories)
 
