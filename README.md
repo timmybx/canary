@@ -1,5 +1,5 @@
-[![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)](https://github.com/timmybx/canary/tree/main/.github/workflows/ci.yml)
-![License](https://img.shields.io/github/license/timmybx/canary)
+[![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/ci.yml)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Ruff](https://img.shields.io/badge/lint-ruff-2ea44f?logo=ruff)
 ![Dependabot](https://img.shields.io/badge/dependabot-enabled-2ea44f?logo=dependabot)
 ![Python](https://img.shields.io/badge/python-3.11-blue?logo=python)
