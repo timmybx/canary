@@ -1,4 +1,8 @@
-![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)](https://github.com/timmybx/canary/tree/main/.github/workflows/ci.yml)
+![License](https://img.shields.io/github/license/timmybx/canary)
+![Ruff](https://img.shields.io/badge/lint-ruff-2ea44f?logo=ruff)
+![Dependabot](https://img.shields.io/badge/dependabot-enabled-2ea44f?logo=dependabot)
+![Python](https://img.shields.io/badge/python-3.11-blue?logo=python)
 
 # 🐤 CANARY — Component Anomaly & Near-term Advisory Risk Yardstick
 
