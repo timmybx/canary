@@ -9,3 +9,14 @@ format:
 
 audit:
 	docker compose run --rm canary pip-audit
+
+bandit:
+	docker compose run --rm canary bandit -r canary -q
+
+security: bandit
+	docker compose run --rm canary pip-audit
+
+reqs:
+	python -m piptools compile --output-file requirements.txt pyproject.toml
+	python -m piptools compile --extra dev --output-file requirements-dev.txt pyproject.toml
+

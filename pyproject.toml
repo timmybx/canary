@@ -16,6 +16,7 @@ dev = [
   "bandit>=1.7.9",
   "pip-audit>=2.7.3",
   "pip-tools>=7.4.1",
+  "pyright>=1.1.390",
 ]
 
 [project.scripts]
@@ -40,3 +41,8 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.pyright]
+include = ["canary", "tests"]
+typeCheckingMode = "basic"
+reportMissingTypeStubs = "none"

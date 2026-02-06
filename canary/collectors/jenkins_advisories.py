@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date
 from typing import Any
 
@@ -16,8 +16,8 @@ class AdvisoryRecord:
     url: str
     fixed_version: str | None = None
     affected_versions: str | None = None
-    cve_ids: list[str] = None  # set in __post_init__ if you want strict immutability
-    cwe_ids: list[str] = None
+    cve_ids: list[str] = field(default_factory=list)
+    cwe_ids: list[str] = field(default_factory=list)
     severity: str | None = None
     cvss: float | None = None
     notes: str | None = None
@@ -47,3 +47,14 @@ def collect_advisories_sample() -> list[dict[str, Any]]:
         # ...
     ]
     return [r.to_dict() for r in records]
+
+
+def collect_advisories_real() -> list[dict[str, Any]]:
+    """
+    Real Jenkins advisory collection (TODO).
+
+    Placeholder so CLI imports don't break before the real collector exists.
+    """
+    raise NotImplementedError(
+        "collect_advisories_real() is not implemented yet. Use sample data for now."
+    )

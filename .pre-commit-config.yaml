@@ -28,5 +28,10 @@ repos:
         pass_filenames: false
         args: ["-r", "requirements.txt", "-r", "requirements-dev.txt"]
 
+  # Pyright (Type checking similar to a compiler)
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.390
+    hooks:
+      - id: pyright
 
 

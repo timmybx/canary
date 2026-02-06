@@ -46,6 +46,8 @@ mdurl==0.1.2
     # via markdown-it-py
 msgpack==1.1.2
     # via cachecontrol
+nodeenv==1.10.0
+    # via pyright
 packageurl-python==0.17.6
     # via cyclonedx-python-lib
 packaging==26.0
@@ -79,6 +81,8 @@ pyproject-hooks==1.2.0
     # via
     #   build
     #   pip-tools
+pyright==1.1.408
+    # via canary (pyproject.toml)
 pytest==9.0.2
     # via canary (pyproject.toml)
 pyyaml==6.0.3
@@ -108,6 +112,7 @@ typing-extensions==4.15.0
     # via
     #   beautifulsoup4
     #   cyclonedx-python-lib
+    #   pyright
 urllib3==2.6.3
     # via requests
 wheel==0.46.3
