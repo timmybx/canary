@@ -1,0 +1,54 @@
+name: Pre-commit autoupdate
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly on Mondays at 09:00 UTC
+    - cron: "0 9 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  autoupdate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pre-commit
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pre-commit
+
+      - name: Update pre-commit hooks
+        run: |
+          pre-commit autoupdate
+
+      # Optional: run the hooks after updating to verify everything still passes.
+      # This can take a bit longer, but prevents "autoupdate broke CI" surprises.
+      - name: Run pre-commit (all files)
+        run: |
+          pre-commit run --all-files
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/pre-commit-autoupdate
+          delete-branch: true
+          title: "chore: pre-commit autoupdate"
+          commit-message: "chore: pre-commit autoupdate"
+          body: |
+            This PR was created automatically by the scheduled workflow.
+
+            It runs `pre-commit autoupdate` to bump hook revisions in `.pre-commit-config.yaml`
+            and then executes `pre-commit run --all-files` to verify hooks still pass.
+          labels: |
+            dependencies
+            automated
