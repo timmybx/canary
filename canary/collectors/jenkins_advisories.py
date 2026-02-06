@@ -30,7 +30,7 @@ class AdvisoryRecord:
         return d
 
 
-def collect_advisories_sample() -> list[dict[str, Any]]:
+def collect_advisories_sample(plugin_id: str | None = None) -> list[dict[str, Any]]:
     records = [
         AdvisoryRecord(
             source="jenkins",
@@ -44,12 +44,26 @@ def collect_advisories_sample() -> list[dict[str, Any]]:
             affected_versions="<= 2.9",
             notes="Placeholder data so the pipeline works end-to-end.",
         ),
-        # ...
+        # Optional: add a sample cucumber-reports record so filtering demonstrates the pipeline
+        AdvisoryRecord(
+            source="jenkins",
+            type="advisory",
+            advisory_id="2016-07-27",
+            published_date=date(2016, 7, 27),
+            plugin_id="cucumber-reports",
+            title="Cucumber Reports Plugin advisory (pilot sample)",
+            url="https://www.jenkins.io/security/advisory/2016-07-27/",
+            notes="Pilot sample record; replace with parsed fields later.",
+        ),
     ]
-    return [r.to_dict() for r in records]
+
+    out = [r.to_dict() for r in records]
+    if plugin_id:
+        out = [r for r in out if r.get("plugin_id") == plugin_id]
+    return out
 
 
-def collect_advisories_real() -> list[dict[str, Any]]:
+def collect_advisories_real(plugin_id: str | None = None) -> list[dict[str, Any]]:
     """
     Real Jenkins advisory collection (TODO).
 
