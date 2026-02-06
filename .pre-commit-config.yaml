@@ -5,15 +5,15 @@
 repos:
   # Ruff (lint + autofix) + Ruff formatter
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.14  # Keep in sync with your project's Ruff version as desired
+    rev: v0.15.0
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [--fix]
       - id: ruff-format
 
   # Bandit (Python security linter)
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.8.4
+    rev: 1.9.3
     hooks:
       - id: bandit
         pass_filenames: false
@@ -21,7 +21,7 @@ repos:
 
   # Pip-Audit (Dependency Vulnerabilities)
   - repo: https://github.com/pypa/pip-audit
-    rev: v2.7.3
+    rev: v2.10.0
     hooks:
       - id: pip-audit
         name: pip-audit (runtime + dev)
@@ -30,7 +30,7 @@ repos:
 
   # Pyright (Type checking similar to a compiler)
   - repo: https://github.com/RobertCraigie/pyright-python
-    rev: v1.1.390
+    rev: v1.1.408
     hooks:
       - id: pyright
 

@@ -1,6 +1,5 @@
 version: 2
 updates:
-  # Keep GitHub Actions up to date (grouped into one PR)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -11,8 +10,13 @@ updates:
         patterns:
           - "*"
 
-  # Keep Python deps up to date (pyproject.toml)
   - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "pre-commit"
     directory: "/"
     schedule:
       interval: "weekly"
