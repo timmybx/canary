@@ -1,0 +1,1313 @@
+{
+"plugin_api": {
+    "firstRelease": "2013-03-19T22:44:29.72Z",
+    "wikiUrl": "https://github.com/jenkinsci/cucumber-reports-plugin",
+    "buildDate": "2026-01-13",
+    "categories": [
+      "buildManagement"
+    ],
+    "dependencies": [
+      {
+        "name": "commons-collections4-api",
+        "title": "commons-collections4 v4.x API Wrapper",
+        "optional": false,
+        "version": "4.5.0-8.va_d5448ef9011",
+        "implied": false
+      },
+      {
+        "name": "commons-lang3-api",
+        "title": "commons-lang3 v3.x Jenkins API",
+        "optional": false,
+        "version": "3.20.0-109.ve43756e2d2b_4",
+        "implied": false
+      },
+      {
+        "name": "commons-text-api",
+        "title": "commons-text API",
+        "optional": false,
+        "version": "1.15.0-210.v7480a_da_70b_9e",
+        "implied": false
+      },
+      {
+        "name": "joda-time-api",
+        "title": "Joda Time API",
+        "optional": false,
+        "version": "2.14.0-149.v1c3ce991d1b_9",
+        "implied": false
+      },
+      {
+        "name": "antisamy-markup-formatter",
+        "title": "OWASP Markup Formatter",
+        "optional": false,
+        "version": "173.v680e3a_b_69ff3",
+        "implied": false
+      },
+      {
+        "name": "jackson2-api",
+        "title": "Jackson 2 API",
+        "optional": false,
+        "version": "2.20.1-423.v13951f6b_6532",
+        "implied": false
+      },
+      {
+        "name": "jsoup",
+        "title": "jsoup API",
+        "optional": false,
+        "version": "1.22.1-76.v9cdb_2456c0e3",
+        "implied": false
+      },
+      {
+        "name": "structs",
+        "title": "Structs",
+        "optional": false,
+        "version": "362.va_b_695ef4fdf9",
+        "implied": false
+      },
+      {
+        "name": "token-macro",
+        "title": "Token Macro",
+        "optional": false,
+        "version": "477.vd4f0dc3cb_cf1",
+        "implied": false
+      }
+    ],
+    "maintainers": [
+      {
+        "id": "dszczepanik",
+        "name": "Damian Szczepanik",
+        "email": null
+      },
+      {
+        "id": "kingsleyh",
+        "name": "Kingsley Hendrickse",
+        "email": null
+      }
+    ],
+    "excerpt": "Provides pretty html reports for Cucumber. Can be used anywhere a json report is generated (Java, Ruby, JavaScript and other implementations).",
+    "gav": "net.masterthought.jenkins:cucumber-reports:5.10.2",
+    "labels": [
+      "report"
+    ],
+    "name": "cucumber-reports",
+    "previousTimestamp": "2025-08-24T07:22:27.00Z",
+    "previousVersion": "5.10.0",
+    "releaseTimestamp": "2026-01-13T07:44:00.00Z",
+    "requiredCore": "2.504.3",
+    "scm": {
+      "issues": null,
+      "link": "https://github.com/jenkinsci/cucumber-reports-plugin",
+      "inLatestRelease": null,
+      "sinceLatestRelease": null,
+      "pullRequests": null
+    },
+    "sha1": "xOgJG8CB4liae9yYnX+/ogIHwqg=",
+    "stats": {
+      "installations": [
+        {
+          "timestamp": 1362096000000,
+          "total": 379
+        },
+        {
+          "timestamp": 1364774400000,
+          "total": 547
+        },
+        {
+          "timestamp": 1367366400000,
+          "total": 670
+        },
+        {
+          "timestamp": 1370044800000,
+          "total": 739
+        },
+        {
+          "timestamp": 1372636800000,
+          "total": 801
+        },
+        {
+          "timestamp": 1375315200000,
+          "total": 884
+        },
+        {
+          "timestamp": 1377993600000,
+          "total": 951
+        },
+        {
+          "timestamp": 1380585600000,
+          "total": 1052
+        },
+        {
+          "timestamp": 1383264000000,
+          "total": 1121
+        },
+        {
+          "timestamp": 1385856000000,
+          "total": 1142
+        },
+        {
+          "timestamp": 1388534400000,
+          "total": 1261
+        },
+        {
+          "timestamp": 1391212800000,
+          "total": 1336
+        },
+        {
+          "timestamp": 1393632000000,
+          "total": 1392
+        },
+        {
+          "timestamp": 1396310400000,
+          "total": 1461
+        },
+        {
+          "timestamp": 1398902400000,
+          "total": 1565
+        },
+        {
+          "timestamp": 1401580800000,
+          "total": 1588
+        },
+        {
+          "timestamp": 1404172800000,
+          "total": 1697
+        },
+        {
+          "timestamp": 1406851200000,
+          "total": 1779
+        },
+        {
+          "timestamp": 1409529600000,
+          "total": 1906
+        },
+        {
+          "timestamp": 1412121600000,
+          "total": 1988
+        },
+        {
+          "timestamp": 1414800000000,
+          "total": 2013
+        },
+        {
+          "timestamp": 1417392000000,
+          "total": 2030
+        },
+        {
+          "timestamp": 1420070400000,
+          "total": 2154
+        },
+        {
+          "timestamp": 1422748800000,
+          "total": 2265
+        },
+        {
+          "timestamp": 1425168000000,
+          "total": 2409
+        },
+        {
+          "timestamp": 1427846400000,
+          "total": 2480
+        },
+        {
+          "timestamp": 1430438400000,
+          "total": 2535
+        },
+        {
+          "timestamp": 1433116800000,
+          "total": 2605
+        },
+        {
+          "timestamp": 1435708800000,
+          "total": 2680
+        },
+        {
+          "timestamp": 1438387200000,
+          "total": 2639
+        },
+        {
+          "timestamp": 1441065600000,
+          "total": 2826
+        },
+        {
+          "timestamp": 1443657600000,
+          "total": 2948
+        },
+        {
+          "timestamp": 1446336000000,
+          "total": 2944
+        },
+        {
+          "timestamp": 1448928000000,
+          "total": 3013
+        },
+        {
+          "timestamp": 1451606400000,
+          "total": 3136
+        },
+        {
+          "timestamp": 1454284800000,
+          "total": 2830
+        },
+        {
+          "timestamp": 1456790400000,
+          "total": 2846
+        },
+        {
+          "timestamp": 1459468800000,
+          "total": 3075
+        },
+        {
+          "timestamp": 1462060800000,
+          "total": 3367
+        },
+        {
+          "timestamp": 1464739200000,
+          "total": 3508
+        },
+        {
+          "timestamp": 1467331200000,
+          "total": 3478
+        },
+        {
+          "timestamp": 1470009600000,
+          "total": 3785
+        },
+        {
+          "timestamp": 1472688000000,
+          "total": 3795
+        },
+        {
+          "timestamp": 1475280000000,
+          "total": 3718
+        },
+        {
+          "timestamp": 1477958400000,
+          "total": 3861
+        },
+        {
+          "timestamp": 1480550400000,
+          "total": 3792
+        },
+        {
+          "timestamp": 1483228800000,
+          "total": 4063
+        },
+        {
+          "timestamp": 1485907200000,
+          "total": 4208
+        },
+        {
+          "timestamp": 1488326400000,
+          "total": 4644
+        },
+        {
+          "timestamp": 1491004800000,
+          "total": 4622
+        },
+        {
+          "timestamp": 1493596800000,
+          "total": 4871
+        },
+        {
+          "timestamp": 1496275200000,
+          "total": 5001
+        },
+        {
+          "timestamp": 1498867200000,
+          "total": 5005
+        },
+        {
+          "timestamp": 1501545600000,
+          "total": 5358
+        },
+        {
+          "timestamp": 1504224000000,
+          "total": 5339
+        },
+        {
+          "timestamp": 1506816000000,
+          "total": 5594
+        },
+        {
+          "timestamp": 1509494400000,
+          "total": 5813
+        },
+        {
+          "timestamp": 1512086400000,
+          "total": 5578
+        },
+        {
+          "timestamp": 1514764800000,
+          "total": 5924
+        },
+        {
+          "timestamp": 1517443200000,
+          "total": 6051
+        },
+        {
+          "timestamp": 1519862400000,
+          "total": 6367
+        },
+        {
+          "timestamp": 1522540800000,
+          "total": 6492
+        },
+        {
+          "timestamp": 1525132800000,
+          "total": 6616
+        },
+        {
+          "timestamp": 1527811200000,
+          "total": 6670
+        },
+        {
+          "timestamp": 1530403200000,
+          "total": 6799
+        },
+        {
+          "timestamp": 1533081600000,
+          "total": 6891
+        },
+        {
+          "timestamp": 1535760000000,
+          "total": 7170
+        },
+        {
+          "timestamp": 1538352000000,
+          "total": 7878
+        },
+        {
+          "timestamp": 1541030400000,
+          "total": 8044
+        },
+        {
+          "timestamp": 1543622400000,
+          "total": 7805
+        },
+        {
+          "timestamp": 1546300800000,
+          "total": 8507
+        },
+        {
+          "timestamp": 1548979200000,
+          "total": 8636
+        },
+        {
+          "timestamp": 1551398400000,
+          "total": 9134
+        },
+        {
+          "timestamp": 1554076800000,
+          "total": 9118
+        },
+        {
+          "timestamp": 1556668800000,
+          "total": 9303
+        },
+        {
+          "timestamp": 1559347200000,
+          "total": 9456
+        },
+        {
+          "timestamp": 1561939200000,
+          "total": 9725
+        },
+        {
+          "timestamp": 1564617600000,
+          "total": 9570
+        },
+        {
+          "timestamp": 1567296000000,
+          "total": 9713
+        },
+        {
+          "timestamp": 1569888000000,
+          "total": 9806
+        },
+        {
+          "timestamp": 1572566400000,
+          "total": 9665
+        },
+        {
+          "timestamp": 1575158400000,
+          "total": 9404
+        },
+        {
+          "timestamp": 1577836800000,
+          "total": 9982
+        },
+        {
+          "timestamp": 1580515200000,
+          "total": 9927
+        },
+        {
+          "timestamp": 1583020800000,
+          "total": 10084
+        },
+        {
+          "timestamp": 1585699200000,
+          "total": 9948
+        },
+        {
+          "timestamp": 1588291200000,
+          "total": 9923
+        },
+        {
+          "timestamp": 1590969600000,
+          "total": 10132
+        },
+        {
+          "timestamp": 1593561600000,
+          "total": 10192
+        },
+        {
+          "timestamp": 1596240000000,
+          "total": 10061
+        },
+        {
+          "timestamp": 1598918400000,
+          "total": 10289
+        },
+        {
+          "timestamp": 1601510400000,
+          "total": 10244
+        },
+        {
+          "timestamp": 1604188800000,
+          "total": 10079
+        },
+        {
+          "timestamp": 1606780800000,
+          "total": 9929
+        },
+        {
+          "timestamp": 1609459200000,
+          "total": 10090
+        },
+        {
+          "timestamp": 1612137600000,
+          "total": 10356
+        },
+        {
+          "timestamp": 1614556800000,
+          "total": 10986
+        },
+        {
+          "timestamp": 1617235200000,
+          "total": 10611
+        },
+        {
+          "timestamp": 1619827200000,
+          "total": 10604
+        },
+        {
+          "timestamp": 1622505600000,
+          "total": 10733
+        },
+        {
+          "timestamp": 1625097600000,
+          "total": 10366
+        },
+        {
+          "timestamp": 1627776000000,
+          "total": 10406
+        },
+        {
+          "timestamp": 1630454400000,
+          "total": 10696
+        },
+        {
+          "timestamp": 1633046400000,
+          "total": 10736
+        },
+        {
+          "timestamp": 1635724800000,
+          "total": 10419
+        },
+        {
+          "timestamp": 1638316800000,
+          "total": 10428
+        },
+        {
+          "timestamp": 1640995200000,
+          "total": 10641
+        },
+        {
+          "timestamp": 1643673600000,
+          "total": 10753
+        },
+        {
+          "timestamp": 1646092800000,
+          "total": 11254
+        },
+        {
+          "timestamp": 1648771200000,
+          "total": 10783
+        },
+        {
+          "timestamp": 1651363200000,
+          "total": 10984
+        },
+        {
+          "timestamp": 1654041600000,
+          "total": 11161
+        },
+        {
+          "timestamp": 1656633600000,
+          "total": 10794
+        },
+        {
+          "timestamp": 1659312000000,
+          "total": 11257
+        },
+        {
+          "timestamp": 1661990400000,
+          "total": 11163
+        },
+        {
+          "timestamp": 1664582400000,
+          "total": 11169
+        },
+        {
+          "timestamp": 1667260800000,
+          "total": 11262
+        },
+        {
+          "timestamp": 1669852800000,
+          "total": 10832
+        },
+        {
+          "timestamp": 1672531200000,
+          "total": 11365
+        },
+        {
+          "timestamp": 1675209600000,
+          "total": 11693
+        },
+        {
+          "timestamp": 1677628800000,
+          "total": 11841
+        },
+        {
+          "timestamp": 1680307200000,
+          "total": 10974
+        },
+        {
+          "timestamp": 1682899200000,
+          "total": 10776
+        },
+        {
+          "timestamp": 1685577600000,
+          "total": 11202
+        },
+        {
+          "timestamp": 1688169600000,
+          "total": 11110
+        },
+        {
+          "timestamp": 1690848000000,
+          "total": 10898
+        },
+        {
+          "timestamp": 1693526400000,
+          "total": 10736
+        },
+        {
+          "timestamp": 1696118400000,
+          "total": 10834
+        },
+        {
+          "timestamp": 1698796800000,
+          "total": 10918
+        },
+        {
+          "timestamp": 1701388800000,
+          "total": 10291
+        },
+        {
+          "timestamp": 1704067200000,
+          "total": 10832
+        },
+        {
+          "timestamp": 1706745600000,
+          "total": 11253
+        },
+        {
+          "timestamp": 1709251200000,
+          "total": 11085
+        },
+        {
+          "timestamp": 1711929600000,
+          "total": 10650
+        },
+        {
+          "timestamp": 1714521600000,
+          "total": 10498
+        },
+        {
+          "timestamp": 1717200000000,
+          "total": 10361
+        },
+        {
+          "timestamp": 1719792000000,
+          "total": 10499
+        },
+        {
+          "timestamp": 1722470400000,
+          "total": 10440
+        },
+        {
+          "timestamp": 1725148800000,
+          "total": 10461
+        },
+        {
+          "timestamp": 1727740800000,
+          "total": 10466
+        },
+        {
+          "timestamp": 1730419200000,
+          "total": 10131
+        },
+        {
+          "timestamp": 1733011200000,
+          "total": 9343
+        },
+        {
+          "timestamp": 1735689600000,
+          "total": 10200
+        },
+        {
+          "timestamp": 1738368000000,
+          "total": 10082
+        },
+        {
+          "timestamp": 1740787200000,
+          "total": 10206
+        },
+        {
+          "timestamp": 1743465600000,
+          "total": 9965
+        },
+        {
+          "timestamp": 1746057600000,
+          "total": 7987
+        }
+      ],
+      "installationsPercentage": [
+        {
+          "timestamp": 1362096000000,
+          "percentage": 0.61469096
+        },
+        {
+          "timestamp": 1364774400000,
+          "percentage": 0.8535539
+        },
+        {
+          "timestamp": 1367366400000,
+          "percentage": 1.0272923
+        },
+        {
+          "timestamp": 1370044800000,
+          "percentage": 1.1258379
+        },
+        {
+          "timestamp": 1372636800000,
+          "percentage": 1.162892
+        },
+        {
+          "timestamp": 1375315200000,
+          "percentage": 1.2955608
+        },
+        {
+          "timestamp": 1377993600000,
+          "percentage": 1.3624057
+        },
+        {
+          "timestamp": 1380585600000,
+          "percentage": 1.4208152
+        },
+        {
+          "timestamp": 1383264000000,
+          "percentage": 1.5199176
+        },
+        {
+          "timestamp": 1385856000000,
+          "percentage": 1.5888696
+        },
+        {
+          "timestamp": 1388534400000,
+          "percentage": 1.6402398
+        },
+        {
+          "timestamp": 1391212800000,
+          "percentage": 1.7037774
+        },
+        {
+          "timestamp": 1393632000000,
+          "percentage": 1.6860874
+        },
+        {
+          "timestamp": 1396310400000,
+          "percentage": 1.7400728
+        },
+        {
+          "timestamp": 1398902400000,
+          "percentage": 1.8413931
+        },
+        {
+          "timestamp": 1401580800000,
+          "percentage": 1.846619
+        },
+        {
+          "timestamp": 1404172800000,
+          "percentage": 1.8592777
+        },
+        {
+          "timestamp": 1406851200000,
+          "percentage": 1.9512998
+        },
+        {
+          "timestamp": 1409529600000,
+          "percentage": 1.9903095
+        },
+        {
+          "timestamp": 1412121600000,
+          "percentage": 2.0119624
+        },
+        {
+          "timestamp": 1414800000000,
+          "percentage": 2.041872
+        },
+        {
+          "timestamp": 1417392000000,
+          "percentage": 2.0617719
+        },
+        {
+          "timestamp": 1420070400000,
+          "percentage": 2.0939863
+        },
+        {
+          "timestamp": 1422748800000,
+          "percentage": 2.183364
+        },
+        {
+          "timestamp": 1425168000000,
+          "percentage": 2.144135
+        },
+        {
+          "timestamp": 1427846400000,
+          "percentage": 2.2221625
+        },
+        {
+          "timestamp": 1430438400000,
+          "percentage": 2.2725642
+        },
+        {
+          "timestamp": 1433116800000,
+          "percentage": 2.2181163
+        },
+        {
+          "timestamp": 1435708800000,
+          "percentage": 2.2179372
+        },
+        {
+          "timestamp": 1438387200000,
+          "percentage": 2.2034082
+        },
+        {
+          "timestamp": 1441065600000,
+          "percentage": 2.2900763
+        },
+        {
+          "timestamp": 1443657600000,
+          "percentage": 2.3161533
+        },
+        {
+          "timestamp": 1446336000000,
+          "percentage": 2.2907298
+        },
+        {
+          "timestamp": 1448928000000,
+          "percentage": 2.3517382
+        },
+        {
+          "timestamp": 1451606400000,
+          "percentage": 2.474279
+        },
+        {
+          "timestamp": 1454284800000,
+          "percentage": 2.6275232
+        },
+        {
+          "timestamp": 1456790400000,
+          "percentage": 2.6004167
+        },
+        {
+          "timestamp": 1459468800000,
+          "percentage": 2.4942207
+        },
+        {
+          "timestamp": 1462060800000,
+          "percentage": 2.587194
+        },
+        {
+          "timestamp": 1464739200000,
+          "percentage": 2.553427
+        },
+        {
+          "timestamp": 1467331200000,
+          "percentage": 2.6466582
+        },
+        {
+          "timestamp": 1470009600000,
+          "percentage": 2.806864
+        },
+        {
+          "timestamp": 1472688000000,
+          "percentage": 2.8458729
+        },
+        {
+          "timestamp": 1475280000000,
+          "percentage": 2.804429
+        },
+        {
+          "timestamp": 1477958400000,
+          "percentage": 2.8322232
+        },
+        {
+          "timestamp": 1480550400000,
+          "percentage": 2.8411093
+        },
+        {
+          "timestamp": 1483228800000,
+          "percentage": 2.89056
+        },
+        {
+          "timestamp": 1485907200000,
+          "percentage": 3.024227
+        },
+        {
+          "timestamp": 1488326400000,
+          "percentage": 3.112997
+        },
+        {
+          "timestamp": 1491004800000,
+          "percentage": 3.225874
+        },
+        {
+          "timestamp": 1493596800000,
+          "percentage": 3.26893
+        },
+        {
+          "timestamp": 1496275200000,
+          "percentage": 3.3374043
+        },
+        {
+          "timestamp": 1498867200000,
+          "percentage": 3.3624907
+        },
+        {
+          "timestamp": 1501545600000,
+          "percentage": 3.4962022
+        },
+        {
+          "timestamp": 1504224000000,
+          "percentage": 3.4761379
+        },
+        {
+          "timestamp": 1506816000000,
+          "percentage": 3.6257575
+        },
+        {
+          "timestamp": 1509494400000,
+          "percentage": 3.640725
+        },
+        {
+          "timestamp": 1512086400000,
+          "percentage": 3.669954
+        },
+        {
+          "timestamp": 1514764800000,
+          "percentage": 3.7226722
+        },
+        {
+          "timestamp": 1517443200000,
+          "percentage": 3.952164
+        },
+        {
+          "timestamp": 1519862400000,
+          "percentage": 3.8808262
+        },
+        {
+          "timestamp": 1522540800000,
+          "percentage": 3.974848
+        },
+        {
+          "timestamp": 1525132800000,
+          "percentage": 3.99459
+        },
+        {
+          "timestamp": 1527811200000,
+          "percentage": 3.945695
+        },
+        {
+          "timestamp": 1530403200000,
+          "percentage": 3.803615
+        },
+        {
+          "timestamp": 1533081600000,
+          "percentage": 3.7615244
+        },
+        {
+          "timestamp": 1535760000000,
+          "percentage": 3.723186
+        },
+        {
+          "timestamp": 1538352000000,
+          "percentage": 3.6572287
+        },
+        {
+          "timestamp": 1541030400000,
+          "percentage": 3.6018126
+        },
+        {
+          "timestamp": 1543622400000,
+          "percentage": 3.5610814
+        },
+        {
+          "timestamp": 1546300800000,
+          "percentage": 3.6550574
+        },
+        {
+          "timestamp": 1548979200000,
+          "percentage": 3.774888
+        },
+        {
+          "timestamp": 1551398400000,
+          "percentage": 3.625754
+        },
+        {
+          "timestamp": 1554076800000,
+          "percentage": 3.6035964
+        },
+        {
+          "timestamp": 1556668800000,
+          "percentage": 3.6109645
+        },
+        {
+          "timestamp": 1559347200000,
+          "percentage": 3.7575102
+        },
+        {
+          "timestamp": 1561939200000,
+          "percentage": 3.6574588
+        },
+        {
+          "timestamp": 1564617600000,
+          "percentage": 3.648508
+        },
+        {
+          "timestamp": 1567296000000,
+          "percentage": 3.6547189
+        },
+        {
+          "timestamp": 1569888000000,
+          "percentage": 3.6564858
+        },
+        {
+          "timestamp": 1572566400000,
+          "percentage": 3.5836778
+        },
+        {
+          "timestamp": 1575158400000,
+          "percentage": 3.5574453
+        },
+        {
+          "timestamp": 1577836800000,
+          "percentage": 3.7370791
+        },
+        {
+          "timestamp": 1580515200000,
+          "percentage": 3.7923183
+        },
+        {
+          "timestamp": 1583020800000,
+          "percentage": 3.6076517
+        },
+        {
+          "timestamp": 1585699200000,
+          "percentage": 3.5924122
+        },
+        {
+          "timestamp": 1588291200000,
+          "percentage": 3.5714157
+        },
+        {
+          "timestamp": 1590969600000,
+          "percentage": 3.596734
+        },
+        {
+          "timestamp": 1593561600000,
+          "percentage": 3.6005356
+        },
+        {
+          "timestamp": 1596240000000,
+          "percentage": 3.6676545
+        },
+        {
+          "timestamp": 1598918400000,
+          "percentage": 3.6813219
+        },
+        {
+          "timestamp": 1601510400000,
+          "percentage": 3.7121053
+        },
+        {
+          "timestamp": 1604188800000,
+          "percentage": 3.6314178
+        },
+        {
+          "timestamp": 1606780800000,
+          "percentage": 3.5849812
+        },
+        {
+          "timestamp": 1609459200000,
+          "percentage": 3.6049361
+        },
+        {
+          "timestamp": 1612137600000,
+          "percentage": 3.7634916
+        },
+        {
+          "timestamp": 1614556800000,
+          "percentage": 3.63236
+        },
+        {
+          "timestamp": 1617235200000,
+          "percentage": 3.5909965
+        },
+        {
+          "timestamp": 1619827200000,
+          "percentage": 3.627879
+        },
+        {
+          "timestamp": 1622505600000,
+          "percentage": 3.6075613
+        },
+        {
+          "timestamp": 1625097600000,
+          "percentage": 3.6787434
+        },
+        {
+          "timestamp": 1627776000000,
+          "percentage": 3.5467544
+        },
+        {
+          "timestamp": 1630454400000,
+          "percentage": 3.620988
+        },
+        {
+          "timestamp": 1633046400000,
+          "percentage": 3.7079377
+        },
+        {
+          "timestamp": 1635724800000,
+          "percentage": 3.5446854
+        },
+        {
+          "timestamp": 1638316800000,
+          "percentage": 3.5314677
+        },
+        {
+          "timestamp": 1640995200000,
+          "percentage": 3.6138442
+        },
+        {
+          "timestamp": 1643673600000,
+          "percentage": 3.705695
+        },
+        {
+          "timestamp": 1646092800000,
+          "percentage": 3.5956995
+        },
+        {
+          "timestamp": 1648771200000,
+          "percentage": 3.5790033
+        },
+        {
+          "timestamp": 1651363200000,
+          "percentage": 3.6266026
+        },
+        {
+          "timestamp": 1654041600000,
+          "percentage": 3.6519446
+        },
+        {
+          "timestamp": 1656633600000,
+          "percentage": 3.617571
+        },
+        {
+          "timestamp": 1659312000000,
+          "percentage": 3.6761992
+        },
+        {
+          "timestamp": 1661990400000,
+          "percentage": 3.659748
+        },
+        {
+          "timestamp": 1664582400000,
+          "percentage": 3.7369514
+        },
+        {
+          "timestamp": 1667260800000,
+          "percentage": 3.6421025
+        },
+        {
+          "timestamp": 1669852800000,
+          "percentage": 3.7099066
+        },
+        {
+          "timestamp": 1672531200000,
+          "percentage": 3.8692522
+        },
+        {
+          "timestamp": 1675209600000,
+          "percentage": 3.844118
+        },
+        {
+          "timestamp": 1677628800000,
+          "percentage": 3.691384
+        },
+        {
+          "timestamp": 1680307200000,
+          "percentage": 3.8217626
+        },
+        {
+          "timestamp": 1682899200000,
+          "percentage": 4.026199
+        },
+        {
+          "timestamp": 1685577600000,
+          "percentage": 3.9355528
+        },
+        {
+          "timestamp": 1688169600000,
+          "percentage": 3.7299402
+        },
+        {
+          "timestamp": 1690848000000,
+          "percentage": 3.6000502
+        },
+        {
+          "timestamp": 1693526400000,
+          "percentage": 3.6469994
+        },
+        {
+          "timestamp": 1696118400000,
+          "percentage": 3.7048817
+        },
+        {
+          "timestamp": 1698796800000,
+          "percentage": 3.6413724
+        },
+        {
+          "timestamp": 1701388800000,
+          "percentage": 3.62956
+        },
+        {
+          "timestamp": 1704067200000,
+          "percentage": 3.7360098
+        },
+        {
+          "timestamp": 1706745600000,
+          "percentage": 3.9427767
+        },
+        {
+          "timestamp": 1709251200000,
+          "percentage": 3.7284944
+        },
+        {
+          "timestamp": 1711929600000,
+          "percentage": 3.6760137
+        },
+        {
+          "timestamp": 1714521600000,
+          "percentage": 3.6959584
+        },
+        {
+          "timestamp": 1717200000000,
+          "percentage": 3.6703131
+        },
+        {
+          "timestamp": 1719792000000,
+          "percentage": 3.670979
+        },
+        {
+          "timestamp": 1722470400000,
+          "percentage": 3.6767294
+        },
+        {
+          "timestamp": 1725148800000,
+          "percentage": 3.7761798
+        },
+        {
+          "timestamp": 1727740800000,
+          "percentage": 3.7107553
+        },
+        {
+          "timestamp": 1730419200000,
+          "percentage": 3.6186538
+        },
+        {
+          "timestamp": 1733011200000,
+          "percentage": 3.5090947
+        },
+        {
+          "timestamp": 1735689600000,
+          "percentage": 3.8134406
+        },
+        {
+          "timestamp": 1738368000000,
+          "percentage": 3.7061272
+        },
+        {
+          "timestamp": 1740787200000,
+          "percentage": 3.6314082
+        },
+        {
+          "timestamp": 1743465600000,
+          "percentage": 3.5567944
+        },
+        {
+          "timestamp": 1746057600000,
+          "percentage": 3.9006262
+        }
+      ],
+      "installationsPerVersion": [],
+      "installationsPercentagePerVersion": [],
+      "currentInstalls": 7987,
+      "trend": 3438
+    },
+    "title": "Cucumber reports",
+    "url": "https://updates.jenkins.io/download/plugins/cucumber-reports/5.10.2/cucumber-reports.hpi",
+    "version": "5.10.2",
+    "securityWarnings": [
+      {
+        "versions": [
+          {
+            "firstVersion": "1.3.0",
+            "lastVersion": "2.5.1"
+          }
+        ],
+        "id": "SECURITY-309",
+        "message": "Plugin disables Content-Security-Policy for files served by Jenkins",
+        "url": "https://jenkins.io/security/advisory/2016-07-27/",
+        "active": false
+      }
+    ],
+    "wiki": {
+      "content": "<div id=\"readme\" class=\"md\" data-path=\"README.md\">\n <article class=\"markdown-body entry-content container-lg\" itemprop=\"text\">\n  <p dir=\"auto\"><a href=\"https://ci.jenkins.io/job/Plugins/job/cucumber-reports-plugin/job/master/\" rel=\"nofollow\"><img src=\"https://camo.githubusercontent.com/7deff753ef0c97327490a4a7ed4374778a8741a3477cb42d095a2efd6837d31b/68747470733a2f2f63692e6a656e6b696e732e696f2f6a6f622f506c7567696e732f6a6f622f637563756d6265722d7265706f7274732d706c7567696e2f6a6f622f6d61737465722f62616467652f69636f6e\" alt=\"Build Status\" data-canonical-src=\"https://ci.jenkins.io/job/Plugins/job/cucumber-reports-plugin/job/master/badge/icon\" style=\"max-width: 100%;\"></a></p> \n  <p dir=\"auto\"><a href=\"https://plugins.jenkins.io/cucumber-reports\" rel=\"nofollow\"><img src=\"https://camo.githubusercontent.com/d77a3f245c938500af59dd11e09876d8669a4c5fbe33773edccf1ee35ff4c5cf/68747470733a2f2f696d672e736869656c64732e696f2f6a656e6b696e732f706c7567696e2f692f637563756d6265722d7265706f7274732e737667\" alt=\"Popularity\" data-canonical-src=\"https://img.shields.io/jenkins/plugin/i/cucumber-reports.svg\" style=\"max-width: 100%;\"></a> <a href=\"https://damianszczepanik.github.io/cucumber-html-reports/overview-features.html\" rel=\"nofollow\"><img src=\"https://camo.githubusercontent.com/91a017b09a574a07df8ec73449a295eb5ba6c678b07cbe89afcf1ddebb8774c8/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f4c69766525323044656d6f2d4f6e6c696e652d626c75652e737667\" alt=\"Live Demo\" data-canonical-src=\"https://img.shields.io/badge/Live%20Demo-Online-blue.svg\" style=\"max-width: 100%;\"></a></p> \n  <div class=\"markdown-heading\" dir=\"auto\">\n   <a id=\"user-content-publish-pretty-cucumber-reports-on-jenkins\" class=\"anchor\" aria-label=\"Permalink: Publish pretty cucumber reports on Jenkins\" href=\"#publish-pretty-cucumber-reports-on-jenkins\">\n    <svg class=\"octicon octicon-link\" viewbox=\"0 0 16 16\" version=\"1.1\" width=\"16\" height=\"16\" aria-hidden=\"true\">\n     <path d=\"m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z\"></path>\n    </svg></a>\n  </div> \n  <p dir=\"auto\">This is a Java Jenkins plugin which publishes <a href=\"https://github.com/damianszczepanik/cucumber-reporting\">pretty html reports</a> showing the results of cucumber runs. To use with regular cucumber just make sure to run cucumber like this: cucumber <code>--plugin json -o cucumber.json</code></p> \n  <div class=\"markdown-heading\" dir=\"auto\">\n   <h2 class=\"heading-element\" dir=\"auto\">Background</h2>\n   <a id=\"user-content-background\" class=\"anchor\" aria-label=\"Permalink: Background\" href=\"#background\">\n    <svg class=\"octicon octicon-link\" viewbox=\"0 0 16 16\" version=\"1.1\" width=\"16\" height=\"16\" aria-hidden=\"true\">\n     <path d=\"m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z\"></path>\n    </svg></a>\n  </div> \n  <p dir=\"auto\">Cucumber is a test automation tool following the principles of <a href=\"https://en.wikipedia.org/wiki/Behavior-driven_development\" rel=\"nofollow\">Behavioural Driven Design</a> and living documentation. Specifications are written in a concise <a href=\"https://cucumber.io/docs/reference\" rel=\"nofollow\">human readable form</a> and executed in continuous integration.</p> \n  <p dir=\"auto\">This plugin allows Jenkins to publish the results as pretty html reports hosted by the Jenkins build server. In order for this plugin to work you must be using the JUnit runner and generating a json report. The plugin converts the json report into an overview html linking to separate feature file htmls with stats and results.</p> \n  <div class=\"markdown-heading\" dir=\"auto\">\n   <h2 class=\"heading-element\" dir=\"auto\">Install</h2>\n   <a id=\"user-content-install\" class=\"anchor\" aria-label=\"Permalink: Install\" href=\"#install\">\n    <svg class=\"octicon octicon-link\" viewbox=\"0 0 16 16\" version=\"1.1\" width=\"16\" height=\"16\" aria-hidden=\"true\">\n     <path d=\"m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z\"></path>\n    </svg></a>\n  </div> \n  <ol dir=\"auto\"> \n   <li><a href=\"https://jenkins-ci.org/\" rel=\"nofollow\">Get</a> Jenkins.</li> \n   <li>Install the <a href=\"https://wiki.jenkins-ci.org/display/JENKINS/Cucumber+Reports+Plugin\" rel=\"nofollow\">Cucumber Reports</a> plugin.</li> \n   <li>Restart Jenkins.</li> \n  </ol> \n  <p dir=\"auto\">Read this if you need further <a href=\"https://github.com/jenkinsci/cucumber-reports-plugin/wiki/Detailed-Configuration\">detailed install and configuration</a> instructions</p> \n  <div class=\"markdown-heading\" dir=\"auto\">\n   <h2 class=\"heading-element\" dir=\"auto\">Use</h2>\n   <a id=\"user-content-use\" class=\"anchor\" aria-label=\"Permalink: Use\" href=\"#use\">\n    <svg class=\"octicon octicon-link\" viewbox=\"0 0 16 16\" version=\"1.1\" width=\"16\" height=\"16\" aria-hidden=\"true\">\n     <path d=\"m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z\"></path>\n    </svg></a>\n  </div> \n  <p dir=\"auto\">You must use a <strong>Freestyle project type</strong> in jenkins.</p> \n  <p dir=\"auto\">With the cucumber-reports plugin installed in Jenkins, you simply check the \"Publish cucumber results as a report\" box in the publish section of the build config:</p> \n  <p dir=\"auto\"><a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://github.com/jenkinsci/cucumber-reports-plugin/blob/master/.README/publish-box.png\"><img src=\"https://cdn.jsdelivr.net/gh/jenkinsci/cucumber-reports-plugin@master/.README/publish-box.png\" alt=\"\" style=\"max-width: 100%;\"></a></p> \n  <p dir=\"auto\">If you need more control over the plugin you can click the Advanced button for more options:</p> \n  <p dir=\"auto\"><a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://github.com/jenkinsci/cucumber-reports-plugin/blob/master/.README/advanced-publish-box.png\"><img src=\"https://cdn.jsdelivr.net/gh/jenkinsci/cucumber-reports-plugin@master/.README/advanced-publish-box.png\" alt=\"\" style=\"max-width: 100%;\"></a></p> \n  <ol dir=\"auto\"> \n   <li>Report title can be used to publish multiple reports from the same job - reports with different titles are stored separately; or leave blank for a single report with no title</li> \n   <li>Leave empty for the plugin to automagically find your json files, or enter a base folder relative to the workspace if for some reason the automagic doesn't work for you</li> \n   <li>Leave default, or specify an ant-style pattern for report json files in case you need to select only specific files</li> \n   <li>Specify which json files should be excluded from prior selection</li> \n   <li>If you would like to include .properties files containing metadata to be displayed in the report's top right corner, specify them via ant-style pattern here. Attention: Equal to File Include/Exclude Pattern, files are searched only below JSON Reports Path</li> \n   <li>Configure how many historical reports to keep (0 = no limit)</li> \n  </ol> \n  <div class=\"markdown-heading\" dir=\"auto\">\n   <h2 class=\"heading-element\" dir=\"auto\">Advanced Configuration Options</h2>\n   <a id=\"user-content-advanced-configuration-options\" class=\"anchor\" aria-label=\"Permalink: Advanced Configuration Options\" href=\"#advanced-configuration-options\">\n    <svg class=\"octicon octicon-link\" viewbox=\"0 0 16 16\" version=\"1.1\" width=\"16\" height=\"16\" aria-hidden=\"true\">\n     <path d=\"m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z\"></path>\n    </svg></a>\n  </div> \n  <p dir=\"auto\">There are 4 advanced configuration options that can affect the outcome of the build status. Click on the Advanced tab in the configuration screen:</p> \n  <p dir=\"auto\"><a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://github.com/jenkinsci/cucumber-reports-plugin/blob/master/.README/advanced_options.png\"><img src=\"https://cdn.jsdelivr.net/gh/jenkinsci/cucumber-reports-plugin@master/.README/advanced_options.png\" alt=\"Advanced Configuration\" style=\"max-width: 100%;\"></a></p> \n  <p dir=\"auto\">The first setting is Skipped steps fail the build - so if you tick this any steps that are skipped during executions will be marked as failed and will cause the build to fail:</p> \n  <p dir=\"auto\">If you check both skipped and not implemented fails the build then your report will look something like this:</p> \n  <p dir=\"auto\">Make sure you have configured cucumber to run with the JUnit runner and to generate a json report: (note - you can add other formatters in if you like e.g. pretty - but only the json formatter is required for the reports to work)</p> \n  <div class=\"highlight highlight-source-java notranslate position-relative overflow-auto\" dir=\"auto\" data-snippet-clipboard-copy-content=\"  import cucumber.junit.Cucumber;\n  import org.junit.runner.RunWith;\n  \n  @RunWith(Cucumber.class)\n  @Cucumber.Options(format = {&quot;json:target/cucumber.json&quot;})\n  public class MyTest {\n  \n  }\">\n   <pre>  <span class=\"pl-k\">import</span> <span class=\"pl-s1\">cucumber</span>.<span class=\"pl-s1\">junit</span>.<span class=\"pl-s1\">Cucumber</span>;\n  <span class=\"pl-k\">import</span> <span class=\"pl-s1\">org</span>.<span class=\"pl-s1\">junit</span>.<span class=\"pl-s1\">runner</span>.<span class=\"pl-s1\">RunWith</span>;\n  \n  <span class=\"pl-c1\">@</span><span class=\"pl-c1\">RunWith</span>(<span class=\"pl-smi\">Cucumber</span>.<span class=\"pl-k\">class</span>)\n  <span class=\"pl-c1\">@</span><span class=\"pl-smi\">Cucumber</span>.<span class=\"pl-s1\">Options</span>(<span class=\"pl-s1\">format</span> = {<span class=\"pl-s\">\"json:target/cucumber.json\"</span>})\n  <span class=\"pl-k\">public</span> <span class=\"pl-k\">class</span> <span class=\"pl-smi\">MyTest</span> {\n  \n  }</pre>\n  </div> \n  <div class=\"markdown-heading\" dir=\"auto\">\n   <h2 class=\"heading-element\" dir=\"auto\">Automated configuration</h2>\n   <a id=\"user-content-automated-configuration\" class=\"anchor\" aria-label=\"Permalink: Automated configuration\" href=\"#automated-configuration\">\n    <svg class=\"octicon octicon-link\" viewbox=\"0 0 16 16\" version=\"1.1\" width=\"16\" height=\"16\" aria-hidden=\"true\">\n     <path d=\"m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z\"></path>\n    </svg></a>\n  </div> \n  <div class=\"markdown-heading\" dir=\"auto\">\n   <h3 class=\"heading-element\" dir=\"auto\">Pipeline usage</h3>\n   <a id=\"user-content-pipeline-usage\" class=\"anchor\" aria-label=\"Permalink: Pipeline usage\" href=\"#pipeline-usage\">\n    <svg class=\"octicon octicon-link\" viewbox=\"0 0 16 16\" version=\"1.1\" width=\"16\" height=\"16\" aria-hidden=\"true\">\n     <path d=\"m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z\"></path>\n    </svg></a>\n  </div> \n  <p dir=\"auto\">Typical step for report generation:</p> \n  <div class=\"highlight highlight-source-groovy notranslate position-relative overflow-auto\" dir=\"auto\" data-snippet-clipboard-copy-content=\"node {\n    stage('Generate HTML report') {\n        cucumber buildStatus: 'UNSTABLE',\n                reportTitle: 'My report',\n                fileIncludePattern: '**/*.json',\n                trendsLimit: 10,\n                classifications: [\n                    [\n                        'key': 'Browser',\n                        'value': 'Firefox'\n                    ]\n                ]\n    }\n}\">\n   <pre>node {\n    stage(<span class=\"pl-s\"><span class=\"pl-pds\">'</span>Generate HTML report<span class=\"pl-pds\">'</span></span>) {\n        cucumber <span class=\"pl-c1\">buildStatus</span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>UNSTABLE<span class=\"pl-pds\">'</span></span>,\n                <span class=\"pl-c1\">reportTitle</span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>My report<span class=\"pl-pds\">'</span></span>,\n                <span class=\"pl-c1\">fileIncludePattern</span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>**/*.json<span class=\"pl-pds\">'</span></span>,\n                <span class=\"pl-c1\">trendsLimit</span>: <span class=\"pl-c1\">10</span>,\n                <span class=\"pl-c1\">classifications</span>: [\n                    [\n                        <span class=\"pl-s\"><span class=\"pl-pds\">'</span>key<span class=\"pl-pds\">'</span></span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>Browser<span class=\"pl-pds\">'</span></span>,\n                        <span class=\"pl-s\"><span class=\"pl-pds\">'</span>value<span class=\"pl-pds\">'</span></span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>Firefox<span class=\"pl-pds\">'</span></span>\n                    ]\n                ]\n    }\n}</pre>\n  </div> \n  <p dir=\"auto\">or post action when the build completes with some fancy features for the Gerrit integraion:</p> \n  <div class=\"highlight highlight-source-groovy notranslate position-relative overflow-auto\" dir=\"auto\" data-snippet-clipboard-copy-content=\"post {\n    always {\n        cucumber buildStatus: 'UNSTABLE',\n                failedFeaturesNumber: 1,\n                failedScenariosNumber: 1,\n                skippedStepsNumber: 1,\n                failedStepsNumber: 1,\n                classifications: [\n                        [key: 'Commit', value: '<a href=&quot;${GERRIT_CHANGE_URL}&quot;>${GERRIT_PATCHSET_REVISION}</a>'],\n                        [key: 'Submitter', value: '${GERRIT_PATCHSET_UPLOADER_NAME}']\n                ],\n                reportTitle: 'My report',\n                fileIncludePattern: '**/*cucumber-report.json',\n                sortingMethod: 'ALPHABETICAL',\n                trendsLimit: 100\n    }\n}\">\n   <pre>post {\n    always {\n        cucumber <span class=\"pl-c1\">buildStatus</span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>UNSTABLE<span class=\"pl-pds\">'</span></span>,\n                <span class=\"pl-c1\">failedFeaturesNumber</span>: <span class=\"pl-c1\">1</span>,\n                <span class=\"pl-c1\">failedScenariosNumber</span>: <span class=\"pl-c1\">1</span>,\n                <span class=\"pl-c1\">skippedStepsNumber</span>: <span class=\"pl-c1\">1</span>,\n                <span class=\"pl-c1\">failedStepsNumber</span>: <span class=\"pl-c1\">1</span>,\n                <span class=\"pl-c1\">classifications</span>: [\n                        [<span class=\"pl-c1\">key</span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>Commit<span class=\"pl-pds\">'</span></span>, <span class=\"pl-c1\">value</span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>&lt;a href=\"${GERRIT_CHANGE_URL}\"&gt;${GERRIT_PATCHSET_REVISION}&lt;/a&gt;<span class=\"pl-pds\">'</span></span>],\n                        [<span class=\"pl-c1\">key</span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>Submitter<span class=\"pl-pds\">'</span></span>, <span class=\"pl-c1\">value</span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>${GERRIT_PATCHSET_UPLOADER_NAME}<span class=\"pl-pds\">'</span></span>]\n                ],\n                <span class=\"pl-c1\">reportTitle</span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>My report<span class=\"pl-pds\">'</span></span>,\n                <span class=\"pl-c1\">fileIncludePattern</span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>**/*cucumber-report.json<span class=\"pl-pds\">'</span></span>,\n                <span class=\"pl-c1\">sortingMethod</span>: <span class=\"pl-s\"><span class=\"pl-pds\">'</span>ALPHABETICAL<span class=\"pl-pds\">'</span></span>,\n                <span class=\"pl-c1\">trendsLimit</span>: <span class=\"pl-c1\">100</span>\n    }\n}</pre>\n  </div> \n  <div class=\"markdown-heading\" dir=\"auto\">\n   <h3 class=\"heading-element\" dir=\"auto\">Raw DSL - This should be utilized after build steps (note that the title is not specified in this example)</h3>\n   <a id=\"user-content-raw-dsl---this-should-be-utilized-after-build-steps-note-that-the-title-is-not-specified-in-this-example\" class=\"anchor\" aria-label=\"Permalink: Raw DSL - This should be utilized after build steps (note that the title is not specified in this example)\" href=\"#raw-dsl---this-should-be-utilized-after-build-steps-note-that-the-title-is-not-specified-in-this-example\">\n    <svg class=\"octicon octicon-link\" viewbox=\"0 0 16 16\" version=\"1.1\" width=\"16\" height=\"16\" aria-hidden=\"true\">\n     <path d=\"m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z\"></path>\n    </svg></a>\n  </div> \n  <div class=\"highlight highlight-source-groovy notranslate position-relative overflow-auto\" dir=\"auto\" data-snippet-clipboard-copy-content=\"configure { project ->\n  project / 'publishers' << 'net.masterthought.jenkins.CucumberReportPublisher' {\n    fileIncludePattern '**/*.json'\n    fileExcludePattern ''\n    jsonReportDirectory ''\n    failedStepsNumber '0'\n    skippedStepsNumber '0'\n    pendingStepsNumber '0'\n    undefinedStepsNumber '0'\n    failedScenariosNumber '0'\n    failedFeaturesNumber '0'\n    buildStatus 'FAILURE'  //other option is 'UNSTABLE' - if you'd like it left unchanged, don't provide a value\n    trendsLimit '0'\n    sortingMethod 'ALPHABETICAL'\n  }\n}\">\n   <pre>configure { <span class=\"pl-v\">project</span> <span class=\"pl-k\">-&gt;</span>\n  project <span class=\"pl-k\">/</span> <span class=\"pl-s\"><span class=\"pl-pds\">'</span>publishers<span class=\"pl-pds\">'</span></span> <span class=\"pl-k\">&lt;&lt;</span> <span class=\"pl-s\"><span class=\"pl-pds\">'</span>net.masterthought.jenkins.CucumberReportPublisher<span class=\"pl-pds\">'</span></span> {\n    fileIncludePattern <span class=\"pl-s\"><span class=\"pl-pds\">'</span>**/*.json<span class=\"pl-pds\">'</span></span>\n    fileExcludePattern <span class=\"pl-s\"><span class=\"pl-pds\">'</span><span class=\"pl-pds\">'</span></span>\n    jsonReportDirectory <span class=\"pl-s\"><span class=\"pl-pds\">'</span><span class=\"pl-pds\">'</span></span>\n    failedStepsNumber <span class=\"pl-s\"><span class=\"pl-pds\">'</span>0<span class=\"pl-pds\">'</span></span>\n    skippedStepsNumber <span class=\"pl-s\"><span class=\"pl-pds\">'</span>0<span class=\"pl-pds\">'</span></span>\n    pendingStepsNumber <span class=\"pl-s\"><span class=\"pl-pds\">'</span>0<span class=\"pl-pds\">'</span></span>\n    undefinedStepsNumber <span class=\"pl-s\"><span class=\"pl-pds\">'</span>0<span class=\"pl-pds\">'</span></span>\n    failedScenariosNumber <span class=\"pl-s\"><span class=\"pl-pds\">'</span>0<span class=\"pl-pds\">'</span></span>\n    failedFeaturesNumber <span class=\"pl-s\"><span class=\"pl-pds\">'</span>0<span class=\"pl-pds\">'</span></span>\n    buildStatus <span class=\"pl-s\"><span class=\"pl-pds\">'</span>FAILURE<span class=\"pl-pds\">'</span></span>  <span class=\"pl-c\"><span class=\"pl-c\">//</span>other option is 'UNSTABLE' - if you'd like it left unchanged, don't provide a value</span>\n    trendsLimit <span class=\"pl-s\"><span class=\"pl-pds\">'</span>0<span class=\"pl-pds\">'</span></span>\n    sortingMethod <span class=\"pl-s\"><span class=\"pl-pds\">'</span>ALPHABETICAL<span class=\"pl-pds\">'</span></span>\n  }\n}</pre>\n  </div> \n  <p dir=\"auto\">When a build runs that publishes cucumber results it will put a link in the sidepanel to the <a href=\"https://github.com/damianszczepanik/cucumber-reporting\">cucumber reports</a>. There is a feature overview page:</p> \n  <p dir=\"auto\"><a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://github.com/damianszczepanik/cucumber-reporting/raw/master/.README/feature-overview.png\"><img src=\"https://github.com/damianszczepanik/cucumber-reporting/raw/master/.README/feature-overview.png\" alt=\"feature overview page\" style=\"max-width: 100%;\"></a></p> \n  <p dir=\"auto\">And there are also feature specific results pages:</p> \n  <p dir=\"auto\"><a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://github.com/damianszczepanik/cucumber-reporting/raw/master/.README/feature-passed.png\"><img src=\"https://github.com/damianszczepanik/cucumber-reporting/raw/master/.README/feature-passed.png\" alt=\"feature specific page passing\" style=\"max-width: 100%;\"></a></p> \n  <p dir=\"auto\">And useful information for failures:</p> \n  <p dir=\"auto\"><a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://github.com/damianszczepanik/cucumber-reporting/raw/master/.README/feature-failed.png\"><img src=\"https://github.com/damianszczepanik/cucumber-reporting/raw/master/.README/feature-failed.png\" alt=\"feature specific page failing\" style=\"max-width: 100%;\"></a></p> \n  <p dir=\"auto\">If you have tags in your cucumber features you can see a tag overview:</p> \n  <p dir=\"auto\"><a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://github.com/damianszczepanik/cucumber-reporting/raw/master/.README/tag-overview.png\"><img src=\"https://github.com/damianszczepanik/cucumber-reporting/raw/master/.README/tag-overview.png\" alt=\"Tag overview\" style=\"max-width: 100%;\"></a></p> \n  <p dir=\"auto\">And you can drill down into tag specific reports:</p> \n  <p dir=\"auto\"><a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://github.com/damianszczepanik/cucumber-reporting/raw/master/.README/tag-report.png\"><img src=\"https://github.com/damianszczepanik/cucumber-reporting/raw/master/.README/tag-report.png\" alt=\"Tag report\" style=\"max-width: 100%;\"></a></p> \n  <div class=\"markdown-heading\" dir=\"auto\">\n   <h2 class=\"heading-element\" dir=\"auto\">Develop</h2>\n   <a id=\"user-content-develop\" class=\"anchor\" aria-label=\"Permalink: Develop\" href=\"#develop\">\n    <svg class=\"octicon octicon-link\" viewbox=\"0 0 16 16\" version=\"1.1\" width=\"16\" height=\"16\" aria-hidden=\"true\">\n     <path d=\"m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z\"></path>\n    </svg></a>\n  </div> \n  <p dir=\"auto\">Interested in contributing to the Jenkins cucumber-reports plugin? Great! Start <a href=\"https://github.com/jenkinsci/cucumber-reports-plugin\">here</a>.</p> \n </article>\n</div>",
+      "url": "https://github.com/jenkinsci/cucumber-reports-plugin"
+    },
+    "defaultBranch": "master"
+  }
+}

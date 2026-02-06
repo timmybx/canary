@@ -23,6 +23,33 @@ class ScoreResult:
         }
 
 
+def _load_plugin_snapshot(plugin_id: str, data_dir: Path) -> dict[str, Any] | None:
+    path = data_dir / "plugins" / f"{plugin_id}.snapshot.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    if not value:
+        return None
+    v = value.strip()
+    # tolerate Z
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(v)
+    except ValueError:
+        return None
+
+
+def _safe_int(x: Any, default: int = 0) -> int:
+    try:
+        return int(x)
+    except Exception:
+        return default
+
+
 def _parse_date(value: str) -> date | None:
     """
     Parse ISO-ish dates like:
@@ -76,9 +103,11 @@ def score_plugin_baseline(plugin: str, *, data_dir: str | Path = "data/raw") -> 
     Baseline scoring:
     - Name-keyword heuristics (existing)
     - Advisory features from collected data (new, minimal)
+    - Plugin snapshot features from plugins API (new)
 
     data_dir should point at the directory that contains:
       advisories/<plugin>.advisories*.jsonl
+      plugins/<plugin>.snapshot.json
     """
     name = plugin.lower().strip()
     score = 0
@@ -116,7 +145,7 @@ def score_plugin_baseline(plugin: str, *, data_dir: str | Path = "data/raw") -> 
 
     features["latest_advisory_date"] = latest_date.isoformat() if latest_date else None
 
-    today = datetime.now(UTC).date()
+    today = datetime.now(tz=UTC).date()
     days_since_latest: int | None = None
     if latest_date:
         days_since_latest = (today - latest_date).days
@@ -128,18 +157,104 @@ def score_plugin_baseline(plugin: str, *, data_dir: str | Path = "data/raw") -> 
     if advisory_count > 0:
         reasons.append(f"{advisory_count} advisory record(s) found for this plugin.")
 
-        # Tiny scoring nudge (tweak later once you have real data)
-        # - More advisories => more risk
-        score += min(30, advisory_count * 10)
+        # Recency-weighted advisory risk:
+        # - Old advisories still matter (history), but much less than recent ones.
+        per_advisory_points = 2  # default for "ancient"
+        if days_since_latest is not None:
+            if days_since_latest <= 30:
+                per_advisory_points = 15
+            elif days_since_latest <= 90:
+                per_advisory_points = 12
+            elif days_since_latest <= 365:
+                per_advisory_points = 10
+            else:
+                per_advisory_points = 2
+
+        advisory_points = min(30, advisory_count * per_advisory_points)
+        score += advisory_points
+
+        reasons.append(
+            f"Advisory risk is weighted by recency (+{advisory_points} point(s); "
+            f"{per_advisory_points}/advisory)."
+        )
 
         if days_since_latest is not None:
             if days_since_latest <= 365:
-                score += 20
                 reasons.append("Recent advisory activity (<= 365 days).")
             else:
                 reasons.append("No advisory activity in the last 365 days.")
     else:
         reasons.append("No advisories found in local dataset (yet).")
+
+    # --- New: plugin snapshot signals (plugins API) ---
+    snapshot = _load_plugin_snapshot(plugin_id, Path(data_dir))
+    features["has_plugin_snapshot"] = snapshot is not None
+
+    # defaults so JSON always has keys
+    features.setdefault("required_core", None)
+    features.setdefault("dependency_count", 0)
+    features.setdefault("security_warning_count", 0)
+    features.setdefault("active_security_warning_count", 0)
+    features.setdefault("release_timestamp", None)
+    features.setdefault("days_since_release", None)
+
+    if snapshot and isinstance(snapshot, dict):
+        api = snapshot.get("plugin_api") or {}
+
+        required_core = api.get("requiredCore")
+        deps = api.get("dependencies") or []
+        sec_warnings = api.get("securityWarnings") or []
+
+        features["required_core"] = required_core
+        features["dependency_count"] = _safe_int(len(deps), default=0)
+        features["security_warning_count"] = _safe_int(len(sec_warnings), default=0)
+        features["active_security_warning_count"] = _safe_int(
+            sum(1 for w in sec_warnings if (w or {}).get("active") is True),
+            default=0,
+        )
+
+        release_ts = _parse_iso_datetime(str(api.get("releaseTimestamp", "")).strip())
+        features["release_timestamp"] = release_ts.isoformat() if release_ts else None
+        if release_ts:
+            features["days_since_release"] = (datetime.now(UTC) - release_ts).days
+
+        # Human-readable reasons
+        if required_core:
+            reasons.append(f"Requires Jenkins core {required_core} (from plugins API).")
+
+        dep_count = len(deps)
+        if dep_count > 0:
+            reasons.append(f"Declares {dep_count} plugin dependency(ies) (surface area).")
+
+        warn_count = len(sec_warnings)
+        if warn_count > 0:
+            active_warn = features["active_security_warning_count"]
+            if active_warn == 0:
+                reasons.append(f"{warn_count} security warning(s) listed (none active).")
+            else:
+                reasons.append(f"{warn_count} security warning(s) listed (active: {active_warn}).")
+
+        if release_ts:
+            reasons.append(f"Latest release is {release_ts.date().isoformat()}.")
+
+        # Conservative scoring nudges:
+        # - Active security warnings should matter.
+        active_warn = features["active_security_warning_count"]
+        score += min(60, active_warn * 20)
+        if active_warn > 0:
+            reasons.append("Active security warning(s) significantly increase risk.")
+
+        # - Lots of dependencies adds surface area (small bump)
+        if dep_count >= 10:
+            score += 5
+        elif dep_count >= 5:
+            score += 3
+
+        # - Recent release activity suggests maintenance (slight risk reduction)
+        dsr = features.get("days_since_release")
+        if isinstance(dsr, int) and dsr <= 180:
+            reasons.append("Recent release activity suggests active maintenance.")
+            score = max(0, score - 3)
 
     if score == 0:
         score = 5
