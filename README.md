@@ -13,107 +13,64 @@ This repo is intentionally lightweight right now: a working CLI, a sample collec
 ---
 
 ## 🔥 What This Does (Right Now)
-
-- ✅ **Collect Jenkins advisories (sample stub)** into newline-delimited JSON (`.jsonl`)
-- ✅ **Score a Jenkins plugin name** using a transparent baseline heuristic
-- ✅ **Run tests + lint/format** in a consistent Docker environment
-
----
+- ✅ **Collect a plugin snapshot** (pilot/curated by default, or `--real` from the Jenkins plugins API)
+- ✅ **Collect Jenkins advisories** as newline-delimited JSON (`.jsonl`)
+  - sample mode (offline / deterministic)
+  - real mode (plugin-specific) using the plugin snapshot’s `securityWarnings` → advisory URLs
+- ✅ **Score a plugin** using explainable signals (name heuristics + advisory recency/count + snapshot metadata like dependencies, required core, release recency, and security warnings)
+- ✅ **Run tests + lint/security checks** in a consistent Docker environment
 
 ## 📦 Project Structure
-
-
 ```
 ├── canary/                    # Python package (CLI, collectors, scoring)
 │   ├── __init__.py
 │   ├── cli.py                 # CLI entrypoint (`canary ...`)
 │   ├── collectors/
-│   │   └── jenkins_advisories.py
+│   │   ├── jenkins_advisories.py   # Sample + real advisory collection
+│   │   └── plugin_snapshot.py      # Plugin snapshot (curated or plugins API `--real`)
 │   └── scoring/
-│       └── baseline.py
+│       └── baseline.py        # Baseline scorer (name + local datasets)
 ├── tests/                     # Unit tests
+│   ├── fixtures/              # Recorded API payloads for deterministic tests
+│   │   └── plugins_api_cucumber-reports.json
 │   ├── test_collectors.py
+│   ├── test_plugin_snapshot.py
 │   ├── test_scoring.py
 │   └── test_smoke.py
 ├── data/
-│   ├── raw/                   # Placeholder for raw inputs
-│   │   └── .gitkeep
-│   └── processed/             # Processed outputs (generated)
-│       ├── .gitkeep
-│       └── jenkins_advisories.sample.jsonl
+│   ├── raw/
+│   │   ├── plugins/           # Plugin snapshots (generated)
+│   │   │   └── cucumber-reports.snapshot.json
+│   │   └── advisories/        # Advisory JSONL (generated)
+│   │       └── cucumber-reports.advisories.{sample|real}.jsonl
+│   └── processed/             # Optional derived outputs (future)
 ├── .github/
 │   ├── workflows/
 │   │   ├── ci.yml             # CI (lint/security/tests + coverage)
 │   │   └── pre-commit-autoupdate.yml
-│   ├── ISSUE_TEMPLATE/
-│   │   ├── bug_report.md
-│   │   └── feature_request.md
-│   ├── PULL_REQUEST_TEMPLATE.md
-│   ├── SECURITY.md            # Vulnerability reporting policy 
-│   └── dependabot.yml
-├── .pre-commit-config.yaml    # pre-commit hooks (ruff, etc.)
-├── .bandit                    # Bandit config
-├── .dockerignore
-├── .gitignore
-├── CHANGELOG.md               # Human-friendly release notes
-├── CITATION.cff               # Citation metadata (GitHub “Cite this repository”)
-├── CODE_OF_CONDUCT.md
-├── CONTRIBUTING.md
-├── Dockerfile                 # Container image for consistent runs
-├── compose.yaml               # Docker Compose dev loop
-├── docker-entrypoint.sh       # Container entrypoint
-├── Makefile                   # Handy shortcuts (test/lint/format/audit)
-├── pyproject.toml             # Project + tool config (pytest, coverage, ruff, etc.)
-├── requirements.txt           # Pinned runtime deps (generated via pip-tools)
-├── requirements-dev.txt       # Pinned dev/test/tooling deps (generated via pip-tools)
-├── LICENSE                    # Apache-2.0 license
-├── NOTICE                     # Apache-2.0 attribution notice
-└── README.md                  # You are here 
+│   └── ISSUE_TEMPLATE/
+└── ...
 ```
 
----
-
 ## 📁 Repo Tour
-
 ### Top-level files
-- **README.md** — What CANARY is, how to run it, and how to contribute.
-- **CHANGELOG.md** — Release notes (kept human-readable; updated on releases).
+- **README.md** — What CANARY is and how to run it.
+- **CHANGELOG.md** — Release notes (updated on releases).
 - **CITATION.cff** — Citation metadata for GitHub’s “Cite this repository”.
-- **LICENSE / NOTICE** — Apache-2.0 licensing + attribution notice.
-- **SECURITY.md** — Responsible vulnerability reporting instructions (also mirrored under `.github/`).
-- **CODE_OF_CONDUCT.md** — Community expectations for participation.
-- **CONTRIBUTING.md** — How to propose changes, run checks, and open PRs.
-- **pyproject.toml** — Project metadata + dependencies + tool configuration (pytest, coverage, ruff, etc.).
-- **requirements.txt / requirements-dev.txt** — Pinned dependencies (generated from `pyproject.toml` via pip-tools).
-- **compose.yaml / Dockerfile / docker-entrypoint.sh** — Reproducible Docker environment for running the CLI and tooling.
-- **Makefile** — Handy shortcuts (lint/test/audit commands).
-- **.pre-commit-config.yaml** — Local + CI hook runner (keeps style/security checks consistent).
-- **.bandit** — Bandit configuration.
-- **.github/** — GitHub “plumbing” (CI, templates, Dependabot):
-  - **workflows/ci.yml** — Lint/security/test pipeline (includes coverage reporting).
-  - **workflows/pre-commit-autoupdate.yml** — Keeps pre-commit hook versions fresh.
-  - **dependabot.yml** — Dependency update automation.
-  - **ISSUE_TEMPLATE/** + **PULL_REQUEST_TEMPLATE.md** — Contribution templates.
+- **Dockerfile / compose.yaml** — Reproducible dev/test environment.
+- **pyproject.toml** — Tooling config (Ruff, pytest, etc.).
 
-### Source code
-- **canary/** — Main Python package.
-  - **__init__.py** — Marks this directory as a package (optionally exports package API).
-  - **cli.py** — Command-line interface entrypoint (`canary ...`).
-  - **collectors/** — Data collection modules (currently Jenkins advisories).
-  - **scoring/** — Scoring/risk model logic (baseline heuristic now; ML later).
+### Key source files
+- **`canary/cli.py`** — CLI entrypoint (`canary collect …`, `canary score …`).
+- **`canary/collectors/plugin_snapshot.py`** — Collects a per-plugin snapshot (curated by default; `--real` pulls the Jenkins plugins API).
+- **`canary/collectors/jenkins_advisories.py`** — Collects advisories:
+  - sample mode (offline)
+  - real mode (plugin-specific) via snapshot → `securityWarnings` → advisory URLs
+- **`canary/scoring/baseline.py`** — Baseline scoring using local artifacts (`data/raw/...`) with explainable features.
 
-### Tests
-- **tests/** — Unit + smoke tests (`test_smoke.py`) to confirm the CLI and key paths run end-to-end.
-
-### Data
-- **data/raw/** — Placeholder for raw inputs (kept out of git except `.gitkeep`).
-- **data/processed/** — Generated outputs (example: `jenkins_advisories.sample.jsonl`).
-
-### Build artifacts (generated)
-- **canary.egg-info/** — Packaging metadata created by editable installs (`pip install -e ...`).
-  - Not hand-edited; safe to delete and regenerate.
-
----
+### Data outputs (generated)
+- **`data/raw/plugins/<plugin>.snapshot.json`** — Plugin snapshot (includes plugins API payload when `--real`).
+- **`data/raw/advisories/<plugin>.advisories.{sample|real}.jsonl`** — Advisory records (JSONL).
 
 ## ✅ Prerequisites (Docker)
 
@@ -132,7 +89,6 @@ docker compose version
 ---
 
 ## 🚀 Quickstart (Docker Compose)
-
 ### 1) Build the image
 ```bash
 docker compose build
@@ -143,26 +99,35 @@ docker compose build
 docker compose run --rm canary canary --help
 ```
 
-### 3) Collect advisories (sample)
-Writes `data/processed/jenkins_advisories.sample.jsonl` (or similar).
+### 3) Collect a plugin snapshot (pilot)
+Curated snapshot (no network):
 ```bash
-docker compose run --rm canary canary collect advisories
+docker compose run --rm canary canary collect plugin --id cucumber-reports
 ```
 
-### 4) Score a plugin
-Human-readable output:
+Real snapshot from the Jenkins plugins API:
 ```bash
-docker compose run --rm canary canary score workflow-cps
+docker compose run --rm canary canary collect plugin --id cucumber-reports --real
 ```
 
-JSON output:
+### 4) Collect advisories
+Sample (offline / deterministic):
 ```bash
-docker compose run --rm canary canary score workflow-cps --json
+docker compose run --rm canary canary collect advisories --plugin cucumber-reports --out-dir data/raw/advisories
 ```
 
-> Note: The scorer is currently a transparent baseline heuristic. It will evolve as real signals/data sources are added.
+Real (plugin-specific; uses the plugin snapshot’s `securityWarnings` to discover advisory URLs):
+```bash
+docker compose run --rm canary canary collect advisories --plugin cucumber-reports --real --data-dir data/raw --out-dir data/raw/advisories
+```
 
----
+### 5) Score a plugin
+JSON output (recommended for now):
+```bash
+docker compose run --rm canary canary score cucumber-reports --data-dir data/raw --json
+```
+
+> Note: Scoring is intentionally a transparent baseline and will evolve as more signals/data sources are added.
 
 ## 🧪 Running Tests
 
@@ -215,30 +180,31 @@ docker compose run --rm canary ruff format .
 ---
 
 ## 🧠 How Scoring Works (Baseline)
+CANARY’s current scorer is intentionally simple and explainable. It combines:
 
-The current baseline is intentionally simple and explainable:
+- **Name heuristics** (e.g., keywords that suggest auth/security or SCM surface area)
+- **Advisory features** (from local JSONL):
+  - advisory count
+  - most recent advisory date
+  - *recency-weighted* advisory risk
+- **Plugin snapshot features** (from `data/raw/plugins/<plugin>.snapshot.json` when available):
+  - required Jenkins core
+  - dependency count (surface area proxy)
+  - security warnings (active warnings are a strong risk signal)
+  - release recency (used as a light “maintenance” signal)
 
-- If the plugin name suggests auth/security-critical keywords → **+20**
-- If the plugin name suggests SCM/integration surface area → **+10**
-- Otherwise → **+5**
-- Score is clamped to **0–100**
-- Output includes **reasons** for transparency
-
-This is a placeholder “yardstick” until CANARY integrates real signals.
-
----
+Outputs include the final score, a human-readable list of reasons, and the raw feature values (JSON mode).
 
 ## 🗺️ Roadmap (Next Steps)
-
-Planned additions (in roughly this order):
-
-- [ ] Real Jenkins advisory collection (live fetch + parsing)
-- [ ] Normalized record schema & validation
-- [ ] Add more ecosystem signals (e.g., release cadence, maintainer count, dependency centrality)
-- [ ] Training dataset construction (time-aware)
-- [ ] Research-grade evaluation + reporting
-
----
+- [x] CLI scaffold (`collect`, `score`) with Docker Compose workflow
+- [x] Plugin snapshot collection (curated + `--real` via Jenkins plugins API)
+- [x] Advisory collection:
+  - [x] sample (offline) mode
+  - [x] real (plugin-specific) mode via snapshot → `securityWarnings` → advisory URLs
+  - [ ] real (global) mode via advisories RSS/index for all advisories
+- [x] Baseline scoring with explainable features (name + advisories + snapshot metadata)
+- [ ] Add GitHub signals (stars, recent activity, issues/PRs) for the plugin repo
+- [ ] Expand datasets and scoring model for research evaluation
 
 ## 🧯 Troubleshooting
 

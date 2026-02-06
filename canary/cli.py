@@ -16,14 +16,24 @@ def _cmd_collect_advisories(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     plugin = args.plugin.strip() if args.plugin else None
-    out_name = f"{plugin}.advisories.sample.jsonl" if plugin else "jenkins_advisories.sample.jsonl"
+
+    # Real mode currently requires a plugin id because it reads the plugin snapshot.
+    if args.real and not plugin:
+        raise SystemExit("ERROR: --real currently requires --plugin <plugin-id>")
+
+    suffix = "real" if args.real else "sample"
+    out_name = (
+        f"{plugin}.advisories.{suffix}.jsonl" if plugin else f"jenkins_advisories.{suffix}.jsonl"
+    )
     out_path = out_dir / out_name
 
-    records = (
-        collect_advisories_real(plugin_id=plugin)
-        if args.real
-        else collect_advisories_sample(plugin_id=plugin)
-    )
+    if args.real:
+        if plugin is None:
+            raise SystemExit("ERROR: --real currently requires --plugin <plugin-id>")
+        plugin_id = plugin  # now a real str
+        records = collect_advisories_real(plugin_id=plugin_id, data_dir=args.data_dir)
+    else:
+        records = collect_advisories_sample(plugin_id=plugin)
 
     with out_path.open("w", encoding="utf-8") as f:
         for rec in records:
@@ -84,7 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Filter advisories to a single plugin id (e.g., cucumber-reports)",
     )
-    advisories.add_argument("--out-dir", default="data/processed", help="Output directory")
+    advisories.add_argument(
+        "--data-dir",
+        default="data/raw",
+        help="Dataset root (expects plugins/<id>.snapshot.json when using --real)",
+    )
+    advisories.add_argument("--out-dir", default="data/raw/advisories", help="Output directory")
     advisories.add_argument(
         "--real", action="store_true", help="Fetch live data from Jenkins (network)"
     )
