@@ -28,6 +28,8 @@ colorama==0.4.6
     #   build
     #   click
     #   pytest
+coverage[toml]==7.13.3
+    # via pytest-cov
 cyclonedx-python-lib==11.6.0
     # via pip-audit
 defusedxml==0.7.1
@@ -68,7 +70,9 @@ pip-tools==7.5.2
 platformdirs==4.5.1
     # via pip-audit
 pluggy==1.6.0
-    # via pytest
+    # via
+    #   pytest
+    #   pytest-cov
 py-serializable==2.1.0
     # via cyclonedx-python-lib
 pygments==2.19.2
@@ -84,6 +88,10 @@ pyproject-hooks==1.2.0
 pyright==1.1.408
     # via canary (pyproject.toml)
 pytest==9.0.2
+    # via
+    #   canary (pyproject.toml)
+    #   pytest-cov
+pytest-cov==7.0.0
     # via canary (pyproject.toml)
 pyyaml==6.0.3
     # via bandit

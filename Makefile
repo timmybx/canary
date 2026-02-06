@@ -1,5 +1,5 @@
 test:
-	docker compose run --rm canary pytest -ra
+	docker compose run --rm canary pytest
 
 lint:
 	docker compose run --rm canary ruff check . --fix

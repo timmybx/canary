@@ -53,4 +53,4 @@ jobs:
 
       - name: Pytest
         run: |
-          pytest -ra
+          pytest --cov-report=xml

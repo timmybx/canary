@@ -22,31 +22,53 @@ This repo is intentionally lightweight right now: a working CLI, a sample collec
 
 ## 📦 Project Structure
 
+
 ```
-├── canary/ # Python package (CLI, collectors, scoring)
-│ ├── init.py
-│ ├── cli.py # CLI entrypoint (canary ...)
-│ ├── collectors/ # Data collection modules (e.g., advisories)
-│ └── scoring/ # Scoring logic (baseline now, ML later)
+├── canary/                    # Python package (CLI, collectors, scoring)
+│   ├── __init__.py
+│   ├── cli.py                 # CLI entrypoint (`canary ...`)
+│   ├── collectors/
+│   │   └── jenkins_advisories.py
+│   └── scoring/
+│       └── baseline.py
+├── tests/                     # Unit tests
+│   ├── test_collectors.py
+│   ├── test_scoring.py
+│   └── test_smoke.py
 ├── data/
-│ ├── raw/ # Raw inputs (if/when collected)
-│ └── processed/ # Processed outputs (e.g., advisories JSONL)
-├── tests/ # Unit tests
-│ ├── test_collectors.py
-│ └── test_scoring.py
+│   ├── raw/                   # Placeholder for raw inputs
+│   │   └── .gitkeep
+│   └── processed/             # Processed outputs (generated)
+│       ├── .gitkeep
+│       └── jenkins_advisories.sample.jsonl
 ├── .github/
-│ └── workflows/ # GitHub Actions CI (ruff, bandit, pip-audit, pytest)
-├── Dockerfile # Container image for consistent runs
-├── compose.yaml # Docker Compose dev loop
-├── docker-entrypoint.sh # Container entrypoint
-├── Makefile # Handy shortcuts (test/lint/format/audit)
-├── pyproject.toml # Project metadata + deps + tool config (pytest, ruff, etc.)
-├── requirements.txt # Pinned runtime deps (generated via pip-tools)
-├── requirements-dev.txt # Pinned dev/test/tooling deps (generated via pip-tools)
-├── LICENSE # Apache-2.0 license
-├── NOTICE # Apache-2.0 attribution notice
-├── SECURITY.md # Vulnerability reporting policy
-└── README.md # You are here 
+│   ├── workflows/
+│   │   ├── ci.yml             # CI (lint/security/tests + coverage)
+│   │   └── pre-commit-autoupdate.yml
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.md
+│   │   └── feature_request.md
+│   ├── PULL_REQUEST_TEMPLATE.md
+│   ├── SECURITY.md            # Vulnerability reporting policy 
+│   └── dependabot.yml
+├── .pre-commit-config.yaml    # pre-commit hooks (ruff, etc.)
+├── .bandit                    # Bandit config
+├── .dockerignore
+├── .gitignore
+├── CHANGELOG.md               # Human-friendly release notes
+├── CITATION.cff               # Citation metadata (GitHub “Cite this repository”)
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
+├── Dockerfile                 # Container image for consistent runs
+├── compose.yaml               # Docker Compose dev loop
+├── docker-entrypoint.sh       # Container entrypoint
+├── Makefile                   # Handy shortcuts (test/lint/format/audit)
+├── pyproject.toml             # Project + tool config (pytest, coverage, ruff, etc.)
+├── requirements.txt           # Pinned runtime deps (generated via pip-tools)
+├── requirements-dev.txt       # Pinned dev/test/tooling deps (generated via pip-tools)
+├── LICENSE                    # Apache-2.0 license
+├── NOTICE                     # Apache-2.0 attribution notice
+└── README.md                  # You are here 
 ```
 
 ---
@@ -55,29 +77,37 @@ This repo is intentionally lightweight right now: a working CLI, a sample collec
 
 ### Top-level files
 - **README.md** — What CANARY is, how to run it, and how to contribute.
+- **CHANGELOG.md** — Release notes (kept human-readable; updated on releases).
+- **CITATION.cff** — Citation metadata for GitHub’s “Cite this repository”.
 - **LICENSE / NOTICE** — Apache-2.0 licensing + attribution notice.
-- **SECURITY.md** — Responsible vulnerability reporting instructions.
-- **pyproject.toml** — Project metadata + dependencies + tool configuration (pytest, ruff, etc.).
-- **compose.yaml** — Docker Compose dev workflow (run CLI, tests, tools in a consistent env).
-- **Dockerfile** — Container build recipe for the `canary` service.
-- **docker-entrypoint.sh** — Container entrypoint used by Docker Compose.
+- **SECURITY.md** — Responsible vulnerability reporting instructions (also mirrored under `.github/`).
+- **CODE_OF_CONDUCT.md** — Community expectations for participation.
+- **CONTRIBUTING.md** — How to propose changes, run checks, and open PRs.
+- **pyproject.toml** — Project metadata + dependencies + tool configuration (pytest, coverage, ruff, etc.).
+- **requirements.txt / requirements-dev.txt** — Pinned dependencies (generated from `pyproject.toml` via pip-tools).
+- **compose.yaml / Dockerfile / docker-entrypoint.sh** — Reproducible Docker environment for running the CLI and tooling.
 - **Makefile** — Handy shortcuts (lint/test/audit commands).
-- **requirements.txt** — Pinned runtime dependencies (generated from `pyproject.toml` via pip-tools).
-- **requirements-dev.txt** — Pinned dev/test/tooling dependencies (also generated; includes pytest/ruff/bandit/etc.).
+- **.pre-commit-config.yaml** — Local + CI hook runner (keeps style/security checks consistent).
+- **.bandit** — Bandit configuration.
+- **.github/** — GitHub “plumbing” (CI, templates, Dependabot):
+  - **workflows/ci.yml** — Lint/security/test pipeline (includes coverage reporting).
+  - **workflows/pre-commit-autoupdate.yml** — Keeps pre-commit hook versions fresh.
+  - **dependabot.yml** — Dependency update automation.
+  - **ISSUE_TEMPLATE/** + **PULL_REQUEST_TEMPLATE.md** — Contribution templates.
 
 ### Source code
 - **canary/** — Main Python package.
   - **__init__.py** — Marks this directory as a package (optionally exports package API).
   - **cli.py** — Command-line interface entrypoint (`canary ...`).
-  - **collectors/** — Data collection modules (e.g., Jenkins advisories).
+  - **collectors/** — Data collection modules (currently Jenkins advisories).
   - **scoring/** — Scoring/risk model logic (baseline heuristic now; ML later).
 
 ### Tests
-- **tests/** — Unit tests for collectors and scoring.
+- **tests/** — Unit + smoke tests (`test_smoke.py`) to confirm the CLI and key paths run end-to-end.
 
 ### Data
-- **data/raw/** — Raw inputs (downloaded/advisory source artifacts, if/when used).
-- **data/processed/** — Processed outputs (e.g., JSONL advisories used downstream).
+- **data/raw/** — Placeholder for raw inputs (kept out of git except `.gitkeep`).
+- **data/processed/** — Generated outputs (example: `jenkins_advisories.sample.jsonl`).
 
 ### Build artifacts (generated)
 - **canary.egg-info/** — Packaging metadata created by editable installs (`pip install -e ...`).
@@ -137,8 +167,20 @@ docker compose run --rm canary canary score workflow-cps --json
 ## 🧪 Running Tests
 
 ```bash
-docker compose run --rm canary pytest -ra
+docker compose run --rm canary pytest
 ```
+
+### Coverage
+
+Coverage is enabled by default (via `pytest-cov`) and prints missing lines in the terminal.
+
+Generate an HTML report:
+
+```bash
+docker compose run --rm canary pytest --cov-report=html
+```
+
+Then open `htmlcov/index.html`.
 
 Quiet mode:
 ```bash
