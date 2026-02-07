@@ -1,5 +1,5 @@
 test:
-	docker compose run --rm canary pytest
+	docker compose run --rm canary pytest --cov-report=html
 
 lint:
 	docker compose run --rm canary ruff check . --fix
@@ -9,6 +9,8 @@ format:
 
 audit:
 	docker compose run --rm canary pip-audit
+
+ruff: lint format
 
 bandit:
 	docker compose run --rm canary bandit -r canary -q
