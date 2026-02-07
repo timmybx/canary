@@ -69,6 +69,8 @@ def collect_plugin_snapshot(
         # Keep the raw API payload (useful while you’re iterating)
         snapshot["plugin_api"] = api
 
+        from canary.collectors.github_repo import fetch_github_repo, parse_github_owner_repo
+
         # Also surface a few stable, high-value fields at top-level
         snapshot["plugin_name"] = api.get("name")
         snapshot["plugin_title"] = api.get("title")
@@ -83,5 +85,21 @@ def collect_plugin_snapshot(
         # Some plugins API responses include wiki/GitHub links; keep if present
         snapshot["wiki_url"] = api.get("wiki")
         snapshot["scm_url"] = api.get("scm")
+
+        # --- GitHub repo metadata (optional, if repo_url is a GitHub repo) ---
+        gh = None
+        if repo_url:
+            parsed = parse_github_owner_repo(repo_url)
+            if parsed:
+                owner, repo = parsed
+                gh = fetch_github_repo(owner, repo)
+
+        snapshot["github_repo"] = gh
+
+        if gh:
+            snapshot["github_stars"] = gh.get("stargazers_count")
+            snapshot["github_forks"] = gh.get("forks_count")
+            snapshot["github_open_issues"] = gh.get("open_issues_count")
+            snapshot["github_pushed_at"] = gh.get("pushed_at")
 
     return snapshot

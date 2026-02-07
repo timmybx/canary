@@ -22,3 +22,4 @@ reqs:
 	python -m piptools compile --output-file requirements.txt pyproject.toml
 	python -m piptools compile --extra dev --output-file requirements-dev.txt pyproject.toml
 
+all: ruff audit bandit reqs test

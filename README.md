@@ -3,6 +3,8 @@
 ![Ruff](https://img.shields.io/badge/lint-ruff-2ea44f?logo=ruff)
 ![Dependabot](https://img.shields.io/badge/dependabot-enabled-2ea44f?logo=dependabot)
 ![Python](https://img.shields.io/badge/python-3.11-blue?logo=python)
+[![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://microsoft.github.io/pyright/)
+[![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 
 # 🐤 CANARY — Component Anomaly & Near-term Advisory Risk Yardstick
 
@@ -34,6 +36,8 @@ This repo is intentionally lightweight right now: a working CLI, a sample collec
 │   ├── fixtures/              # Recorded API payloads for deterministic tests
 │   │   └── plugins_api_cucumber-reports.json
 │   ├── test_collectors.py
+│   ├── test_github_repo.py
+│   ├── test_jenkins_advisories_real.py
 │   ├── test_plugin_snapshot.py
 │   ├── test_scoring.py
 │   └── test_smoke.py
