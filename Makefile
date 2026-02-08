@@ -24,8 +24,8 @@ pyright:
 	docker compose run --rm canary pyright
 
 reqs:
-	docker compose run --rm canary python -m piptools compile --output-file requirements.txt pyproject.toml
-	docker compose run --rm canary python -m piptools compile --extra dev --output-file requirements-dev.txt pyproject.toml
+	docker compose run --rm canary pip-compile --generate-hashes -o requirements.txt pyproject.toml
+	docker compose run --rm canary pip-compile --extra=dev --generate-hashes -o requirements-dev.txt pyproject.toml
 
 all: ruff security pyright reqs test
 

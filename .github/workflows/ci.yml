@@ -17,18 +17,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55  # v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install package (dev deps)
+      - name: Install dependencies (pinned)
         run: |
-          python -m pip install --upgrade pip setuptools wheel
-          pip install -e ".[dev]"
+          # Uses a pinned, hashed lockfile. Generate it with:
+          #   python -m piptools compile --generate-hashes --extra dev -o requirements-dev.txt pyproject.toml
+          python -m pip install --require-hashes -r requirements-dev.txt
 
       - name: Ruff (lint)
         run: |

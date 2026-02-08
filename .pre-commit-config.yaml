@@ -20,13 +20,13 @@ repos:
         args: ["-q", "-r", "canary", "-x", "tests"]
 
   # Pip-Audit (Dependency Vulnerabilities)
-  - repo: https://github.com/pypa/pip-audit
-    rev: v2.10.0
+  - repo: local
     hooks:
-      - id: pip-audit
-        name: pip-audit (runtime + dev)
+      - id: pip-audit-docker
+        name: pip-audit (runtime + dev, docker)
+        entry: docker compose run --rm canary pip-audit -r requirements.txt -r requirements-dev.txt
+        language: system
         pass_filenames: false
-        args: ["-r", "requirements.txt", "-r", "requirements-dev.txt"]
 
   # Pyright (Type checking similar to a compiler)
   - repo: https://github.com/RobertCraigie/pyright-python
