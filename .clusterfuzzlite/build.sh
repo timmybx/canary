@@ -4,7 +4,12 @@
 
 # Install your project (and any deps needed by fuzzers).
 # If you have C extensions, this compiles them with sanitizer-friendly flags.
-pip3 install .
+
+# Install locked deps (hash-locked) to avoid env/version drift.
+pip3 install --no-cache-dir --require-hashes -r "$SRC/requirements.txt"
+
+# Install your package without resolving deps.
+pip3 install --no-cache-dir --no-deps "$SRC"
 
 # Build fuzzers into $OUT.
 for fuzzer in $(find $SRC -name '*_fuzzer.py'); do

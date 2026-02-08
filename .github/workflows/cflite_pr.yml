@@ -5,10 +5,8 @@ on:
     paths:
       - "**"
 
-# Least privilege (instead of read-all)
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   PR:
@@ -19,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sanitizer: [address]  # Python supports address + undefined per docs.
+        sanitizer: [address]
 
     steps:
       - name: Build Fuzzers (${{ matrix.sanitizer }})
@@ -38,4 +36,4 @@ jobs:
           fuzz-seconds: 300
           mode: "code-change"
           sanitizer: ${{ matrix.sanitizer }}
-          output-sarif: true
+          output-sarif: false
