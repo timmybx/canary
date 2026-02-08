@@ -5,6 +5,7 @@ import json
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
@@ -45,7 +46,21 @@ def _allowlisted_url(url: str) -> None:
         raise ValueError(f"Refusing to fetch unexpected URL: {url}")
 
 
+def _canonicalize_jenkins_url(url: str | None) -> str | None:
+    """Normalize Jenkins domains/URLs to reduce duplicates and matching bugs."""
+    if not url:
+        return url
+    url = url.strip()
+    url = url.replace("http://", "https://")
+    url = url.replace("https://jenkins.io/", "https://www.jenkins.io/")
+    url = url.replace("https://www.jenkins.io//", "https://www.jenkins.io/")
+    # (Optional) normalize trailing slash for advisory pages (keep consistent)
+    # Don't force trailing slash for all URLs; only tidy obvious advisory links.
+    return url
+
+
 def _fetch_text(url: str, *, timeout_s: float = 15.0) -> str:
+    url = _canonicalize_jenkins_url(url) or url
     _allowlisted_url(url)
     req = urllib.request.Request(
         url,
@@ -84,6 +99,90 @@ def _load_plugin_snapshot(plugin_id: str, data_dir: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def merge_advisory_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Deduplicate advisory records and merge fields.
+
+    Dedupe key: (source, type, plugin_id, advisory_id)
+
+    Merge rules:
+      - URL: canonicalize Jenkins domain; prefer https://www.jenkins.io/ if present
+      - security_warning_ids: union + stable sort
+      - active_security_warning: True if any record has True
+      - published_date: keep earliest (lexicographic works for YYYY-MM-DD)
+      - title: prefer a non-empty title, else keep existing
+      - adds _merged_from_count for transparency when duplicates were merged
+    """
+    merged: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    counts: dict[tuple[str, str, str, str], int] = {}
+
+    def key_for(r: dict[str, Any]) -> tuple[str, str, str, str]:
+        return (
+            str(r.get("source", "")),
+            str(r.get("type", "")),
+            str(r.get("plugin_id", "")),
+            str(r.get("advisory_id", "")),
+        )
+
+    for r_in in records:
+        r = dict(r_in)  # copy
+        if r.get("source") == "jenkins" and r.get("type") == "advisory":
+            r["url"] = _canonicalize_jenkins_url(r.get("url"))
+
+        # normalize list fields early
+        r["security_warning_ids"] = sorted(set(r.get("security_warning_ids") or []))
+
+        k = key_for(r)
+        counts[k] = counts.get(k, 0) + 1
+
+        if k not in merged:
+            merged[k] = r
+            continue
+
+        base = merged[k]
+
+        # URL preference: canonical Jenkins URL if available
+        base_url = base.get("url")
+        new_url = r.get("url")
+        if new_url:
+            if (not base_url) or (
+                "www.jenkins.io" in new_url and "www.jenkins.io" not in (base_url or "")
+            ):
+                base["url"] = new_url
+
+        # Merge security_warning_ids (union)
+        base_ids = set(base.get("security_warning_ids") or [])
+        new_ids = set(r.get("security_warning_ids") or [])
+        base["security_warning_ids"] = sorted(base_ids | new_ids)
+
+        # Merge active_security_warning (any True wins)
+        base["active_security_warning"] = bool(base.get("active_security_warning")) or bool(
+            r.get("active_security_warning")
+        )
+
+        # published_date: keep earliest if both exist
+        base_date = base.get("published_date")
+        new_date = r.get("published_date")
+        if base_date and new_date:
+            base["published_date"] = min(str(base_date), str(new_date))
+        elif not base_date and new_date:
+            base["published_date"] = new_date
+
+        # title: prefer a non-empty title
+        if not base.get("title") and r.get("title"):
+            base["title"] = r.get("title")
+
+        merged[k] = base
+
+    out: list[dict[str, Any]] = []
+    for k, obj in merged.items():
+        c = counts.get(k, 1)
+        if c > 1:
+            obj["_merged_from_count"] = c
+        out.append(obj)
+    return out
+
+
 def collect_advisories_sample(plugin_id: str | None = None) -> list[dict[str, Any]]:
     records = [
         AdvisoryRecord(
@@ -113,7 +212,7 @@ def collect_advisories_sample(plugin_id: str | None = None) -> list[dict[str, An
     out = [r.to_dict() for r in records]
     if plugin_id:
         out = [r for r in out if r.get("plugin_id") == plugin_id]
-    return out
+    return merge_advisory_records(out)
 
 
 def collect_advisories_real(
@@ -135,20 +234,41 @@ def collect_advisories_real(
     for w in api.get("securityWarnings") or []:
         u = (w or {}).get("url")
         if u:
-            urls.add(str(u).strip())
+            urls.add(_canonicalize_jenkins_url(str(u)) or str(u).strip())
 
     # 2) any curated URLs you already store
     for u in snapshot.get("security_advisory_urls") or []:
         if u:
-            urls.add(str(u).strip())
+            urls.add(_canonicalize_jenkins_url(str(u)) or str(u).strip())
+
+    # Canonicalize once so matching below is consistent
+    warnings = api.get("securityWarnings") or []
+    warnings_by_url: dict[str, list[dict[str, Any]]] = {}
+    for w in warnings:
+        u = _canonicalize_jenkins_url((w or {}).get("url"))
+        if not u:
+            continue
+        warnings_by_url.setdefault(u, []).append(w)
 
     records: list[dict[str, Any]] = []
     for url in sorted(urls):
+        url = _canonicalize_jenkins_url(url) or url
+
         html = _fetch_text(url, timeout_s=timeout_s)
         title = _extract_title(html)
 
         published = _date_from_advisory_url(url)
         advisory_id = published.isoformat() if published else None
+
+        related_warnings = warnings_by_url.get(url, [])
+
+        security_warning_ids = []
+        for w in related_warnings:
+            wid = (w or {}).get("id")
+            if wid:
+                security_warning_ids.append(str(wid))
+
+        active_security_warning = any((w or {}).get("active") is True for w in related_warnings)
 
         records.append(
             {
@@ -159,17 +279,10 @@ def collect_advisories_real(
                 "url": url,
                 "published_date": published.isoformat() if published else None,
                 "title": title,
-                "security_warning_ids": [
-                    (w or {}).get("id")
-                    for w in (api.get("securityWarnings") or [])
-                    if (w or {}).get("url") == url
-                ],
-                "active_security_warning": any(
-                    (w or {}).get("active") is True
-                    for w in (api.get("securityWarnings") or [])
-                    if (w or {}).get("url") == url
-                ),
+                "security_warning_ids": security_warning_ids,
+                "active_security_warning": active_security_warning,
             }
         )
 
-    return records
+    # Deduplicate/merge near-duplicates (e.g., jenkins.io vs www.jenkins.io)
+    return merge_advisory_records(records)
