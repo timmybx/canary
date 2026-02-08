@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 _ALLOWED_NETLOCS = {"jenkins.io", "www.jenkins.io"}
 
@@ -47,16 +47,32 @@ def _allowlisted_url(url: str) -> None:
 
 
 def _canonicalize_jenkins_url(url: str | None) -> str | None:
-    """Normalize Jenkins domains/URLs to reduce duplicates and matching bugs."""
+    """
+    Normalize Jenkins advisory URLs safely.
+
+    - Forces https (if scheme is http or missing).
+    - Normalizes hostname strictly: jenkins.io -> www.jenkins.io.
+    - Avoids substring matching (CodeQL-friendly).
+    - Keeps path/query/fragment intact.
+    """
     if not url:
         return url
+
     url = url.strip()
-    url = url.replace("http://", "https://")
-    url = url.replace("https://jenkins.io/", "https://www.jenkins.io/")
-    url = url.replace("https://www.jenkins.io//", "https://www.jenkins.io/")
-    # (Optional) normalize trailing slash for advisory pages (keep consistent)
-    # Don't force trailing slash for all URLs; only tidy obvious advisory links.
-    return url
+    parsed = urlparse(url)
+
+    # Normalize scheme
+    scheme = parsed.scheme or "https"
+    if scheme == "http":
+        scheme = "https"
+
+    # Normalize host strictly (no substring checks)
+    netloc = parsed.netloc
+    if netloc == "jenkins.io":
+        netloc = "www.jenkins.io"
+
+    normalized = parsed._replace(scheme=scheme, netloc=netloc)
+    return urlunparse(normalized)
 
 
 def _fetch_text(url: str, *, timeout_s: float = 15.0) -> str:
@@ -106,7 +122,7 @@ def merge_advisory_records(records: Iterable[dict[str, Any]]) -> list[dict[str, 
     Dedupe key: (source, type, plugin_id, advisory_id)
 
     Merge rules:
-      - URL: canonicalize Jenkins domain; prefer https://www.jenkins.io/ if present
+      - URL: canonicalize Jenkins domain; prefer host www.jenkins.io when present
       - security_warning_ids: union + stable sort
       - active_security_warning: True if any record has True
       - published_date: keep earliest (lexicographic works for YYYY-MM-DD)
@@ -123,6 +139,11 @@ def merge_advisory_records(records: Iterable[dict[str, Any]]) -> list[dict[str, 
             str(r.get("plugin_id", "")),
             str(r.get("advisory_id", "")),
         )
+
+    def host(u: str | None) -> str:
+        if not u:
+            return ""
+        return urlparse(u).netloc
 
     for r_in in records:
         r = dict(r_in)  # copy
@@ -141,12 +162,12 @@ def merge_advisory_records(records: Iterable[dict[str, Any]]) -> list[dict[str, 
 
         base = merged[k]
 
-        # URL preference: canonical Jenkins URL if available
+        # URL preference: prefer canonical host www.jenkins.io when available
         base_url = base.get("url")
         new_url = r.get("url")
         if new_url:
             if (not base_url) or (
-                "www.jenkins.io" in new_url and "www.jenkins.io" not in (base_url or "")
+                host(new_url) == "www.jenkins.io" and host(base_url) != "www.jenkins.io"
             ):
                 base["url"] = new_url
 
@@ -262,7 +283,7 @@ def collect_advisories_real(
 
         related_warnings = warnings_by_url.get(url, [])
 
-        security_warning_ids = []
+        security_warning_ids: list[str] = []
         for w in related_warnings:
             wid = (w or {}).get("id")
             if wid:
