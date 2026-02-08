@@ -1,18 +1,31 @@
 [![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/timmybx/canary/badge)](https://scorecard.dev/viewer/?uri=github.com/timmybx/canary)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Ruff](https://img.shields.io/badge/lint-ruff-2ea44f?logo=ruff)
 ![Dependabot](https://img.shields.io/badge/dependabot-enabled-2ea44f?logo=dependabot)
 ![Python](https://img.shields.io/badge/python-3.11-blue?logo=python)
 [![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://microsoft.github.io/pyright/)
 [![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/timmybx/canary/badge)](https://scorecard.dev/viewer/?uri=github.com/timmybx/canary)
-
 
 # 🐤 CANARY — Component Anomaly & Near-term Advisory Risk Yardstick
 
 CANARY is a starter scaffold for a research prototype that collects software ecosystem signals (starting with Jenkins advisories) and produces a transparent, explainable “risk” score for components/plugins.
 
 This repo is intentionally lightweight right now: a working CLI, a sample collector, a baseline scorer, and unit tests.
+
+> **Dependency source of truth:** `pyproject.toml` is the source of dependency declarations.  
+> `requirements*.txt` files are generated lockfiles used for reproducible installs.
+
+---
+
+## 🔐 Security & Supply Chain Notes
+
+CANARY aims to be reproducible and supply-chain aware:
+
+- Dependencies are **hash-locked** (`requirements*.txt`) and installed with `--require-hashes` in containers/CI.
+- Vulnerability auditing runs in Docker to avoid OS-specific dependency drift.
+- GitHub Actions are pinned to commit SHAs where possible.
+- OpenSSF Scorecard is enabled to track supply-chain posture over time.
 
 ---
 
@@ -78,6 +91,8 @@ This repo is intentionally lightweight right now: a working CLI, a sample collec
 - **`data/raw/plugins/<plugin>.snapshot.json`** — Plugin snapshot (includes plugins API payload when `--real`).
 - **`data/raw/advisories/<plugin>.advisories.{sample|real}.jsonl`** — Advisory records (JSONL).
 
+---
+
 ## ✅ Prerequisites (Docker)
 
 To run CANARY locally, the recommended approach is Docker Compose.
@@ -135,6 +150,8 @@ docker compose run --rm canary canary score cucumber-reports --data-dir data/raw
 
 > Note: Scoring is intentionally a transparent baseline and will evolve as more signals/data sources are added.
 
+---
+
 ## 🧪 Running Tests
 
 ```bash
@@ -182,6 +199,26 @@ Common combo:
 docker compose run --rm canary ruff check . --fix
 docker compose run --rm canary ruff format .
 ```
+
+---
+
+## 🔁 Updating Dependencies (Locked)
+
+This repo uses hash-locked requirements for reproducible installs.
+
+Regenerate lockfiles (Docker):
+```bash
+docker compose run --rm canary pip-compile --generate-hashes -o requirements.txt pyproject.toml
+docker compose run --rm canary pip-compile --extra=dev --generate-hashes -o requirements-dev.txt pyproject.toml
+```
+
+Run all checks locally:
+```bash
+pre-commit run -a
+```
+
+> Tip: For CI/workflow hardening, some workflows may install tools from additional hash-locked files
+> (e.g., `requirements-ci.txt`). If present, regenerate them the same way using `pip-compile --generate-hashes`.
 
 ---
 
