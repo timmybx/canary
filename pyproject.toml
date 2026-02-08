@@ -18,6 +18,7 @@ dev = [
   "pip-audit>=2.7.3",
   "pip-tools>=7.4.1",
   "pyright>=1.1.390",
+  "pre-commit",
 ]
 
 [project.scripts]

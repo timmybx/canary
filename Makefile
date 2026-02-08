@@ -1,3 +1,6 @@
+build:
+	docker compose build --no-cache canary
+
 test:
 	docker compose run --rm canary pytest --cov-report=html
 
@@ -18,11 +21,11 @@ bandit:
 security: bandit audit
 	
 pyright:
-	python -m pre_commit run pyright --all-files
+	docker compose run --rm canary pyright
 
 reqs:
-	python -m piptools compile --output-file requirements.txt pyproject.toml
-	python -m piptools compile --extra dev --output-file requirements-dev.txt pyproject.toml
+	docker compose run --rm canary python -m piptools compile --output-file requirements.txt pyproject.toml
+	docker compose run --rm canary python -m piptools compile --extra dev --output-file requirements-dev.txt pyproject.toml
 
 all: ruff security pyright reqs test
 
