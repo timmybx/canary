@@ -3,35 +3,39 @@ name: OpenSSF Scorecard
 on:
   branch_protection_rule:
   schedule:
-    - cron: "18 9 * * 4"  # weekly (Thu 09:18 UTC) - change if you want
+    - cron: "18 9 * * 4" # weekly (Thu 09:18 UTC) - change if you want
   push:
     branches: ["main"]
   workflow_dispatch:
 
-permissions: read-all
+# Least-privilege at workflow level; job elevates only what it needs.
+permissions:
+  contents: read
 
 jobs:
   analysis:
     name: Scorecard analysis
     runs-on: ubuntu-latest
+
     permissions:
-      security-events: write   # upload SARIF to code scanning
-      id-token: write          # publish results / badge via Sigstore/Rekor
+      contents: read          # checkout + read repo contents
+      security-events: write  # upload SARIF to code scanning
+      id-token: write         # publish results / badge via OIDC (Sigstore/Rekor)
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1 :contentReference[oaicite:5]{index=5}
         with:
           persist-credentials: false
 
       - name: Run Scorecard
-        uses: ossf/scorecard-action@v2.4.3
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3 :contentReference[oaicite:6]{index=6}
         with:
           results_file: results.sarif
           results_format: sarif
           publish_results: true
 
       - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@b5ebac6f4c00c8ccddb7cdcd45fdb248329f808a # v3.32.2 :contentReference[oaicite:7]{index=7}
         with:
           sarif_file: results.sarif
