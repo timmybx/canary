@@ -3,7 +3,7 @@
 # Expects fuzz targets named *_fuzzer.py somewhere under $SRC.
 
 # Install locked deps (hash-locked) to avoid env/version drift.
-pip3 install --no-cache-dir --require-hashes -r "$SRC/requirements.txt"
+pip3 install --no-cache-dir --require-hashes -r "requirements.txt"
 
 # Make your source importable without installing it (avoids unpinned pip install).
 export PYTHONPATH="$SRC:${PYTHONPATH:-}"
