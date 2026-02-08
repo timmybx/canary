@@ -19,6 +19,7 @@ dev = [
   "pip-tools>=7.4.1",
   "pyright>=1.1.390",
   "pre-commit",
+  "atheris>=2.3.0",
 ]
 
 [project.scripts]
