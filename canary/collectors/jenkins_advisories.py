@@ -59,7 +59,12 @@ def _canonicalize_jenkins_url(url: str | None) -> str | None:
         return url
 
     url = url.strip()
-    parsed = urlparse(url)
+
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        # Malformed URLs (e.g., invalid bracketed IPv6) should not crash the pipeline.
+        return None
 
     # Normalize scheme
     scheme = parsed.scheme or "https"

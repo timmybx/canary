@@ -1,4 +1,8 @@
-from canary.collectors.jenkins_advisories import collect_advisories_real
+from canary.collectors.jenkins_advisories import _canonicalize_jenkins_url, collect_advisories_real
+
+
+def test_canonicalize_jenkins_url_invalid_ipv6_does_not_crash():
+    assert _canonicalize_jenkins_url("//[\n") is None
 
 
 def test_collect_advisories_real_uses_snapshot_and_parses_advisory(monkeypatch):
