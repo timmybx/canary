@@ -5,6 +5,8 @@
 ![Python](https://img.shields.io/badge/python-3.11-blue?logo=python)
 [![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://microsoft.github.io/pyright/)
 [![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/timmybx/canary/badge)](https://scorecard.dev/viewer/?uri=github.com/timmybx/canary)
+
 
 # 🐤 CANARY — Component Anomaly & Near-term Advisory Risk Yardstick
 
