@@ -25,6 +25,7 @@ pyright:
 
 reqs:
 	docker compose run --rm canary pip-compile --generate-hashes -o requirements-build.txt requirements-build.in
+	docker compose run --rm canary pip-compile --generate-hashes -o requirements-ci.txt requirements-ci.in
 	docker compose run --rm canary pip-compile --generate-hashes -o requirements.txt pyproject.toml
 	docker compose run --rm canary pip-compile --extra=dev --generate-hashes -o requirements-dev.txt pyproject.toml
 
