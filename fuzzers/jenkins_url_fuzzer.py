@@ -1,7 +1,10 @@
 import sys
 from urllib.parse import urlparse
 
-import atheris
+try:
+    import atheris  # type: ignore
+except ImportError:
+    atheris = None  # type: ignore
 
 # Import the function you want to harden.
 # Adjust import path to match your project.
@@ -23,6 +26,11 @@ def TestOneInput(data: bytes) -> None:
 
 
 def main():
+    if atheris is None:
+        raise SystemExit(
+            "atheris is not installed (expected on Windows host). Run fuzzing in Linux/Docker."
+        )
+
     atheris.Setup(sys.argv, TestOneInput)
     atheris.Fuzz()
 
