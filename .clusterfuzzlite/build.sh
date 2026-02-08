@@ -8,8 +8,14 @@ pip3 install --no-cache-dir --require-hashes -r "requirements.txt"
 # Make your source importable without installing it (avoids unpinned pip install).
 export PYTHONPATH="$SRC:${PYTHONPATH:-}"
 
+echo "SRC=$SRC"
+echo "OUT=$OUT"
+ls -la "$SRC" || true
+ls -la "$SRC/canary" || true
+find "$SRC" -maxdepth 4 -name '*_fuzzer.py' -print || true
+
 # Build fuzzers into $OUT.
-for fuzzer in $(find $SRC -name '*_fuzzer.py'); do
+for fuzzer in $(find . -name '*_fuzzer.py'); do
   fuzzer_basename=$(basename -s .py $fuzzer)
   fuzzer_package=${fuzzer_basename}.pkg
 
