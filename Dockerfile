@@ -3,17 +3,16 @@ FROM python:3.11-slim@sha256:0b23cfb7425d065008b778022a17b1551c82f8b4866ee5a7a20
 WORKDIR /app
 
 ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_ROOT_USER_ACTION=ignore
 
-# Pin build tooling (replace with the exact versions you want)
-RUN python -m pip install --no-cache-dir \
-    pip==25.3 \
-    setuptools==72.2.0 \
-    wheel==0.46.3
+# Install pinned build tooling (hash-locked)
+COPY requirements-build.txt /app/
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements-build.txt
 
-# OS deps (optional: pin version; see note below)
+# OS deps (optional: pin version if you want full immutability)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libatomic1 \
  && rm -rf /var/lib/apt/lists/*
