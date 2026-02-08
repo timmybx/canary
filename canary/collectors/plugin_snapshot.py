@@ -69,7 +69,19 @@ def collect_plugin_snapshot(
         # Keep the raw API payload (useful while you’re iterating)
         snapshot["plugin_api"] = api
 
-        from canary.collectors.github_repo import fetch_github_repo, parse_github_owner_repo
+        from datetime import timedelta
+
+        from canary.collectors.github_repo import (
+            fetch_github_commits_since,
+            fetch_github_contributors,
+            fetch_github_open_issues,
+            fetch_github_open_pulls,
+            fetch_github_releases,
+            fetch_github_repo,
+            fetch_github_tags,
+            fetch_github_workflows_dir,
+            parse_github_owner_repo,
+        )
 
         # Also surface a few stable, high-value fields at top-level
         snapshot["plugin_name"] = api.get("name")
@@ -88,10 +100,12 @@ def collect_plugin_snapshot(
 
         # --- GitHub repo metadata (optional, if repo_url is a GitHub repo) ---
         gh = None
+        gh_owner_repo: tuple[str, str] | None = None
         if repo_url:
             parsed = parse_github_owner_repo(repo_url)
             if parsed:
                 owner, repo = parsed
+                gh_owner_repo = (owner, repo)
                 gh = fetch_github_repo(owner, repo)
 
         snapshot["github_repo"] = gh
@@ -101,5 +115,58 @@ def collect_plugin_snapshot(
             snapshot["github_forks"] = gh.get("forks_count")
             snapshot["github_open_issues"] = gh.get("open_issues_count")
             snapshot["github_pushed_at"] = gh.get("pushed_at")
+
+        # --- Additional GitHub signals (PoC-friendly summaries) ---
+        if gh_owner_repo:
+            owner, repo = gh_owner_repo
+
+            # Releases + tags (some repos use tags only)
+            releases = fetch_github_releases(owner, repo)
+            snapshot["github_release_count"] = len(releases)
+            snapshot["github_latest_release"] = (
+                {
+                    "tag_name": releases[0].get("tag_name"),
+                    "name": releases[0].get("name"),
+                    "published_at": releases[0].get("published_at"),
+                    "prerelease": releases[0].get("prerelease"),
+                    "draft": releases[0].get("draft"),
+                }
+                if releases
+                else None
+            )
+
+            tags = fetch_github_tags(owner, repo)
+            snapshot["github_tag_count_sampled"] = len(tags)
+
+            # Commit cadence in simple time windows
+            now = datetime.now(UTC)
+            windows = [30, 90, 365]
+            commit_counts: dict[str, int] = {}
+            for days in windows:
+                since = (now - timedelta(days=days)).isoformat()
+                commits = fetch_github_commits_since(owner, repo, since_iso=since)
+                commit_counts[f"commits_{days}d"] = len(commits)
+            snapshot["github_commit_counts"] = commit_counts
+
+            # Contributors (bus factor-ish proxy)
+            contributors = fetch_github_contributors(owner, repo)
+            contrib_counts = [c.get("contributions", 0) for c in contributors]
+            total = sum(contrib_counts) if contrib_counts else 0
+            snapshot["github_contributors_top_sampled"] = len(contributors)
+            snapshot["github_top_contributor_share"] = (
+                (max(contrib_counts) / total) if total else None
+            )
+
+            # Issues vs PRs split
+            open_prs = fetch_github_open_pulls(owner, repo)
+            open_items = fetch_github_open_issues(owner, repo)
+            open_issues_only = [i for i in open_items if "pull_request" not in i]
+            snapshot["github_open_prs"] = len(open_prs)
+            snapshot["github_open_issues_only"] = len(open_issues_only)
+
+            # CI workflows presence
+            workflows = fetch_github_workflows_dir(owner, repo)
+            snapshot["github_has_ci_workflows"] = bool(workflows)
+            snapshot["github_ci_workflow_count"] = len(workflows) if workflows else 0
 
     return snapshot
