@@ -6,7 +6,7 @@ on:
     # Weekly on Mondays at 09:00 UTC
     - cron: "0 9 * * 1"
 
-# Default to least-privilege at workflow level
+# Default to least privilege: keep GITHUB_TOKEN read-only
 permissions:
   contents: read
 
@@ -14,15 +14,15 @@ jobs:
   autoupdate:
     runs-on: ubuntu-latest
 
-    # Only this job needs write perms (to push a branch + open PR)
+    # Keep job token read-only as well (writes happen via PR_BOT_TOKEN)
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
 
     steps:
       - name: Check out repo
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          # Important: don't leave GITHUB_TOKEN creds in the repo; we use PR_BOT_TOKEN later.
           persist-credentials: false
 
       - name: Set up Python
@@ -43,8 +43,10 @@ jobs:
           pre-commit run --all-files
 
       - name: Create pull request
-        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8
+        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
         with:
+          # Use the fine-grained PAT you created (repo-scoped) to do the write operations.
+          token: ${{ secrets.PR_BOT_TOKEN }}
           branch: chore/pre-commit-autoupdate
           delete-branch: true
           title: "chore: pre-commit autoupdate"
