@@ -8,9 +8,13 @@ ENV PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1 \
     PIP_ROOT_USER_ACTION=ignore
 
-# Install pinned build tooling (hash-locked)
-COPY requirements-build.txt /app/
-RUN python -m pip install --no-cache-dir --require-hashes -r requirements-build.txt
+# Install build tooling.
+# `requirements-build.txt` is hash-locked for regular deps; `requirements-build.in`
+# carries explicit pins for unsafe tooling (pip/setuptools) that pip-compile omits
+# unless generated with --allow-unsafe.
+COPY requirements-build.txt requirements-build.in /app/
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements-build.txt \
+ && python -m pip install --no-cache-dir -r requirements-build.in
 
 # OS deps (optional: pin version if you want full immutability)
 RUN apt-get update \
