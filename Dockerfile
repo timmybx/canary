@@ -8,13 +8,11 @@ ENV PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1 \
     PIP_ROOT_USER_ACTION=ignore
 
-# Install build tooling.
-# `requirements-build.txt` is hash-locked for regular deps; `requirements-build.in`
-# carries explicit pins for unsafe tooling (pip/setuptools) that pip-compile omits
-# unless generated with --allow-unsafe.
-COPY requirements-build.txt requirements-build.in /app/
-RUN python -m pip install --no-cache-dir --require-hashes -r requirements-build.txt \
- && python -m pip install --no-cache-dir -r requirements-build.in
+# Install pinned build tooling (hash-locked).
+# Include pip/setuptools/wheel in requirements-build.txt by generating it with:
+#   pip-compile --allow-unsafe --generate-hashes -o requirements-build.txt requirements-build.in
+COPY requirements-build.txt /app/
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements-build.txt
 
 # OS deps (optional: pin version if you want full immutability)
 RUN apt-get update \
