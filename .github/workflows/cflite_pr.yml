@@ -23,14 +23,7 @@ jobs:
         ports:
           - 2375:2375
 
-    # Force non-TLS docker over tcp to the DinD daemon, and avoid ~/.docker TLS cert lookups.
-    env:
-      DOCKER_HOST: tcp://docker:2375
-      DOCKER_TLS_VERIFY: "0"
-      DOCKER_TLS_CERTDIR: ""
-      DOCKER_CERT_PATH: ""
-      DOCKER_CONFIG: /tmp/docker-config
-
+          
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.sanitizer }}-${{ github.ref }}
       cancel-in-progress: true
@@ -41,9 +34,6 @@ jobs:
         sanitizer: [address]
 
     steps:
-      - name: Prepare docker config (no TLS)
-        run: |
-          mkdir -p /tmp/docker-config
 
       # Optional but handy if this ever regresses again:
       # - name: Docker version (debug)
