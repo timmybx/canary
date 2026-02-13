@@ -13,7 +13,7 @@ jobs:
   PR:
     runs-on: ubuntu-latest
 
-    # Add a DinD service so the action's (old) docker client talks to this daemon instead.
+    # Docker-in-Docker daemon the action's docker client will talk to.
     services:
       docker:
         image: docker:24-dind
@@ -23,22 +23,43 @@ jobs:
         ports:
           - 2375:2375
 
+    # Force non-TLS docker over tcp to the DinD daemon, and avoid ~/.docker TLS cert lookups.
     env:
       DOCKER_HOST: tcp://docker:2375
       DOCKER_TLS_VERIFY: "0"
+      DOCKER_TLS_CERTDIR: ""
+      DOCKER_CERT_PATH: ""
+      DOCKER_CONFIG: /tmp/docker-config
 
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.sanitizer }}-${{ github.ref }}
       cancel-in-progress: true
+
     strategy:
       fail-fast: false
       matrix:
         sanitizer: [address]
 
     steps:
+      - name: Prepare docker config (no TLS)
+        run: |
+          mkdir -p /tmp/docker-config
+
+      # Optional but handy if this ever regresses again:
+      # - name: Docker version (debug)
+      #   run: |
+      #     docker version
+      #     docker info
+
       - name: Build Fuzzers (${{ matrix.sanitizer }})
         id: build
         uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        env:
+          DOCKER_HOST: tcp://docker:2375
+          DOCKER_TLS_VERIFY: "0"
+          DOCKER_TLS_CERTDIR: ""
+          DOCKER_CERT_PATH: ""
+          DOCKER_CONFIG: /tmp/docker-config
         with:
           language: python
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -47,6 +68,12 @@ jobs:
       - name: Run Fuzzers (${{ matrix.sanitizer }})
         id: run
         uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        env:
+          DOCKER_HOST: tcp://docker:2375
+          DOCKER_TLS_VERIFY: "0"
+          DOCKER_TLS_CERTDIR: ""
+          DOCKER_CERT_PATH: ""
+          DOCKER_CONFIG: /tmp/docker-config
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fuzz-seconds: 300

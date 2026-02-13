@@ -23,14 +23,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@f5c2471be782132e47a6e6f9c725e56730d6e9a3 # v3.32.3
         with:
           languages: ${{ matrix.language }}
 
-      # For Python, autobuild isn't required; CodeQL can analyze source as-is.
-      # For Actions, there is no build step either.
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@f5c2471be782132e47a6e6f9c725e56730d6e9a3 # v3.32.3
