@@ -12,6 +12,21 @@ permissions:
 jobs:
   PR:
     runs-on: ubuntu-latest
+
+    # Add a DinD service so the action's (old) docker client talks to this daemon instead.
+    services:
+      docker:
+        image: docker:24-dind
+        options: --privileged
+        env:
+          DOCKER_TLS_CERTDIR: ""
+        ports:
+          - 2375:2375
+
+    env:
+      DOCKER_HOST: tcp://docker:2375
+      DOCKER_TLS_VERIFY: "0"
+
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.sanitizer }}-${{ github.ref }}
       cancel-in-progress: true
