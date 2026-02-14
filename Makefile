@@ -24,10 +24,10 @@ pyright:
 	docker compose run --rm canary pyright
 
 reqs:
-	docker compose run --rm canary pip-compile --allow-unsafe --generate-hashes -o requirements-build.txt requirements-build.in
-	docker compose run --rm canary pip-compile --generate-hashes -o requirements-ci.txt requirements-ci.in
-	docker compose run --rm canary pip-compile --generate-hashes -o requirements.txt pyproject.toml
-	docker compose run --rm canary pip-compile --extra=dev --generate-hashes -o requirements-dev.txt pyproject.toml
+	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip<26' && pip-compile --allow-unsafe --generate-hashes -o requirements-build.txt requirements-build.in"
+	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip<26' && pip-compile --generate-hashes -o requirements-ci.txt requirements-ci.in"
+	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip<26' && pip-compile --generate-hashes -o requirements.txt pyproject.toml"
+	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip<26' && pip-compile --extra=dev --generate-hashes -o requirements-dev.txt pyproject.toml"
 
 all: ruff security pyright reqs test
 
@@ -35,3 +35,9 @@ demo:
 	docker compose run --rm canary canary collect plugin --id cucumber-reports --real
 	docker compose run --rm canary canary collect advisories --plugin cucumber-reports --real --data-dir data/raw --out-dir data/raw/advisories
 	docker compose run --rm canary canary score cucumber-reports --data-dir data/raw --json
+
+gharchive-sample:
+	python -m canary.datasets.gharchive $(ARGS)
+
+github-features:
+	python -m canary.datasets.github_repo_features $(ARGS)

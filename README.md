@@ -87,6 +87,8 @@ CANARY aims to be reproducible and supply-chain aware:
   - sample mode (offline)
   - real mode (plugin-specific) via snapshot → `securityWarnings` → advisory URLs
 - **`canary/scoring/baseline.py`** — Baseline scoring using local artifacts (`data/raw/...`) with explainable features.
+- **`canary/datasets/gharchive.py`** — BigQuery GH Archive proof-of-concept query for Jenkins plugin activity features.
+- **`canary/datasets/github_repo_features.py`** — GitHub API PoC for repo-level security/process features.
 
 ### Data outputs (generated)
 - **`data/raw/plugins/<plugin>.snapshot.json`** — Plugin snapshot (includes plugins API payload when `--real`).
@@ -152,6 +154,176 @@ docker compose run --rm canary canary score cucumber-reports --data-dir data/raw
 > Note: Scoring is intentionally a transparent baseline and will evolve as more signals/data sources are added.
 
 ---
+
+## Google BigQuery GH Archive PoC (Jenkins Plugins)
+
+This repo includes a small proof-of-concept query in `canary/datasets/gharchive.py` that pulls
+GitHub Archive activity for Jenkins plugin repos (`jenkinsci/*-plugin`) from BigQuery.
+
+### 1) One-time local setup (Google Cloud CLI + ADC)
+
+Install Google Cloud CLI:
+- https://cloud.google.com/sdk/docs/install
+
+Then run in your local terminal/PowerShell:
+
+```bash
+gcloud --version
+gcloud init
+```
+
+Set your project and enable BigQuery API:
+
+```bash
+gcloud config set project <YOUR_PROJECT_ID>
+gcloud services enable bigquery.googleapis.com --project <YOUR_PROJECT_ID>
+```
+
+Authenticate Application Default Credentials (ADC):
+
+```bash
+gcloud auth application-default login
+gcloud auth application-default set-quota-project <YOUR_PROJECT_ID>
+```
+
+Install Python dependency (local environment):
+
+```bash
+pip install google-cloud-bigquery
+```
+
+### 2) Run the sample query
+
+Default run (last 7 complete UTC days):
+
+```bash
+make gharchive-sample
+```
+
+If `make` is unavailable on your platform:
+
+```bash
+python -m canary.datasets.gharchive
+```
+
+Custom date range/output:
+
+```bash
+python -m canary.datasets.gharchive --start 20260201 --end 20260207 --out data/processed/gharchive_sample.csv
+```
+
+Output file (default):
+- `data/processed/gharchive_jenkins_plugins_last_week.csv`
+
+Result shape:
+- One row per Jenkins plugin repo for the selected window.
+- Includes activity and risk-oriented features such as:
+  - `committers_unique_30d`, `push_days_active_30d`
+  - `pr_reviewed_ratio`, `pr_merge_time_p50_hours`, `pr_close_without_merge_ratio`
+  - `issue_reopen_rate`, `issue_close_time_p50_hours`
+  - `hotfix_proxy`, `releases_30d`, `days_since_last_release`
+  - `security_label_proxy`, `churn_intensity`, `owner_concentration`
+
+### 3) Cost guardrail
+
+The script sets `maximum_bytes_billed` to 2GB by default. You can override it:
+
+```bash
+python -m canary.datasets.gharchive --max-bytes-billed 500000000
+```
+
+The script also samples each day table to keep costs low (default: `--sample-percent 5`).
+To sample less/more:
+
+```bash
+python -m canary.datasets.gharchive --sample-percent 2
+python -m canary.datasets.gharchive --sample-percent 20
+```
+
+## GitHub Repo Feature PoC (API)
+
+Use this to collect repo metadata and process/security posture features for Jenkins plugin repos.
+
+### 1) Optional: set a GitHub token
+
+Unauthenticated API usage is heavily rate-limited. For smoother runs, export `GITHUB_TOKEN` first.
+
+```bash
+export GITHUB_TOKEN=<your_token>
+```
+
+PowerShell:
+
+```powershell
+$env:GITHUB_TOKEN="<your_token>"
+```
+
+### 2) Run
+
+Default (up to 10 `jenkinsci/*-plugin` repos):
+
+```bash
+make github-features
+```
+
+Without `GITHUB_TOKEN`, the script uses a conservative default (`--max-repos 10`) due to
+GitHub's unauthenticated API rate limit (60 requests/hour).
+
+Direct Python command with options:
+
+```bash
+python -m canary.datasets.github_repo_features --org jenkinsci --repo-suffix -plugin --max-repos 25 --out data/processed/github_repo_features.csv
+```
+
+Skip Scorecard API enrichment (faster, fewer external calls):
+
+```bash
+python -m canary.datasets.github_repo_features --skip-scorecard
+```
+
+### 3) Output
+
+- `data/processed/github_repo_features.csv`
+- Fields include:
+  - popularity/activity context: `stars`, `forks`, `watchers`, `open_issues_count`, `days_since_last_push`
+  - release recency: `days_since_last_release`
+  - hygiene config presence: `dependabot_config_present`, `codeql_workflow_present`
+  - security/process posture: `codeowners_present`,
+    `security_policy_present`, `workflows_present`
+  - OpenSSF posture: `scorecard_overall`, `scorecard_branch_protection`,
+    `scorecard_pinned_dependencies`, `scorecard_token_permissions`,
+    `scorecard_dangerous_workflow`, `scorecard_maintained`
+
+### Feature Reference (What + Why)
+
+The GH Archive PoC output includes one row per repo for your selected window and the
+following feature fields:
+
+| Name | Description | Why It Matters |
+|---|---|---|
+| `events_total` | Total GH Archive events observed for the repo in the window. | Normalizes overall activity; useful context for interpreting other rates. |
+| `actors_unique` | Distinct GitHub actors across all events. | Low contributor diversity can increase key-person risk; very high churn can increase instability. |
+| `pushes` | Count of `PushEvent`s. | Basic change-volume indicator; more code movement can increase exposure to defects. |
+| `committers_unique_30d` | Distinct actors who pushed code. | Bus-factor proxy; concentrated commit access can increase operational/security risk. |
+| `push_days_active_30d` | Number of days with at least one push. | Maintenance consistency proxy; long inactivity can correlate with delayed patching. |
+| `prs_opened` | Pull requests opened. | Baseline for collaboration and denominator for PR-related ratios. |
+| `prs_closed` | Pull requests closed (merged + unmerged). | Throughput and triage signal. |
+| `prs_merged` | Pull requests merged. | Accepted change velocity; useful with review and latency signals. |
+| `pr_reviewed_ratio` | `PullRequestReviewEvent` count divided by PRs opened. | Review rigor proxy; stronger review often reduces defect/security regression risk. |
+| `pr_merge_time_p50_hours` | Median hours from PR creation to merge (merged PRs only). | Process quality/speed signal; extremes can indicate rushed or stalled pipelines. |
+| `prs_closed_unmerged` | Closed PRs that were not merged. | Friction/rejection signal that can indicate quality issues or noisy contributions. |
+| `pr_close_without_merge_ratio` | `prs_closed_unmerged / prs_opened`. | Normalized PR friction metric for cross-repo comparison. |
+| `issues_opened` | Issues opened. | Workload/incoming problem volume proxy. |
+| `issues_closed` | Issues closed. | Issue resolution throughput proxy. |
+| `issues_reopened` | Reopened issues. | Potential quality/regression signal. |
+| `issue_reopen_rate` | `issues_reopened / issues_closed`. | Normalized stability proxy; higher rates can indicate recurring defects. |
+| `issue_close_time_p50_hours` | Median issue open-to-close duration. | Responsiveness/maintenance capacity signal. |
+| `releases_30d` | Count of release events in the window. | Release cadence signal; long gaps may correlate with stale dependencies/fixes. |
+| `days_since_last_release` | Days since latest release event observed. | Freshness/maintenance recency proxy. |
+| `hotfix_proxy` | Share of pushes that happen within 48 hours after issue-open events. | Reactive churn proxy; persistent reactive behavior can indicate instability pressure. |
+| `security_label_proxy` | Count of issue/PR text blobs matching security-related terms (`security`, `vuln`, `cve-`, `xss`, `sqli`, `rce`). | Weak proxy for security-related discussion and triage intensity. |
+| `churn_intensity` | `(pushes + prs_opened) / actors_unique`. | Normalized code-change pressure per contributor. |
+| `owner_concentration` | Max single-actor share of pushes in the window. | Ownership concentration (bus-factor) proxy; high concentration can raise maintenance and supply-chain risk. |
 
 ## 🧪 Running Tests
 
