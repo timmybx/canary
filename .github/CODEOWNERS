@@ -1,0 +1,5 @@
+# Default owner for the whole repository.
+* @timmybx
+
+# Explicitly mark CI/workflow ownership.
+.github/workflows/ @timmybx
