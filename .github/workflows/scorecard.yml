@@ -31,6 +31,8 @@ jobs:
       - name: Run Scorecard
         uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3 :contentReference[oaicite:6]{index=6}
         with:
+          # Prefer a PAT (if configured) so Scorecard can read branch protection/rules reliably.
+          repo_token: ${{ secrets.SCORECARD_READ_TOKEN != '' && secrets.SCORECARD_READ_TOKEN || github.token }}
           results_file: results.sarif
           results_format: sarif
           publish_results: true
