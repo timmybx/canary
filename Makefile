@@ -42,6 +42,9 @@ registry:
 enrich:
 	docker compose run --rm canary canary collect enrich --real --max-plugins 25
 
+advisories-events:
+	docker compose run --rm canary canary build advisories-events
+
 gharchive-sample:
 	python -m canary.datasets.gharchive $(ARGS)
 
