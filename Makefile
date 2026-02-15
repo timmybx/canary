@@ -36,6 +36,9 @@ demo:
 	docker compose run --rm canary canary collect advisories --plugin cucumber-reports --real --data-dir data/raw --out-dir data/raw/advisories
 	docker compose run --rm canary canary score cucumber-reports --data-dir data/raw --json
 
+registry:
+	docker compose run --rm canary canary collect registry --real
+
 gharchive-sample:
 	python -m canary.datasets.gharchive $(ARGS)
 
