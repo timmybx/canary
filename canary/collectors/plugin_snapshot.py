@@ -106,7 +106,12 @@ def collect_plugin_snapshot(
             if parsed:
                 owner, repo = parsed
                 gh_owner_repo = (owner, repo)
-                gh = fetch_github_repo(owner, repo)
+                try:
+                    gh = fetch_github_repo(owner, repo)
+                except RuntimeError as e:
+                    # GitHub API data is nice-to-have, but should not fail snapshot collection
+                    # (e.g. CI rate-limits or missing credentials).
+                    snapshot["github_repo_error"] = str(e)
 
         snapshot["github_repo"] = gh
 
@@ -117,7 +122,9 @@ def collect_plugin_snapshot(
             snapshot["github_pushed_at"] = gh.get("pushed_at")
 
         # --- Additional GitHub signals (PoC-friendly summaries) ---
-        if gh_owner_repo:
+        # Only attempt these if the basic repo fetch succeeded
+        # (avoids cascading failures on rate-limit).
+        if gh_owner_repo and gh:
             owner, repo = gh_owner_repo
 
             # Releases + tags (some repos use tags only)

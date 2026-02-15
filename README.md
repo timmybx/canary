@@ -294,20 +294,16 @@ If unavailable, alert fields are emitted as `null` and `*_visible` is `false`.
 
 - `data/processed/github_repo_features.csv`
 - Fields include:
-  - popularity/activity context: `stars`, `forks`, `watchers`, `open_issues_count`, `days_since_last_push`
-  - release recency: `days_since_last_release`
-  - hygiene config presence: `dependabot_config_present`, `codeql_workflow_present`
-  - security/process posture: `codeowners_present`,
-    `security_policy_present`, `workflows_present`
-  - OpenSSF posture: `scorecard_overall`, `scorecard_branch_protection`,
-    `scorecard_pinned_dependencies`, `scorecard_token_permissions`,
-    `scorecard_dangerous_workflow`, `scorecard_maintained`
-  - alert posture (when visible): `dependabot_open_alerts*`,
-    `code_scanning_open_alerts*` with visibility flags
-  - repository advisory posture (when visible): `repo_security_advisories_total`,
-    severity bucket counts, `repo_security_advisories_published_30d`,
-    and CVSS summary fields (`repo_security_advisories_cvss_max`,
-    `repo_security_advisories_cvss_avg`)
+
+| Category | Fields | Notes |
+|---|---|---|
+| Popularity/activity context | `stars`, `forks`, `watchers`, `open_issues_count`, `days_since_last_push` | Context for normalizing/segmenting risk signals. |
+| Release recency | `days_since_last_release` | Maintenance freshness proxy. |
+| Hygiene config presence | `dependabot_config_present`, `codeql_workflow_present` | Presence of configuration (not alert counts). |
+| Security/process posture | `codeowners_present`, `security_policy_present`, `workflows_present` | Lightweight public posture signals. |
+| OpenSSF posture | `scorecard_overall`, `scorecard_branch_protection`, `scorecard_pinned_dependencies`, `scorecard_token_permissions`, `scorecard_dangerous_workflow`, `scorecard_maintained` | Pulled from Scorecard API. |
+| Alert posture (when visible) | `dependabot_open_alerts*`, `code_scanning_open_alerts*` plus `*_visible` flags | Depends on token/org access; emits `null` when unavailable. |
+| Repository advisory posture (when visible) | `repo_security_advisories_total`, severity buckets, `repo_security_advisories_published_30d`, `repo_security_advisories_cvss_max`, `repo_security_advisories_cvss_avg` | Depends on token/org access; emits `null` when unavailable. |
 
 ### Feature Reference (What + Why)
 
