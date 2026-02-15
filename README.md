@@ -1,4 +1,4 @@
-[![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/ci.yml)
+﻿[![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/timmybx/canary/badge)](https://scorecard.dev/viewer/?uri=github.com/timmybx/canary)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Ruff](https://img.shields.io/badge/lint-ruff-2ea44f?logo=ruff)
@@ -40,16 +40,22 @@ CANARY aims to be reproducible and supply-chain aware:
 
 ## 📦 Project Structure
 ```
-├── canary/                    # Python package (CLI, collectors, scoring)
+├── canary/                         # Python package
 │   ├── __init__.py
-│   ├── cli.py                 # CLI entrypoint (`canary ...`)
-│   ├── collectors/
-│   │   ├── jenkins_advisories.py   # Sample + real advisory collection
-│   │   └── plugin_snapshot.py      # Plugin snapshot (curated or plugins API `--real`)
+│   ├── cli.py                      # CLI entrypoint (`canary ...`)
+│   ├── collectors/                 # Data collectors (Jenkins + GitHub)
+│   │   ├── github_repo.py
+│   │   ├── jenkins_advisories.py
+│   │   └── plugin_snapshot.py
+│   ├── datasets/                   # Dataset builders / feature extraction scripts
+│   │   ├── gharchive.py            # BigQuery GH Archive feature PoC
+│   │   └── github_repo_features.py # GitHub API repo features (+ Scorecard/alerts/advisories)
 │   └── scoring/
-│       └── baseline.py        # Baseline scorer (name + local datasets)
-├── tests/                     # Unit tests
-│   ├── fixtures/              # Recorded API payloads for deterministic tests
+│       └── baseline.py             # Baseline scorer (explainable)
+├── fuzzers/
+│   └── jenkins_url_fuzzer.py
+├── tests/
+│   ├── fixtures/
 │   │   └── plugins_api_cucumber-reports.json
 │   ├── test_collectors.py
 │   ├── test_github_repo.py
@@ -58,18 +64,25 @@ CANARY aims to be reproducible and supply-chain aware:
 │   ├── test_scoring.py
 │   └── test_smoke.py
 ├── data/
-│   ├── raw/
-│   │   ├── plugins/           # Plugin snapshots (generated)
-│   │   │   └── cucumber-reports.snapshot.json
-│   │   └── advisories/        # Advisory JSONL (generated)
-│   │       └── cucumber-reports.advisories.{sample|real}.jsonl
-│   └── processed/             # Optional derived outputs (future)
+│   ├── raw/                        # Collected raw artifacts (gitkept; generated)
+│   └── processed/                  # Derived datasets/features (gitkept; generated)
 ├── .github/
+│   ├── CODEOWNERS
+│   ├── SECURITY.md
+│   ├── dependabot.yml
 │   ├── workflows/
-│   │   ├── ci.yml             # CI (lint/security/tests + coverage)
-│   │   └── pre-commit-autoupdate.yml
-│   └── ISSUE_TEMPLATE/
-└── ...
+│   │   ├── ci.yml
+│   │   ├── cflite_pr.yml
+│   │   ├── codeql.yml
+│   │   ├── pre-commit-autoupdate.yml
+│   │   └── scorecard.yml
+│   └── rulesets/
+│       └── main-branch-protection.json
+├── Dockerfile
+├── compose.yaml
+├── Makefile
+├── pyproject.toml
+└── requirements*.txt               # Hash-locked lockfiles
 ```
 
 ## 📁 Repo Tour
