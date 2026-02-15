@@ -5,7 +5,7 @@ import csv
 import os
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +65,21 @@ def _get_json(
         )
     resp.raise_for_status()
     return resp.json()
+
+
+def _get_json_list(
+    session: requests.Session,
+    url: str,
+    params: dict[str, Any] | None = None,
+    *,
+    allow_statuses: set[int] | None = None,
+) -> list[dict[str, Any]] | None:
+    data = _get_json(session, url, params=params, allow_statuses=allow_statuses)
+    if data is None:
+        return None
+    if isinstance(data, list):
+        return [x for x in data if isinstance(x, dict)]
+    return None
 
 
 def _parse_iso8601(value: str | None) -> datetime | None:
@@ -148,6 +163,162 @@ def _as_float_or_none(value: Any) -> float | None:
     return None
 
 
+def _dependabot_alert_metrics(
+    session: requests.Session,
+    repo: RepoRef,
+) -> dict[str, Any]:
+    # Endpoint often requires authenticated access and may be unavailable for some repos.
+    url = f"https://api.github.com/repos/{repo.full_name}/dependabot/alerts"
+    alerts = _get_json_list(
+        session,
+        url,
+        params={"state": "open", "per_page": 100},
+        allow_statuses={401, 403, 404},
+    )
+    if alerts is None:
+        return {
+            "dependabot_alerts_visible": False,
+            "dependabot_open_alerts": None,
+            "dependabot_open_alerts_critical": None,
+            "dependabot_open_alerts_high": None,
+            "dependabot_open_alerts_medium": None,
+            "dependabot_open_alerts_low": None,
+            "dependabot_open_alerts_unknown": None,
+        }
+
+    sev_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0}
+    for alert in alerts:
+        sec_adv = alert.get("security_advisory")
+        sev = None
+        if isinstance(sec_adv, dict):
+            v = sec_adv.get("severity")
+            if isinstance(v, str):
+                sev = v.lower()
+        if sev in sev_counts:
+            sev_counts[sev] += 1
+        else:
+            sev_counts["unknown"] += 1
+
+    return {
+        "dependabot_alerts_visible": True,
+        "dependabot_open_alerts": len(alerts),
+        "dependabot_open_alerts_critical": sev_counts["critical"],
+        "dependabot_open_alerts_high": sev_counts["high"],
+        "dependabot_open_alerts_medium": sev_counts["medium"],
+        "dependabot_open_alerts_low": sev_counts["low"],
+        "dependabot_open_alerts_unknown": sev_counts["unknown"],
+    }
+
+
+def _code_scanning_alert_metrics(
+    session: requests.Session,
+    repo: RepoRef,
+) -> dict[str, Any]:
+    url = f"https://api.github.com/repos/{repo.full_name}/code-scanning/alerts"
+    alerts = _get_json_list(
+        session,
+        url,
+        params={"state": "open", "per_page": 100},
+        allow_statuses={401, 403, 404},
+    )
+    if alerts is None:
+        return {
+            "code_scanning_alerts_visible": False,
+            "code_scanning_open_alerts": None,
+            "code_scanning_open_alerts_error": None,
+            "code_scanning_open_alerts_warning": None,
+            "code_scanning_open_alerts_note": None,
+            "code_scanning_open_alerts_unknown": None,
+        }
+
+    sev_counts = {"error": 0, "warning": 0, "note": 0, "unknown": 0}
+    for alert in alerts:
+        rule = alert.get("rule")
+        sev = None
+        if isinstance(rule, dict):
+            v = rule.get("severity")
+            if isinstance(v, str):
+                sev = v.lower()
+        if sev in sev_counts:
+            sev_counts[sev] += 1
+        else:
+            sev_counts["unknown"] += 1
+
+    return {
+        "code_scanning_alerts_visible": True,
+        "code_scanning_open_alerts": len(alerts),
+        "code_scanning_open_alerts_error": sev_counts["error"],
+        "code_scanning_open_alerts_warning": sev_counts["warning"],
+        "code_scanning_open_alerts_note": sev_counts["note"],
+        "code_scanning_open_alerts_unknown": sev_counts["unknown"],
+    }
+
+
+def _repository_security_advisory_metrics(
+    session: requests.Session,
+    repo: RepoRef,
+) -> dict[str, Any]:
+    url = f"https://api.github.com/repos/{repo.full_name}/security-advisories"
+    advisories = _get_json_list(
+        session,
+        url,
+        params={"per_page": 100},
+        allow_statuses={401, 403, 404},
+    )
+    if advisories is None:
+        return {
+            "repo_security_advisories_visible": False,
+            "repo_security_advisories_total": None,
+            "repo_security_advisories_published_30d": None,
+            "repo_security_advisories_critical": None,
+            "repo_security_advisories_high": None,
+            "repo_security_advisories_medium": None,
+            "repo_security_advisories_low": None,
+            "repo_security_advisories_unknown": None,
+            "repo_security_advisories_cvss_max": None,
+            "repo_security_advisories_cvss_avg": None,
+        }
+
+    sev_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0}
+    cvss_scores: list[float] = []
+    cutoff_30d = datetime.now(UTC) - timedelta(days=30)
+    published_30d = 0
+
+    for advisory in advisories:
+        sev_raw = advisory.get("severity")
+        sev = sev_raw.lower() if isinstance(sev_raw, str) else "unknown"
+        if sev in sev_counts:
+            sev_counts[sev] += 1
+        else:
+            sev_counts["unknown"] += 1
+
+        published_at = _parse_iso8601(advisory.get("published_at"))
+        if published_at and published_at.astimezone(UTC) >= cutoff_30d:
+            published_30d += 1
+
+        cvss = advisory.get("cvss")
+        if isinstance(cvss, dict):
+            score = cvss.get("score")
+            if isinstance(score, (int, float)):
+                cvss_scores.append(float(score))
+
+    cvss_max = max(cvss_scores) if cvss_scores else None
+    cvss_avg = (sum(cvss_scores) / len(cvss_scores)) if cvss_scores else None
+
+    return {
+        "repo_security_advisories_visible": True,
+        "repo_security_advisories_total": len(advisories),
+        "repo_security_advisories_published_30d": published_30d,
+        "repo_security_advisories_critical": sev_counts["critical"],
+        "repo_security_advisories_high": sev_counts["high"],
+        "repo_security_advisories_medium": sev_counts["medium"],
+        "repo_security_advisories_low": sev_counts["low"],
+        "repo_security_advisories_unknown": sev_counts["unknown"],
+        "repo_security_advisories_cvss_max": cvss_max,
+        "repo_security_advisories_cvss_avg": cvss_avg,
+    }
+
+
 def list_repos_for_org(
     session: requests.Session,
     org: str,
@@ -189,6 +360,7 @@ def collect_repo_features(
     repos: list[RepoRef],
     *,
     include_scorecard: bool,
+    include_alerts: bool,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for repo in repos:
@@ -204,6 +376,11 @@ def collect_repo_features(
         )
         scorecard = _fetch_scorecard(repo) if include_scorecard else None
         scorecard_checks = _scorecard_check_map(scorecard)
+        dependabot_metrics = _dependabot_alert_metrics(session, repo) if include_alerts else {}
+        code_scan_metrics = _code_scanning_alert_metrics(session, repo) if include_alerts else {}
+        repo_adv_metrics = (
+            _repository_security_advisory_metrics(session, repo) if include_alerts else {}
+        )
         row = {
             "repo": repo.full_name,
             "stars": int(meta.get("stargazers_count") or 0),
@@ -227,6 +404,36 @@ def collect_repo_features(
             "scorecard_dangerous_workflow": scorecard_checks.get("Dangerous-Workflow"),
             "scorecard_maintained": scorecard_checks.get("Maintained"),
         }
+        row.update(
+            {
+                "dependabot_alerts_visible": False,
+                "dependabot_open_alerts": None,
+                "dependabot_open_alerts_critical": None,
+                "dependabot_open_alerts_high": None,
+                "dependabot_open_alerts_medium": None,
+                "dependabot_open_alerts_low": None,
+                "dependabot_open_alerts_unknown": None,
+                "code_scanning_alerts_visible": False,
+                "code_scanning_open_alerts": None,
+                "code_scanning_open_alerts_error": None,
+                "code_scanning_open_alerts_warning": None,
+                "code_scanning_open_alerts_note": None,
+                "code_scanning_open_alerts_unknown": None,
+                "repo_security_advisories_visible": False,
+                "repo_security_advisories_total": None,
+                "repo_security_advisories_published_30d": None,
+                "repo_security_advisories_critical": None,
+                "repo_security_advisories_high": None,
+                "repo_security_advisories_medium": None,
+                "repo_security_advisories_low": None,
+                "repo_security_advisories_unknown": None,
+                "repo_security_advisories_cvss_max": None,
+                "repo_security_advisories_cvss_avg": None,
+            }
+        )
+        row.update(dependabot_metrics)
+        row.update(code_scan_metrics)
+        row.update(repo_adv_metrics)
         rows.append(row)
     return rows
 
@@ -256,6 +463,29 @@ def write_csv(rows: list[dict[str, Any]], out_path: str) -> None:
         "scorecard_token_permissions",
         "scorecard_dangerous_workflow",
         "scorecard_maintained",
+        "dependabot_alerts_visible",
+        "dependabot_open_alerts",
+        "dependabot_open_alerts_critical",
+        "dependabot_open_alerts_high",
+        "dependabot_open_alerts_medium",
+        "dependabot_open_alerts_low",
+        "dependabot_open_alerts_unknown",
+        "code_scanning_alerts_visible",
+        "code_scanning_open_alerts",
+        "code_scanning_open_alerts_error",
+        "code_scanning_open_alerts_warning",
+        "code_scanning_open_alerts_note",
+        "code_scanning_open_alerts_unknown",
+        "repo_security_advisories_visible",
+        "repo_security_advisories_total",
+        "repo_security_advisories_published_30d",
+        "repo_security_advisories_critical",
+        "repo_security_advisories_high",
+        "repo_security_advisories_medium",
+        "repo_security_advisories_low",
+        "repo_security_advisories_unknown",
+        "repo_security_advisories_cvss_max",
+        "repo_security_advisories_cvss_avg",
     ]
     with out.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -295,6 +525,11 @@ def main() -> None:
         action="store_true",
         help="Skip OpenSSF Scorecard API enrichment fields.",
     )
+    parser.add_argument(
+        "--include-alerts",
+        action="store_true",
+        help="Include Dependabot and code-scanning alert metrics (best-effort).",
+    )
     args = parser.parse_args()
     has_token = bool(os.getenv("GITHUB_TOKEN"))
     if not has_token and args.max_repos > 10:
@@ -312,7 +547,12 @@ def main() -> None:
         max_repos=args.max_repos,
         include_archived=args.include_archived,
     )
-    rows = collect_repo_features(session, repos, include_scorecard=not args.skip_scorecard)
+    rows = collect_repo_features(
+        session,
+        repos,
+        include_scorecard=not args.skip_scorecard,
+        include_alerts=args.include_alerts,
+    )
     write_csv(rows, args.out)
     print(f"Wrote {len(rows)} rows to {args.out}")
 

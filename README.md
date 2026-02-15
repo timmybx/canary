@@ -281,6 +281,15 @@ Skip Scorecard API enrichment (faster, fewer external calls):
 python -m canary.datasets.github_repo_features --skip-scorecard
 ```
 
+Include Dependabot/code-scanning alert metrics (best-effort):
+
+```bash
+python -m canary.datasets.github_repo_features --include-alerts
+```
+
+For alert endpoints, your token may need additional read permissions depending on repo/org policy.
+If unavailable, alert fields are emitted as `null` and `*_visible` is `false`.
+
 ### 3) Output
 
 - `data/processed/github_repo_features.csv`
@@ -293,6 +302,12 @@ python -m canary.datasets.github_repo_features --skip-scorecard
   - OpenSSF posture: `scorecard_overall`, `scorecard_branch_protection`,
     `scorecard_pinned_dependencies`, `scorecard_token_permissions`,
     `scorecard_dangerous_workflow`, `scorecard_maintained`
+  - alert posture (when visible): `dependabot_open_alerts*`,
+    `code_scanning_open_alerts*` with visibility flags
+  - repository advisory posture (when visible): `repo_security_advisories_total`,
+    severity bucket counts, `repo_security_advisories_published_30d`,
+    and CVSS summary fields (`repo_security_advisories_cvss_max`,
+    `repo_security_advisories_cvss_avg`)
 
 ### Feature Reference (What + Why)
 
