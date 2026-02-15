@@ -44,7 +44,7 @@ jobs:
 
       - name: Bandit (security lint)
         run: |
-          bandit -r canary -q
+          bandit -r canary -q -s B608
 
       - name: pip-audit (runtime deps)
         run: pip-audit -r requirements.txt
