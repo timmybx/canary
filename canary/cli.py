@@ -8,6 +8,7 @@ import time
 from collections.abc import Iterable
 from pathlib import Path
 
+from canary.build.advisories_events import build_advisories_events
 from canary.collectors.jenkins_advisories import collect_advisories_real, collect_advisories_sample
 from canary.collectors.plugin_snapshot import collect_plugin_snapshot  # NEW
 from canary.collectors.plugins_registry import (
@@ -354,6 +355,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fetch live data from plugins.jenkins.io (network)",
     )
     registry.set_defaults(func=_cmd_collect_registry)
+
+    # NEW: build commands
+    build = sub.add_parser("build", help="Build normalized/derived datasets")
+    build_sub = build.add_subparsers(dest="build_cmd", required=True)
+
+    adv_events = build_sub.add_parser(
+        "advisories-events",
+        help="Normalize raw advisories into a single deduplicated events JSONL",
+    )
+    adv_events.add_argument(
+        "--data-raw",
+        default="data/raw",
+        help="Raw data root (expects advisories/*.jsonl beneath this)",
+    )
+    adv_events.add_argument(
+        "--out",
+        default="data/processed/events/advisories.jsonl",
+        help="Output JSONL path (default: data/processed/events/advisories.jsonl)",
+    )
+
+    def _cmd_build_advisories_events(args: argparse.Namespace) -> int:
+        records = build_advisories_events(data_raw_dir=args.data_raw, out_path=args.out)
+        print(f"Wrote {len(records)} records to {args.out}")
+        return 0
+
+    adv_events.set_defaults(func=_cmd_build_advisories_events)
 
     score = sub.add_parser("score", help="Score a component/plugin")
     score.add_argument("plugin", help="Plugin short name (e.g. workflow-cps)")

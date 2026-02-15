@@ -5,13 +5,17 @@ __pycache__/
 .ruff_cache/
 .venv/
 dist/
-build/
 *.egg-info/
 .DS_Store
 .env
 
 # Data outputs (keep dirs via .gitkeep)
-data/raw/**
+data/raw/advisories/**
+data/raw/github/**
+data/raw/plugins/**
+data/raw/registry/**
+data/processed/events/**
+data/processed/features/**
 data/processed/**
 data/cache/**
 
