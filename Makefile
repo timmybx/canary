@@ -39,6 +39,9 @@ demo:
 registry:
 	docker compose run --rm canary canary collect registry --real
 
+enrich:
+	docker compose run --rm canary canary collect enrich --real --max-plugins 25
+
 gharchive-sample:
 	python -m canary.datasets.gharchive $(ARGS)
 

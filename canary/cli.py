@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
+from collections.abc import Iterable
 from pathlib import Path
 
 from canary.collectors.jenkins_advisories import collect_advisories_real, collect_advisories_sample
@@ -13,6 +15,116 @@ from canary.collectors.plugins_registry import (
     collect_plugins_registry_sample,
 )
 from canary.scoring.baseline import score_plugin_baseline
+
+
+def _iter_registry_plugin_ids(registry_path: Path) -> Iterable[str]:
+    with registry_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            pid = (rec.get("plugin_id") or "").strip()
+            if pid:
+                yield pid
+
+
+def _nonempty(path: Path) -> bool:
+    try:
+        return path.exists() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _cmd_collect_enrich(args: argparse.Namespace) -> int:
+    registry_path = Path(args.registry)
+
+    if not registry_path.exists():
+        raise SystemExit(f"ERROR: registry file not found: {registry_path}")
+
+    # Output roots (kept explicit so enrich always writes to standard locations)
+    data_raw = Path(args.data_dir)
+    plugins_dir = data_raw / "plugins"
+    advisories_dir = data_raw / "advisories"
+
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    advisories_dir.mkdir(parents=True, exist_ok=True)
+
+    only = args.only
+    do_snapshot = (only is None) or (only == "snapshot")
+    do_advisories = (only is None) or (only == "advisories")
+
+    max_plugins = int(args.max_plugins) if args.max_plugins is not None else None
+    sleep_s = float(args.sleep)
+
+    processed = 0
+    snap_written = 0
+    adv_written = 0
+    snap_skipped = 0
+    adv_skipped = 0
+    errors = 0
+
+    for plugin_id in _iter_registry_plugin_ids(registry_path):
+        processed += 1
+        if max_plugins is not None and processed > max_plugins:
+            break
+
+        try:
+            # 1) Snapshot
+            snapshot_path = plugins_dir / f"{plugin_id}.snapshot.json"
+            if do_snapshot:
+                if _nonempty(snapshot_path):
+                    snap_skipped += 1
+                else:
+                    snapshot = collect_plugin_snapshot(
+                        plugin_id=plugin_id,
+                        repo_url=None,
+                        real=args.real,
+                    )
+                    snapshot_path.write_text(
+                        json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8",
+                    )
+                    snap_written += 1
+
+            # 2) Advisories (requires snapshot on disk when using --real)
+            advisories_path = advisories_dir / f"{plugin_id}.advisories.real.jsonl"
+            if do_advisories:
+                if _nonempty(advisories_path):
+                    adv_skipped += 1
+                else:
+                    if not args.real:
+                        raise SystemExit(
+                            "ERROR: enrich advisories currently requires --real "
+                            "(it fetches live advisory pages)"
+                        )
+
+                    # collect_advisories_real reads the snapshot
+                    # from data_dir/plugins/<id>.snapshot.json
+                    records = collect_advisories_real(plugin_id=plugin_id, data_dir=str(data_raw))
+                    with advisories_path.open("w", encoding="utf-8") as f:
+                        for rec in records:
+                            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    adv_written += 1
+
+        except Exception as e:
+            errors += 1
+            print(f"[ERROR] {plugin_id}: {e}")
+
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+
+    print("Enrich summary")
+    print(f"  Plugins processed:   {processed}")
+    if do_snapshot:
+        print(f"  Snapshots written:   {snap_written}")
+        print(f"  Snapshots skipped:   {snap_skipped}")
+    if do_advisories:
+        print(f"  Advisories written:  {adv_written}")
+        print(f"  Advisories skipped:  {adv_skipped}")
+    print(f"  Errors:              {errors}")
+
+    return 0 if errors == 0 else 2
 
 
 def _cmd_collect_advisories(args: argparse.Namespace) -> int:
@@ -139,6 +251,44 @@ def build_parser() -> argparse.ArgumentParser:
         "--real", action="store_true", help="Fetch live data from Jenkins (network)"
     )
     advisories.set_defaults(func=_cmd_collect_advisories)
+
+    # NEW: collect enrich (batch runner from registry)
+    enrich = collect_sub.add_parser(
+        "enrich",
+        help="Batch-enrich plugins from the registry (snapshot + advisories) with resume",
+    )
+    enrich.add_argument(
+        "--registry",
+        default="data/raw/registry/plugins.jsonl",
+        help="Path to registry JSONL (default: data/raw/registry/plugins.jsonl)",
+    )
+    enrich.add_argument(
+        "--data-dir",
+        default="data/raw",
+        help="Raw data root (writes plugins/ and advisories/ beneath this)",
+    )
+    enrich.add_argument(
+        "--only",
+        choices=["snapshot", "advisories"],
+        default=None,
+        help="Run only one stage (default: run all stages)",
+    )
+    enrich.add_argument(
+        "--max-plugins",
+        default=None,
+        help="Optional cap for quick tests (e.g., 50)",
+    )
+    enrich.add_argument(
+        "--sleep",
+        default=0.15,
+        help="Sleep seconds between plugins (default: 0.15)",
+    )
+    enrich.add_argument(
+        "--real",
+        action="store_true",
+        help="Fetch live data (required for advisories; recommended overall)",
+    )
+    enrich.set_defaults(func=_cmd_collect_enrich)
 
     # NEW: collect plugin
     plugin = collect_sub.add_parser("plugin", help="Collect a plugin snapshot (pilot)")
