@@ -10,11 +10,16 @@ build/
 .DS_Store
 .env
 
-# Generated datasets / collection outputs
-data/raw/**
-data/processed/**
-data/cache/**
 
 # Keep folder structure + docs/samples
 !data/**/.gitkeep
+
+# --- Keep directory structure in git via .gitkeep ---
+!data/raw/**/.gitkeep
+!data/processed/**/.gitkeep
+!data/cache/**/.gitkeep
+
+# (Optional) Keep docs/samples in data/
 !data/**/README.md
+!data/raw/registry/*.sample.*
+
