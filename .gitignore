@@ -5,21 +5,16 @@ __pycache__/
 .ruff_cache/
 .venv/
 dist/
+build/
 *.egg-info/
 .DS_Store
 .env
 
-# Data outputs (keep dirs via .gitkeep)
-data/raw/advisories/**
-data/raw/github/**
-data/raw/plugins/**
-data/raw/registry/**
-data/processed/events/**
-data/processed/features/**
+# Generated datasets / collection outputs
+data/raw/**
 data/processed/**
 data/cache/**
 
-!data/raw/**/.gitkeep
-!data/processed/**/.gitkeep
-!data/cache/**/.gitkeep
-
+# Keep folder structure + docs/samples
+!data/**/.gitkeep
+!data/**/README.md

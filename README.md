@@ -1,4 +1,4 @@
-﻿[![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/ci.yml)
+[![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/timmybx/canary/badge)](https://scorecard.dev/viewer/?uri=github.com/timmybx/canary)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Ruff](https://img.shields.io/badge/lint-ruff-2ea44f?logo=ruff)
