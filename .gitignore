@@ -10,6 +10,10 @@ build/
 .DS_Store
 .env
 
+# --- Generated data outputs (ignore by default) ---
+data/raw/**
+data/processed/**
+data/cache/**
 
 # Keep folder structure + docs/samples
 !data/**/.gitkeep
