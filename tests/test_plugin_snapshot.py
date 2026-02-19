@@ -26,6 +26,14 @@ def test_collect_plugin_snapshot_real_uses_api_fixture(monkeypatch):
 
     monkeypatch.setattr("canary.collectors.plugin_snapshot._fetch_plugin_api_json", fake_fetch)
 
+    # Avoid any real GitHub network calls during this unit test.
+    # The snapshot collector opportunistically enriches GitHub signals when
+    # repo_url points at github.com, which can be rate-limited in CI.
+    monkeypatch.setattr(
+        "canary.collectors.github_repo.parse_github_owner_repo",
+        lambda _url: None,
+    )
+
     snap = collect_plugin_snapshot(plugin_id="cucumber-reports", real=True)
 
     assert snap["plugin_id"] == "cucumber-reports"
