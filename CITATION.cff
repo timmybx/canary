@@ -1,17 +1,27 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
 cff-version: 1.2.0
-title: "CANARY: Component Anomaly & Near-term Advisory Risk Yardstick"
-message: "If you use this software, please cite it."
+title: >-
+  CANARY: Component Anomaly & Near-term Advisory Risk
+  Yardstick
+message: 'If you use this software, please cite it.'
+type: software
 authors:
   - family-names: Brennan
     given-names: Timothy
-    affiliation: "George Washington University"
-license: Apache-2.0
-url: "https://github.com/timmybx/canary"
-repository-code: "https://github.com/timmybx/canary"
-version: "0.1.2"
-date-released: "2026-02-05"
+    affiliation: George Washington University
+    orcid: 'https://orcid.org/0009-0001-6376-410X'
+repository-code: 'https://github.com/timmybx/canary'
+abstract: >-
+  CANARY is a research prototype that collects Jenkins
+  security advisories and produces an explainable baseline
+  risk score for plugins. 
 keywords:
-  - "software supply chain"
-  - "dependency risk"
-  - "Jenkins"
-  - "vulnerability advisories"
+  - software supply chain
+  - dependency risk
+  - Jenkins
+  - vulnerability advisories
+license: Apache-2.0
+version: 0.1.2
+date-released: '2026-02-05'
