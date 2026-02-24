@@ -15,6 +15,9 @@ from urllib.parse import urlparse, urlunparse
 _ALLOWED_NETLOCS = {"jenkins.io", "www.jenkins.io"}
 
 
+_SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
 @dataclass(frozen=True)
 class AdvisoryRecord:
     source: str
@@ -80,6 +83,20 @@ def _canonicalize_jenkins_url(url: str | None) -> str | None:
     return urlunparse(normalized)
 
 
+def _strip_query_fragment(url: str) -> str:
+    """Return URL without query/fragment (keeps scheme/host/path)."""
+    try:
+        p = urlparse(url)
+    except ValueError:
+        return url
+    return urlunparse(p._replace(query="", fragment=""))
+
+
+def _normalize_advisory_url(url: str) -> str:
+    """Canonicalize Jenkins advisory URL and drop query/fragment for stable matching."""
+    return _strip_query_fragment(_canonicalize_jenkins_url(url) or url)
+
+
 def _fetch_text(url: str, *, timeout_s: float = 15.0) -> str:
     url = _canonicalize_jenkins_url(url) or url
     _allowlisted_url(url)
@@ -106,6 +123,7 @@ def _extract_title(html: str) -> str | None:
 
 def _date_from_advisory_url(url: str) -> date | None:
     # matches .../security/advisory/YYYY-MM-DD/
+    url = _strip_query_fragment(url)
     m = re.search(r"/security/advisory/(\d{4}-\d{2}-\d{2})/?$", url)
     if not m:
         return None
@@ -153,10 +171,33 @@ def merge_advisory_records(records: Iterable[dict[str, Any]]) -> list[dict[str, 
     for r_in in records:
         r = dict(r_in)  # copy
         if r.get("source") == "jenkins" and r.get("type") == "advisory":
-            r["url"] = _canonicalize_jenkins_url(r.get("url"))
+            if r.get("url"):
+                r["url"] = _normalize_advisory_url(str(r.get("url")))
+
+            # If advisory_id/published_date are missing, derive from URL when possible.
+            derived = _date_from_advisory_url(str(r.get("url") or ""))
+            if derived:
+                if not r.get("advisory_id"):
+                    r["advisory_id"] = derived.isoformat()
+                if not r.get("published_date"):
+                    r["published_date"] = derived.isoformat()
 
         # normalize list fields early
         r["security_warning_ids"] = sorted(set(r.get("security_warning_ids") or []))
+
+        # normalize vulnerabilities
+        vulns = r.get("vulnerabilities")
+        if isinstance(vulns, list):
+            norm_v: list[dict[str, Any]] = []
+            for v in vulns:
+                if not isinstance(v, dict):
+                    continue
+                sid = v.get("security_warning_id")
+                if sid:
+                    vv = dict(v)
+                    vv["security_warning_id"] = str(sid)
+                    norm_v.append(vv)
+            r["vulnerabilities"] = norm_v
 
         k = key_for(r)
         counts[k] = counts.get(k, 0) + 1
@@ -198,6 +239,42 @@ def merge_advisory_records(records: Iterable[dict[str, Any]]) -> list[dict[str, 
         if not base.get("title") and r.get("title"):
             base["title"] = r.get("title")
 
+        # Merge vulnerabilities (union by security_warning_id)
+        base_vulns = {
+            v.get("security_warning_id"): v
+            for v in (base.get("vulnerabilities") or [])
+            if isinstance(v, dict)
+        }
+        new_vulns = {
+            v.get("security_warning_id"): v
+            for v in (r.get("vulnerabilities") or [])
+            if isinstance(v, dict)
+        }
+        for sid, v in new_vulns.items():
+            if not sid:
+                continue
+            if sid not in base_vulns:
+                base_vulns[sid] = v
+                continue
+            # prefer non-null fields from the new record
+            b = dict(base_vulns[sid])
+            for field_name in ["severity_label", "url_fragment"]:
+                if not b.get(field_name) and v.get(field_name):
+                    b[field_name] = v.get(field_name)
+            # cvss object merge
+            if isinstance(v.get("cvss"), dict):
+                bcv = dict(b.get("cvss") or {}) if isinstance(b.get("cvss"), dict) else {}
+                for kk, vv in v["cvss"].items():
+                    if bcv.get(kk) in (None, "") and vv not in (None, ""):
+                        bcv[kk] = vv
+                b["cvss"] = bcv
+            base_vulns[sid] = b
+        if base_vulns:
+            sorted_vuln_ids = sorted(
+                sid for sid in base_vulns.keys() if isinstance(sid, str) and sid
+            )
+            base["vulnerabilities"] = [base_vulns[sid] for sid in sorted_vuln_ids]
+
         merged[k] = base
 
     out: list[dict[str, Any]] = []
@@ -207,6 +284,146 @@ def merge_advisory_records(records: Iterable[dict[str, Any]]) -> list[dict[str, 
             obj["_merged_from_count"] = c
         out.append(obj)
     return out
+
+
+def _extract_severity_labels(html: str) -> dict[str, str]:
+    """Best-effort parse of Jenkins advisory severity lines."""
+    out: dict[str, str] = {}
+    for m in re.finditer(
+        r"\b(SECURITY-\d+)\b\s+is\s+considered\s+\b(low|medium|high|critical)\b",
+        html,
+        flags=re.IGNORECASE,
+    ):
+        out[m.group(1).upper()] = m.group(2).lower()
+    return out
+
+
+def _extract_security_sections(html: str) -> dict[str, str]:
+    """Split HTML into SECURITY-<id> sections using a loose heuristic."""
+    matches = list(re.finditer(r"\bSECURITY-\d+\b", html))
+    if not matches:
+        return {}
+    out: dict[str, str] = {}
+    for i, m in enumerate(matches):
+        sid = m.group(0).upper()
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(html)
+        chunk = html[start:end]
+        if sid not in out or len(chunk) > len(out[sid]):
+            out[sid] = chunk
+    return out
+
+
+def _parse_cvss_vector_from_url(url: str) -> tuple[str | None, str | None]:
+    """Extract (version, vector) from a FIRST CVSS calculator URL."""
+    try:
+        p = urlparse(url)
+    except ValueError:
+        return (None, None)
+    frag = p.fragment or ""
+    if frag.startswith("CVSS:"):
+        parts = frag.split("/", 1)
+        vpart = parts[0]  # CVSS:3.0
+        version = vpart.split(":", 1)[1] if ":" in vpart else None
+        return (version, frag)
+    return (None, None)
+
+
+def _cvss3_round_up_1_decimal(x: float) -> float:
+    # CVSS v3 uses "round up" to one decimal place.
+    import math
+
+    return math.ceil(x * 10.0 + 1e-10) / 10.0
+
+
+def _cvss3_base_score(vector: str) -> float | None:
+    """Compute CVSS v3.x base score from a vector string."""
+    if not vector.startswith("CVSS:3"):
+        return None
+
+    metrics: dict[str, str] = {}
+    try:
+        parts = vector.split("/")
+        for p in parts[1:]:
+            if ":" not in p:
+                continue
+            k, v = p.split(":", 1)
+            metrics[k] = v
+    except Exception:
+        return None
+
+    av_w = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}
+    ac_w = {"L": 0.77, "H": 0.44}
+    ui_w = {"N": 0.85, "R": 0.62}
+    s = metrics.get("S")
+    cia_w = {"N": 0.0, "L": 0.22, "H": 0.56}
+    pr_u = {"N": 0.85, "L": 0.62, "H": 0.27}
+    pr_c = {"N": 0.85, "L": 0.68, "H": 0.5}
+
+    try:
+        av = av_w[metrics["AV"]]
+        ac = ac_w[metrics["AC"]]
+        ui = ui_w[metrics["UI"]]
+        pr = (pr_c if s == "C" else pr_u)[metrics["PR"]]
+        c = cia_w[metrics["C"]]
+        i = cia_w[metrics["I"]]
+        a = cia_w[metrics["A"]]
+    except KeyError:
+        return None
+
+    exploitability = 8.22 * av * ac * pr * ui
+    isc_base = 1.0 - (1.0 - c) * (1.0 - i) * (1.0 - a)
+    if s == "C":
+        impact = 7.52 * (isc_base - 0.029) - 3.25 * (isc_base - 0.02) ** 15
+    else:
+        impact = 6.42 * isc_base
+
+    if impact <= 0:
+        return 0.0
+
+    if s == "C":
+        base = _cvss3_round_up_1_decimal(min(1.08 * (impact + exploitability), 10.0))
+    else:
+        base = _cvss3_round_up_1_decimal(min(impact + exploitability, 10.0))
+
+    return float(f"{base:.1f}")
+
+
+def _extract_cvss_by_security_id(html: str) -> dict[str, dict[str, Any]]:
+    """Best-effort mapping of SECURITY-id -> CVSS metadata."""
+    out: dict[str, dict[str, Any]] = {}
+    sections = _extract_security_sections(html)
+    for sid, chunk in sections.items():
+        m = re.search(
+            r"https?://www\.first\.org/cvss/calculator/[^\"'\s>]+",
+            chunk,
+            flags=re.IGNORECASE,
+        )
+        if not m:
+            continue
+        cvss_url = m.group(0)
+        version, vector = _parse_cvss_vector_from_url(cvss_url)
+        if not vector:
+            continue
+        base = _cvss3_base_score(vector)
+        out[sid] = {
+            "version": version,
+            "vector": vector,
+            "base_score": base,
+            "url": cvss_url,
+        }
+    return out
+
+
+def _max_severity_label(labels: Iterable[str]) -> str | None:
+    best = None
+    best_v = -1
+    for lab in labels:
+        v = _SEVERITY_ORDER.get(str(lab).lower(), -1)
+        if v > best_v:
+            best_v = v
+            best = str(lab).lower()
+    return best
 
 
 def collect_advisories_sample(plugin_id: str | None = None) -> list[dict[str, Any]]:
@@ -260,28 +477,32 @@ def collect_advisories_real(
     for w in api.get("securityWarnings") or []:
         u = (w or {}).get("url")
         if u:
-            urls.add(_canonicalize_jenkins_url(str(u)) or str(u).strip())
+            urls.add(_normalize_advisory_url(str(u).strip()))
 
     # 2) any curated URLs you already store
     for u in snapshot.get("security_advisory_urls") or []:
         if u:
-            urls.add(_canonicalize_jenkins_url(str(u)) or str(u).strip())
+            urls.add(_normalize_advisory_url(str(u).strip()))
 
     # Canonicalize once so matching below is consistent
     warnings = api.get("securityWarnings") or []
     warnings_by_url: dict[str, list[dict[str, Any]]] = {}
     for w in warnings:
-        u = _canonicalize_jenkins_url((w or {}).get("url"))
+        u_raw = (w or {}).get("url")
+        u = _normalize_advisory_url(str(u_raw)) if u_raw else None
         if not u:
             continue
         warnings_by_url.setdefault(u, []).append(w)
 
     records: list[dict[str, Any]] = []
     for url in sorted(urls):
-        url = _canonicalize_jenkins_url(url) or url
+        url = _normalize_advisory_url(url)
 
         html = _fetch_text(url, timeout_s=timeout_s)
         title = _extract_title(html)
+
+        severity_labels = _extract_severity_labels(html)
+        cvss_by_sid = _extract_cvss_by_security_id(html)
 
         published = _date_from_advisory_url(url)
         advisory_id = published.isoformat() if published else None
@@ -296,6 +517,32 @@ def collect_advisories_real(
 
         active_security_warning = any((w or {}).get("active") is True for w in related_warnings)
 
+        vulnerabilities: list[dict[str, Any]] = []
+        for wid in sorted(set(security_warning_ids)):
+            v: dict[str, Any] = {
+                "security_warning_id": wid,
+                "url_fragment": f"{url}#{wid}",
+                "severity_label": severity_labels.get(wid),
+                "severity_source": "jenkins_advisory",
+            }
+            if wid in cvss_by_sid:
+                v["cvss"] = cvss_by_sid[wid]
+            vulnerabilities.append(v)
+
+        max_cvss = None
+        for v in vulnerabilities:
+            cv = v.get("cvss")
+            if isinstance(cv, dict):
+                sc = cv.get("base_score")
+                if isinstance(sc, (int, float)):
+                    max_cvss = float(sc) if max_cvss is None else max(max_cvss, float(sc))
+        severity_labels_for_max: list[str] = []
+        for v in vulnerabilities:
+            label = v.get("severity_label")
+            if isinstance(label, str) and label:
+                severity_labels_for_max.append(label)
+        max_sev = _max_severity_label(severity_labels_for_max)
+
         records.append(
             {
                 "source": "jenkins",
@@ -307,6 +554,11 @@ def collect_advisories_real(
                 "title": title,
                 "security_warning_ids": security_warning_ids,
                 "active_security_warning": active_security_warning,
+                "vulnerabilities": vulnerabilities,
+                "severity_summary": {
+                    "max_severity_label": max_sev,
+                    "max_cvss_base_score": max_cvss,
+                },
             }
         )
 
