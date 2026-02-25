@@ -22,9 +22,11 @@ Output record shape (JSONL recommended):
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
+from http.client import IncompleteRead
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
@@ -40,22 +42,35 @@ def _fetch_json(url: str, *, timeout_s: float = 30.0) -> Any:
         url,
         headers={
             "Accept": "application/json",
+            # Avoid compressed responses; reduces the chance of partial reads on flaky connections.
+            "Accept-Encoding": "identity",
             "User-Agent": "canary/0.1 (plugins-registry)",
         },
         method="GET",
     )
 
-    try:
-        # URL is allowlisted above (prevents file:// and custom schemes).
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # nosec B310
-            data = resp.read().decode("utf-8")
-            return json.loads(data)
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"Registry request failed ({e.code}) for {url}") from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Registry request failed (network) for {url}") from e
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"Registry response was not valid JSON for {url}") from e
+    # The Jenkins plugins API occasionally closes connections mid-transfer.
+    # Retry a few times with backoff to make full-registry pulls reliable.
+    last_err: Exception | None = None
+    for attempt in range(1, 6):
+        try:
+            # URL is allowlisted above (prevents file:// and custom schemes).
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # nosec B310
+                data = resp.read().decode("utf-8")
+                return json.loads(data)
+        except urllib.error.HTTPError as e:
+            # 4xx/5xx are unlikely to succeed on retry; fail fast.
+            raise RuntimeError(f"Registry request failed ({e.code}) for {url}") from e
+        except (urllib.error.URLError, IncompleteRead, TimeoutError) as e:
+            last_err = e
+        except json.JSONDecodeError as e:
+            # Sometimes a truncated read yields invalid JSON; retry a couple times.
+            last_err = e
+
+        # Backoff (attempt 1 -> 0.5s, then 1s, 2s, 4s, ...)
+        time.sleep(0.5 * (2 ** (attempt - 1)))
+
+    raise RuntimeError(f"Registry request failed after retries for {url}") from last_err
 
 
 def _extract_plugin_id(plugin_obj: dict[str, Any]) -> str | None:

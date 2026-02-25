@@ -167,9 +167,10 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
     errors = 0
 
     for plugin_id in _iter_registry_plugin_ids(registry_path):
-        processed += 1
-        if max_plugins is not None and processed > max_plugins:
+        if max_plugins is not None and processed >= max_plugins:
             break
+
+        processed += 1
 
         try:
             snapshot_path = plugins_dir / f"{plugin_id}.snapshot.json"
