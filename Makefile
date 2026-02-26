@@ -43,48 +43,25 @@ github-features:
 	python -m canary.datasets.github_repo_features $(ARGS)
 
 
-.PHONY: metrics metrics-severity metrics-plugin-severity clean help
+.PHONY: metrics metrics-top clean help
 
 # Quick metrics to summarize severity distribution in the collected real advisories.
 # Counts are based on CVSS v3.x base_score buckets (None/Low/Medium/High/Critical).
-metrics: metrics-severity metrics-plugin-severity
-
-# Distribution across *vulnerability instances* (each advisory may contain multiple vulnerabilities).
-metrics-severity:
-	@ls data/raw/advisories/*.advisories.real.jsonl >/dev/null 2>&1 || (echo "No files found: data/raw/advisories/*.advisories.real.jsonl" && echo "Run: docker compose run --rm canary canary collect advisories --real --out-dir data/raw/advisories" && exit 1)
+metrics:
 	@echo "Vulnerability CVSS severity counts (instances):"
-	@cat data/raw/advisories/*.advisories.real.jsonl \
-	| jq -r '.vulnerabilities[]? \
-		| select(.cvss?.base_score? != null) \
-		| (.cvss.base_score) as $$s \
-		| if $$s == 0 then "None" \
-		  elif $$s < 4 then "Low" \
-		  elif $$s < 7 then "Medium" \
-		  elif $$s < 9 then "High" \
-		  else "Critical" end' \
-	| sort | uniq -c
-
-# Distribution across *unique plugins* by their maximum CVSS base score observed in advisories.
-metrics-plugin-severity:
-	@ls data/raw/advisories/*.advisories.real.jsonl >/dev/null 2>&1 || (echo "No files found: data/raw/advisories/*.advisories.real.jsonl" && echo "Run: docker compose run --rm canary canary collect advisories --real --out-dir data/raw/advisories" && exit 1)
+	@cat data/raw/advisories/*.advisories.real.jsonl | jq -r '.vulnerabilities[]? | select(.cvss?.base_score? != null) | (.cvss.base_score) as $$s | if $$s == 0 then "None" elif $$s < 4 then "Low" elif $$s < 7 then "Medium" elif $$s < 9 then "High" else "Critical" end' | sort | uniq -c
 	@echo ""
 	@echo "Unique plugins with any CVSS score in advisories:"
-	@cat data/raw/advisories/*.advisories.real.jsonl \
-	| jq -r 'select(.vulnerabilities[]? | .cvss?.base_score? != null) | .plugin_id' \
-	| sort -u | wc -l
+	@cat data/raw/advisories/*.advisories.real.jsonl | jq -r 'select(.vulnerabilities[]? | .cvss?.base_score? != null) | .plugin_id' | sort -u | wc -l
 	@echo ""
 	@echo "Unique plugin severity (max CVSS per plugin):"
-	@cat data/raw/advisories/*.advisories.real.jsonl \
-	| jq -r '.plugin_id as $$p \
-		| ([.vulnerabilities[]? | .cvss?.base_score?] | map(select(. != null)) | max) as $$m \
-		| select($$m != null) \
-		| (if $$m == 0 then "None" \
-		   elif $$m < 4 then "Low" \
-		   elif $$m < 7 then "Medium" \
-		   elif $$m < 9 then "High" \
-		   else "Critical" end) as $$label \
-		| $$label' \
-	| sort | uniq -c
+	@cat data/raw/advisories/*.advisories.real.jsonl | jq -r '.plugin_id as $$p | ([.vulnerabilities[]? | .cvss?.base_score?] | map(select(. != null)) | max) as $$m | select($$m != null) | (if $$m == 0 then "None" elif $$m < 4 then "Low" elif $$m < 7 then "Medium" elif $$m < 9 then "High" else "Critical" end) as $$label | $$label' | sort | uniq -c
+
+metrics-top:
+	@echo "Top 10 plugins by max CVSS base score:"
+	@cat data/raw/advisories/*.advisories.real.jsonl | jq -r '.plugin_id as $$p | ([.vulnerabilities[]? | .cvss?.base_score?] | map(select(.!=null)) | max) as $$m | select($$m != null) | [($$m|tostring), $$p] | @tsv' \
+	| sort -t $$'\t' -k1,1nr \
+	| head -n 10
 
 clean:
 	@rm -rf .pytest_cache .ruff_cache htmlcov .coverage
