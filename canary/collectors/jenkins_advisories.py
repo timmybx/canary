@@ -15,7 +15,32 @@ from urllib.parse import urlparse, urlunparse
 _ALLOWED_NETLOCS = {"jenkins.io", "www.jenkins.io"}
 
 
-_SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+_SEVERITY_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def _cvss_base_score_to_severity_label(score: float | None) -> str | None:
+    """Derive a severity label from a CVSS v3.x base score.
+
+    Jenkins advisories often provide CVSS vectors/scores but not a structured
+    severity label. This mapping follows the CVSS v3.x qualitative severity
+    ratings.
+    """
+    if score is None:
+        return None
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return None
+
+    if s <= 0.0:
+        return "none"
+    if s < 4.0:
+        return "low"
+    if s < 7.0:
+        return "medium"
+    if s < 9.0:
+        return "high"
+    return "critical"
 
 
 @dataclass(frozen=True)
@@ -527,6 +552,18 @@ def collect_advisories_real(
             }
             if wid in cvss_by_sid:
                 v["cvss"] = cvss_by_sid[wid]
+
+            # Jenkins advisories frequently include CVSS but omit a structured
+            # severity label. When missing, derive a label from the CVSS base score.
+            if v.get("severity_label") in (None, ""):
+                cv = v.get("cvss")
+                if isinstance(cv, dict):
+                    sc = cv.get("base_score")
+                    if isinstance(sc, (int, float)):
+                        derived = _cvss_base_score_to_severity_label(float(sc))
+                        if derived:
+                            v["severity_label"] = derived
+                            v["severity_source"] = "cvss_v3_derived"
             vulnerabilities.append(v)
 
         max_cvss = None
