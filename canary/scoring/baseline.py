@@ -66,24 +66,99 @@ def _parse_date(value: str) -> date | None:
         return None
 
 
+def _cvss_base_score_to_label(score: float | int | None) -> str | None:
+    """Map CVSS v3.x base score to a severity label."""
+    if score is None:
+        return None
+    try:
+        s = float(score)
+    except Exception:
+        return None
+    if s == 0.0:
+        return "None"
+    if s < 4.0:
+        return "Low"
+    if s < 7.0:
+        return "Medium"
+    if s < 9.0:
+        return "High"
+    return "Critical"
+
+
+_SEVERITY_BONUS = {
+    "None": 0,
+    "Low": 1,
+    "Medium": 3,
+    "High": 6,
+    "Critical": 10,
+}
+
+
+def _advisory_record_max_cvss(rec: dict[str, Any]) -> float | None:
+    """Return the maximum CVSS base score found in a single advisory record."""
+    max_score: float | None = None
+    vulns = rec.get("vulnerabilities") or []
+    if isinstance(vulns, list):
+        for v in vulns:
+            if not isinstance(v, dict):
+                continue
+            cvss = v.get("cvss") or {}
+            if not isinstance(cvss, dict):
+                continue
+            bs = cvss.get("base_score")
+            if not isinstance(bs, (int, float, str)):
+                continue
+            try:
+                s = float(bs)
+            except ValueError:
+                continue
+            if max_score is None or s > max_score:
+                max_score = s
+    # fall back to summary if present
+    if max_score is None:
+        summ = rec.get("severity_summary") or {}
+        if isinstance(summ, dict):
+            bs = summ.get("max_cvss_base_score")
+            if isinstance(bs, (int, float, str)):
+                try:
+                    max_score = float(bs)
+                except ValueError:
+                    max_score = None
+    return max_score
+
+
 def _load_advisories_for_plugin(
     plugin_id: str,
     data_dir: Path,
+    *,
+    prefer_real: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Load advisories JSONL for a plugin.
 
-    We look for the file you’re currently writing:
+    We look for these per-plugin files (first match wins):
+      data/raw/advisories/<plugin>.advisories.real.jsonl
       data/raw/advisories/<plugin>.advisories.sample.jsonl
+      data/raw/advisories/<plugin>.advisories.jsonl (back-compat)
 
-    Later, when you switch to real collection, you can also write:
-      <plugin>.advisories.jsonl
-    and this loader will still find it.
+    Use prefer_real=True to prefer the *.real.jsonl file when both exist.
     """
     candidates = [
-        data_dir / "advisories" / f"{plugin_id}.advisories.jsonl",
+        # Prefer exact suffix matches first so unit tests can use sample while
+        # real pipelines can opt into real data explicitly.
+        data_dir / "advisories" / f"{plugin_id}.advisories.real.jsonl",
         data_dir / "advisories" / f"{plugin_id}.advisories.sample.jsonl",
+        # Back-compat / alternate naming
+        data_dir / "advisories" / f"{plugin_id}.advisories.jsonl",
     ]
+
+    if not prefer_real:
+        # In sample mode, prefer sample over real if both exist.
+        candidates = [
+            data_dir / "advisories" / f"{plugin_id}.advisories.sample.jsonl",
+            data_dir / "advisories" / f"{plugin_id}.advisories.real.jsonl",
+            data_dir / "advisories" / f"{plugin_id}.advisories.jsonl",
+        ]
 
     for path in candidates:
         if path.exists():
@@ -98,7 +173,12 @@ def _load_advisories_for_plugin(
     return []
 
 
-def score_plugin_baseline(plugin: str, *, data_dir: str | Path = "data/raw") -> ScoreResult:
+def score_plugin_baseline(
+    plugin: str,
+    *,
+    data_dir: str | Path = "data/raw",
+    real: bool = False,
+) -> ScoreResult:
     """
     Baseline scoring:
     - Name-keyword heuristics (existing)
@@ -133,56 +213,89 @@ def score_plugin_baseline(plugin: str, *, data_dir: str | Path = "data/raw") -> 
 
     # --- New: advisory-backed signals ---
     plugin_id = name  # for now, plugin arg is the id
-    advisories = _load_advisories_for_plugin(plugin_id, Path(data_dir))
+    advisories = _load_advisories_for_plugin(plugin_id, Path(data_dir), prefer_real=real)
     advisory_count = len(advisories)
     features["advisory_count"] = advisory_count
 
-    latest_date: date | None = None
+    today = datetime.now(tz=UTC).date()
+
+    # Dates + recency buckets
+    advisory_dates: list[date] = []
     for rec in advisories:
         d = _parse_date(str(rec.get("published_date", "")).strip())
-        if d and (latest_date is None or d > latest_date):
-            latest_date = d
+        if d:
+            advisory_dates.append(d)
 
+    latest_date: date | None = max(advisory_dates) if advisory_dates else None
     features["latest_advisory_date"] = latest_date.isoformat() if latest_date else None
 
-    today = datetime.now(tz=UTC).date()
-    days_since_latest: int | None = None
-    if latest_date:
-        days_since_latest = (today - latest_date).days
+    days_since_latest: int | None = (today - latest_date).days if latest_date else None
     features["days_since_latest_advisory"] = days_since_latest
-    features["had_advisory_within_365d"] = (
-        days_since_latest is not None and days_since_latest <= 365
+
+    within_90 = sum(1 for d in advisory_dates if (today - d).days <= 90)
+    within_365 = sum(1 for d in advisory_dates if (today - d).days <= 365)
+    features["advisory_within_90d"] = within_90
+    features["advisory_within_365d"] = within_365
+    features["had_advisory_within_365d"] = within_365 > 0
+
+    # Severity summary across advisories (best observed in the local dataset)
+    max_cvss_overall: float | None = None
+    for rec in advisories:
+        ms = _advisory_record_max_cvss(rec)
+        if ms is not None and (max_cvss_overall is None or ms > max_cvss_overall):
+            max_cvss_overall = ms
+    features["max_cvss_base_score_observed"] = max_cvss_overall
+    features["max_cvss_severity_label_observed"] = (
+        _cvss_base_score_to_label(max_cvss_overall) if max_cvss_overall is not None else None
     )
 
     if advisory_count > 0:
         reasons.append(f"{advisory_count} advisory record(s) found for this plugin.")
 
-        # Recency-weighted advisory risk:
-        # - Old advisories still matter (history), but much less than recent ones.
-        per_advisory_points = 2  # default for "ancient"
-        if days_since_latest is not None:
-            if days_since_latest <= 30:
-                per_advisory_points = 15
-            elif days_since_latest <= 90:
-                per_advisory_points = 12
-            elif days_since_latest <= 365:
-                per_advisory_points = 10
-            else:
-                per_advisory_points = 2
+        # Advisory points are split into:
+        #  1) Base history (old advisories still matter)
+        #  2) Recency bonus (recent advisories matter much more)
+        #  3) Severity bonus (CVSS-based, per advisory)
+        base_points = min(20, advisory_count * 2)  # +2/advisory, capped
+        recency_points = min(40, within_90 * 20 + max(0, within_365 - within_90) * 10)
+        severity_points_raw = 0
+        for rec in advisories:
+            label = _cvss_base_score_to_label(_advisory_record_max_cvss(rec))
+            severity_points_raw += _SEVERITY_BONUS.get(str(label), 0)
+        severity_points = min(30, severity_points_raw)
 
-        advisory_points = min(30, advisory_count * per_advisory_points)
+        advisory_points = base_points + recency_points + severity_points
         score += advisory_points
 
-        reasons.append(
-            f"Advisory risk is weighted by recency (+{advisory_points} point(s); "
-            f"{per_advisory_points}/advisory)."
-        )
+        reasons.append(f"Advisory history: +{base_points} point(s) (2/advisory, capped at 20).")
 
-        if days_since_latest is not None:
-            if days_since_latest <= 365:
-                reasons.append("Recent advisory activity (<= 365 days).")
+        if within_365 > 0:
+            if within_90 > 0:
+                reasons.append(
+                    f"Recent advisories: +{recency_points} point(s) "
+                    f"({within_90} within 90d @20, "
+                    f"{within_365 - within_90} within 365d @10; capped at 40)."
+                )
             else:
-                reasons.append("No advisory activity in the last 365 days.")
+                reasons.append(
+                    f"Recent advisories: +{recency_points} point(s) "
+                    f"({within_365} within 365d @10; capped at 40)."
+                )
+            reasons.append("Recent advisory activity (<= 365 days).")
+        else:
+            reasons.append("No advisory activity in the last 365 days (recency bonus = 0).")
+
+        if severity_points > 0:
+            sev_label = features.get("max_cvss_severity_label_observed")
+            if sev_label:
+                reasons.append(
+                    f"Advisory severity (CVSS): +{severity_points} point(s) "
+                    f"(max observed: {sev_label}, CVSS {max_cvss_overall:.1f}; capped at 30)."
+                )
+            else:
+                reasons.append(
+                    f"Advisory severity (CVSS): +{severity_points} point(s) (capped at 30)."
+                )
     else:
         reasons.append("No advisories found in local dataset (yet).")
 

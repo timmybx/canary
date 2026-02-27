@@ -258,7 +258,7 @@ def _cmd_build_advisories_events(args: argparse.Namespace) -> int:
 
 def _cmd_score(args: argparse.Namespace) -> int:
     plugin = args.plugin.strip()
-    result = score_plugin_baseline(plugin, data_dir=args.data_dir)
+    result = score_plugin_baseline(plugin, data_dir=args.data_dir, real=bool(args.real))
 
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
@@ -398,6 +398,9 @@ def build_parser() -> argparse.ArgumentParser:
     score.add_argument("--json", action="store_true", help="Output JSON instead of text")
     score.add_argument(
         "--data-dir", default="data/raw", help="Directory containing collected datasets"
+    )
+    score.add_argument(
+        "--real", action="store_true", help="Prefer *.advisories.real.jsonl if present"
     )
     score.set_defaults(func=_cmd_score)
 

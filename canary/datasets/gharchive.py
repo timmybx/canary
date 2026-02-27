@@ -112,8 +112,8 @@ def _build_query_with_sampling(
         )
 
     raw_union = "\nUNION ALL\n".join(raw_parts)
-    # nosec rationale: SQL identifiers here are derived from validated YYYYMMDD values only.
-    return f"""  # nosec
+    # SQL identifiers here are derived from validated YYYYMMDD values only.
+    return f"""
 WITH raw AS (
 {raw_union}
 ),

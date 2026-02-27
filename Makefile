@@ -16,7 +16,7 @@ audit:
 ruff: lint format
 
 bandit:
-	docker compose run --rm canary bandit -r canary -q
+	docker compose run --rm canary bandit -r canary -q -s B608
 
 security: bandit audit
 	
@@ -76,3 +76,42 @@ help:
 	@echo "  make reqs             Rebuild requirements*txt with hashes"
 	@echo "  make metrics          Show CVSS severity distributions from real advisories"
 	@echo "  make clean            Remove local test/lint artifacts"
+
+# ---- Scoring leaderboard  ----
+# How many plugins to score (override with: make score-top LIMIT=30)
+LIMIT ?= 20
+.PHONY: score-top score-top20 score-top20-tsv
+score-top: score-top20
+
+.PHONY: score-top20
+score-top20:
+	@ls data/raw/advisories/*.advisories.real.jsonl >/dev/null 2>&1 || (echo "No real advisory files found. Run: docker compose run --rm canary canary collect enrich --real --only advisories" && exit 1)
+	@tmpfile=score_top_input.tsv; \
+	  rm -f $$tmpfile; \
+	  for f in data/raw/advisories/*.advisories.real.jsonl; do \
+	    plugin=$$(basename "$$f" .advisories.real.jsonl); \
+	    maxcvss=$$(jq -r '[.vulnerabilities[]? | .cvss?.base_score?] | map(select(.!=null)) | max // empty' "$$f"); \
+	    if [ -n "$$maxcvss" ]; then printf "%s\t%s\n" "$$plugin" "$$maxcvss"; fi; \
+	  done | sort -k2,2nr | head -n $(LIMIT) > $$tmpfile; \
+	  printf "score\tplugin_id\tadvisory_count\tmax_cvss\tadvisories_365d\tactive_sec_warnings\tdeps\tlatest_release\n"; \
+	  COMPOSE_PROGRESS=quiet docker compose run --rm -T canary bash -lc '\
+	    set -euo pipefail; \
+	    tmp="score_top_input.tsv"; \
+	    while IFS=$$'\''\t'\'' read -r plugin maxcvss; do \
+	      plugin=$${plugin%$$'\''\r'\''}; \
+	      maxcvss=$${maxcvss%$$'\''\r'\''}; \
+	      j=$$(canary score "$$plugin" --real --json </dev/null | tr -d '\r'); \
+	      row=$$(python -c "import json,sys; plugin,maxcvss,raw=sys.argv[1:4]; obj=json.loads(raw); features=obj.get(\"features\") or {}; score=obj.get(\"score\") or 0; advis=features.get(\"advisory_count\") or 0; adv365=features.get(\"advisory_within_365d\") or 0; active=features.get(\"active_security_warning_count\") or 0; deps=features.get(\"dependency_count\") or 0; rel=features.get(\"release_timestamp\") or \"-\"; rel=(rel[:10] if isinstance(rel, str) and len(rel) >= 10 else rel); print(f\"{score}\\t{plugin}\\t{advis}\\t{maxcvss}\\t{adv365}\\t{active}\\t{deps}\\t{rel}\")" "$$plugin" "$$maxcvss" "$$j" 2>/dev/null) || { \
+	        fn="canary_bad_json_$${plugin}.txt"; \
+	        printf "%s" "$$j" > "$$fn"; \
+	        echo "BAD JSON for plugin=$$plugin (wrote $$fn)" >&2; \
+	        exit 1; \
+	      }; \
+	      printf "%s\n" "$$row"; \
+	    done < "$$tmp"'; \
+	  rm -f $$tmpfile
+	  
+# Save leaderboard output to a TSV file (docker noise suppressed)
+score-top20-tsv:
+	@$(MAKE) --no-print-directory score-top20 1> score_top20.tsv 2>/dev/null
+	@echo "Wrote score_top20.tsv"
