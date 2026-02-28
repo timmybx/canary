@@ -47,22 +47,44 @@ def _load_plugin_snapshot(plugin_id: str, *, data_dir: str) -> dict[str, Any]:
     return json.loads(snap_path.read_text(encoding="utf-8"))
 
 
+def _scm_to_url(val: object) -> str | None:
+    """Normalize snapshot SCM fields to a URL string.
+
+    The Jenkins plugins API may represent SCM as either:
+      - a plain URL string, or
+      - an object like {"link": "https://github.com/org/repo", ...}
+
+    This helper returns the URL string (or None if not present/usable).
+    """
+    if val is None:
+        return None
+    if isinstance(val, str):
+        v = val.strip()
+        return v or None
+    if isinstance(val, dict):
+        link = val.get("link")
+        if isinstance(link, str):
+            v = link.strip()
+            return v or None
+    return None
+
+
 def _infer_repo_url(snapshot: dict[str, Any]) -> str | None:
     # Prefer explicit curated mapping if present
-    repo_url = snapshot.get("repo_url")
-    if isinstance(repo_url, str) and repo_url.strip():
-        return repo_url.strip()
+    url = _scm_to_url(snapshot.get("repo_url"))
+    if url:
+        return url
 
     # Then SCM URL (plugins api field), if present
-    scm = snapshot.get("scm_url")
-    if isinstance(scm, str) and scm.strip():
-        return scm.strip()
+    url = _scm_to_url(snapshot.get("scm_url"))
+    if url:
+        return url
 
     plugin_api = snapshot.get("plugin_api")
     if isinstance(plugin_api, dict):
-        scm2 = plugin_api.get("scm")
-        if isinstance(scm2, str) and scm2.strip():
-            return scm2.strip()
+        url = _scm_to_url(plugin_api.get("scm"))
+        if url:
+            return url
 
     return None
 
@@ -126,6 +148,22 @@ def collect_github_plugin_real(
         "files": {},
         "errors": {},
     }
+
+    # Write a stable identity record for joining across datasets
+    # (GitHub Archive, github_repos, etc.)
+    # This is intentionally small and slow-changing.
+    identity_path = out_base / "plugins" / plugin_id / "identity.json"
+    identity = {
+        "plugin_id": plugin_id,
+        "github_full_name": full_name,
+        "github_owner": owner,
+        "github_repo": repo,
+        "repo_url": repo_url,
+        "collected_at": results["collected_at"],
+    }
+    if overwrite or not _nonempty(identity_path):
+        _write_json(identity_path, identity)
+    results["files"]["identity"] = str(identity_path)
 
     # index is always rewritten
     index_path = out_base / f"{plugin_id}.github_index.json"

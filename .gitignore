@@ -28,3 +28,7 @@ data/cache/**
 !data/**/README.md
 !data/raw/registry/*.sample.*
 
+canary_bad_json_distfork.txt
+.vscode/settings.json
+score_top_input.tsv
+top20.tsv

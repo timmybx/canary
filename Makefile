@@ -100,7 +100,7 @@ score-top20:
 	    while IFS=$$'\''\t'\'' read -r plugin maxcvss; do \
 	      plugin=$${plugin%$$'\''\r'\''}; \
 	      maxcvss=$${maxcvss%$$'\''\r'\''}; \
-	      j=$$(canary score "$$plugin" --real --json </dev/null | tr -d '\r'); \
+	      j=$$(canary score "$$plugin" --real --json </dev/null | tr -d $$'\''\r'\''); \
 	      row=$$(python -c "import json,sys; plugin,maxcvss,raw=sys.argv[1:4]; obj=json.loads(raw); features=obj.get(\"features\") or {}; score=obj.get(\"score\") or 0; advis=features.get(\"advisory_count\") or 0; adv365=features.get(\"advisory_within_365d\") or 0; active=features.get(\"active_security_warning_count\") or 0; deps=features.get(\"dependency_count\") or 0; rel=features.get(\"release_timestamp\") or \"-\"; rel=(rel[:10] if isinstance(rel, str) and len(rel) >= 10 else rel); print(f\"{score}\\t{plugin}\\t{advis}\\t{maxcvss}\\t{adv365}\\t{active}\\t{deps}\\t{rel}\")" "$$plugin" "$$maxcvss" "$$j" 2>/dev/null) || { \
 	        fn="canary_bad_json_$${plugin}.txt"; \
 	        printf "%s" "$$j" > "$$fn"; \

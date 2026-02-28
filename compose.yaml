@@ -7,5 +7,6 @@ services:
     environment:
       - CANARY_DATA_DIR=/app/data
       - PIP_DISABLE_PIP_VERSION_CHECK=1
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
     entrypoint: ["sh", "/app/docker-entrypoint.sh"]
     command: ["pytest", "-q"]
