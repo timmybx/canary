@@ -10,6 +10,7 @@ from pathlib import Path
 
 from canary.build.advisories_events import build_advisories_events
 from canary.collectors.github_plugin import collect_github_plugin_real
+from canary.collectors.healthscore import collect_health_scores
 from canary.collectors.jenkins_advisories import collect_advisories_real, collect_advisories_sample
 from canary.collectors.plugin_snapshot import collect_plugin_snapshot
 from canary.collectors.plugins_registry import (
@@ -134,6 +135,16 @@ def _cmd_collect_github(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_collect_healthscore(args: argparse.Namespace) -> int:
+    result = collect_health_scores(
+        data_dir=args.data_dir,
+        timeout_s=float(args.timeout_s),
+        overwrite=bool(args.overwrite),
+    )
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
+
+
 def _cmd_collect_enrich(args: argparse.Namespace) -> int:
     registry_path = Path(args.registry)
 
@@ -144,15 +155,18 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
     plugins_dir = data_raw / "plugins"
     advisories_dir = data_raw / "advisories"
     github_dir = data_raw / "github"
+    health_dir = data_raw / "healthscore"
 
     plugins_dir.mkdir(parents=True, exist_ok=True)
     advisories_dir.mkdir(parents=True, exist_ok=True)
     github_dir.mkdir(parents=True, exist_ok=True)
+    health_dir.mkdir(parents=True, exist_ok=True)
 
     only = args.only
     do_snapshot = (only is None) or (only == "snapshot")
     do_advisories = (only is None) or (only == "advisories")
     do_github = (only is None) or (only == "github")
+    do_healthscore = (only is None) or (only == "healthscore")
 
     max_plugins = int(args.max_plugins) if args.max_plugins is not None else None
     sleep_s = float(args.sleep)
@@ -161,10 +175,37 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
     snap_written = 0
     adv_written = 0
     gh_written = 0
+    hs_written = 0
+
     snap_skipped = 0
     adv_skipped = 0
     gh_skipped = 0
+    hs_skipped = 0
+
     errors = 0
+
+    # Healthscore is a bulk dataset; fetch it once per enrich run (no per-plugin API calls).
+    if do_healthscore:
+        try:
+            hs_result = collect_health_scores(
+                data_dir=str(data_raw),
+                timeout_s=float(args.healthscore_timeout_s),
+                overwrite=False,
+            )
+            hs_written += int(hs_result.get("written", 0))
+            hs_skipped += int(hs_result.get("skipped", 0))
+        except Exception as e:
+            errors += 1
+            print(f"[ERROR] healthscore: {e}")
+
+        # If the user asked for ONLY healthscore, we can stop here.
+        if only == "healthscore":
+            print("Enrich summary")
+            print("  Plugins processed:   0")
+            print(f"  Healthscore written: {hs_written}")
+            print(f"  Healthscore skipped: {hs_skipped}")
+            print(f"  Errors:              {errors}")
+            return 0 if errors == 0 else 2
 
     for plugin_id in _iter_registry_plugin_ids(registry_path):
         if max_plugins is not None and processed >= max_plugins:
@@ -242,6 +283,9 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
     if do_github:
         print(f"  GitHub written:      {gh_written}")
         print(f"  GitHub skipped:      {gh_skipped}")
+    if do_healthscore:
+        print(f"  Healthscore written: {hs_written}")
+        print(f"  Healthscore skipped: {hs_skipped}")
     print(f"  Errors:              {errors}")
 
     return 0 if errors == 0 else 2
@@ -347,6 +391,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     github.set_defaults(func=_cmd_collect_github)
 
+    healthscore = collect_sub.add_parser(
+        "healthscore",
+        help="Collect Jenkins plugin Health Score dataset (bulk) from plugin-health.jenkins.io",
+    )
+    healthscore.add_argument(
+        "--data-dir",
+        default="data/raw",
+        help="Raw data root (writes healthscore/ beneath this)",
+    )
+    healthscore.add_argument(
+        "--timeout-s",
+        default=30.0,
+        help="Network timeout for healthscore fetch",
+    )
+    healthscore.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing healthscore files",
+    )
+    healthscore.set_defaults(func=_cmd_collect_healthscore)
+
     enrich = collect_sub.add_parser(
         "enrich",
         help="Batch-enrich plugins from the registry (snapshot + advisories + github) with resume",
@@ -363,7 +428,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     enrich.add_argument(
         "--only",
-        choices=["snapshot", "advisories", "github"],
+        choices=["snapshot", "advisories", "github", "healthscore"],
         default=None,
         help="Run only one stage (default: run all stages)",
     )
@@ -374,6 +439,11 @@ def build_parser() -> argparse.ArgumentParser:
     enrich.add_argument("--github-timeout-s", default=20.0, help="GitHub timeout per request")
     enrich.add_argument("--github-max-pages", default=5, help="GitHub max pages per endpoint")
     enrich.add_argument("--github-commits-days", default=365, help="GitHub commits lookback days")
+    enrich.add_argument(
+        "--healthscore-timeout-s",
+        default=30.0,
+        help="Healthscore timeout per request",
+    )
     enrich.set_defaults(func=_cmd_collect_enrich)
 
     build = sub.add_parser("build", help="Build processed datasets from raw data")

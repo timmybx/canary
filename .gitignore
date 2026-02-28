@@ -23,6 +23,9 @@ data/cache/**
 !data/raw/**/.gitkeep
 !data/processed/**/.gitkeep
 !data/cache/**/.gitkeep
+!data/raw/healthscore/
+!data/raw/healthscore/plugins/
+!data/raw/healthscore/plugins/.gitkeep
 
 # (Optional) Keep docs/samples in data/
 !data/**/README.md
