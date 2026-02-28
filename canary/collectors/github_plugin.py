@@ -75,18 +75,90 @@ def _infer_repo_url(snapshot: dict[str, Any]) -> str | None:
     if url:
         return url
 
-    # Then SCM URL (plugins api field), if present
-    url = _scm_to_url(snapshot.get("scm_url"))
+    # Then SCM URL, if present
+    scm = snapshot.get("scm_url")
+    url = _scm_to_url(scm)
     if url:
         return url
 
+    # Some snapshots store scm_url as an object with a link field
+    if isinstance(scm, dict):
+        url = _scm_to_url(scm.get("link") or scm.get("url"))
+        if url:
+            return url
+
+    # Finally: plugins API field(s), if present
     plugin_api = snapshot.get("plugin_api")
     if isinstance(plugin_api, dict):
         url = _scm_to_url(plugin_api.get("scm"))
         if url:
             return url
+        # Sometimes plugin_api.scm is also nested
+        scm2 = plugin_api.get("scm")
+        if isinstance(scm2, dict):
+            url = _scm_to_url(scm2.get("link") or scm2.get("url"))
+            if url:
+                return url
 
     return None
+
+
+def backfill_github_identities_from_indexes(
+    *,
+    out_dir: str = "data/raw/github",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Backfill plugins/<plugin_id>/identity.json from existing <plugin_id>.github_index.json files.
+
+    This is a **no-API** operation intended to support cases where the enrich pipeline
+    skips GitHub collection because prior payloads already exist.
+
+    Returns a summary dict with counts and per-plugin errors.
+    """
+    out_base = Path(out_dir)
+    out_base.mkdir(parents=True, exist_ok=True)
+
+    results: dict[str, Any] = {
+        "out_dir": str(out_base),
+        "processed": 0,
+        "written": 0,
+        "skipped": 0,
+        "errors": {},
+    }
+
+    for idx_path in sorted(out_base.glob("*.github_index.json")):
+        plugin_id = idx_path.name.split(".github_index.json", 1)[0]
+        results["processed"] += 1
+        try:
+            idx = json.loads(idx_path.read_text(encoding="utf-8"))
+            full_name = idx.get("repo_full_name") or idx.get("repo_fullname")
+            repo_url = idx.get("repo_url")
+
+            if not isinstance(full_name, str) or "/" not in full_name:
+                raise ValueError(f"Missing/invalid repo_full_name in {idx_path.name}")
+
+            owner, repo = full_name.split("/", 1)
+
+            identity_path = out_base / "plugins" / plugin_id / "identity.json"
+            if not overwrite and _nonempty(identity_path):
+                results["skipped"] += 1
+                continue
+
+            identity = {
+                "plugin_id": plugin_id,
+                "github_full_name": full_name,
+                "github_owner": owner,
+                "github_repo": repo,
+                "repo_url": repo_url,
+                "collected_at": idx.get("collected_at"),
+                "source_index": str(idx_path),
+            }
+            _write_json(identity_path, identity)
+            results["written"] += 1
+        except Exception as e:
+            results["errors"][plugin_id] = str(e)
+
+    return results
 
 
 def collect_github_plugin_real(
@@ -148,22 +220,6 @@ def collect_github_plugin_real(
         "files": {},
         "errors": {},
     }
-
-    # Write a stable identity record for joining across datasets
-    # (GitHub Archive, github_repos, etc.)
-    # This is intentionally small and slow-changing.
-    identity_path = out_base / "plugins" / plugin_id / "identity.json"
-    identity = {
-        "plugin_id": plugin_id,
-        "github_full_name": full_name,
-        "github_owner": owner,
-        "github_repo": repo,
-        "repo_url": repo_url,
-        "collected_at": results["collected_at"],
-    }
-    if overwrite or not _nonempty(identity_path):
-        _write_json(identity_path, identity)
-    results["files"]["identity"] = str(identity_path)
 
     # index is always rewritten
     index_path = out_base / f"{plugin_id}.github_index.json"
