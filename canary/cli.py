@@ -44,49 +44,153 @@ def _cmd_collect_advisories(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     plugin = args.plugin.strip() if args.plugin else None
-
-    # Real mode currently requires a plugin id because it reads the plugin snapshot.
-    if args.real and not plugin:
-        raise SystemExit("ERROR: --real currently requires --plugin <plugin-id>")
-
     suffix = "real" if args.real else "sample"
-    out_name = (
-        f"{plugin}.advisories.{suffix}.jsonl" if plugin else f"jenkins_advisories.{suffix}.jsonl"
-    )
-    out_path = out_dir / out_name
 
-    if args.real:
-        if plugin is None:
-            raise SystemExit("ERROR: --real currently requires --plugin <plugin-id>")
-        plugin_id = plugin  # now a real str
-        records = collect_advisories_real(plugin_id=plugin_id, data_dir=args.data_dir)
-    else:
-        records = collect_advisories_sample(plugin_id=plugin)
+    # Single-plugin mode (backwards compatible).
+    if plugin is not None:
+        out_path = out_dir / f"{plugin}.advisories.{suffix}.jsonl"
+        if args.real:
+            records = collect_advisories_real(plugin_id=plugin, data_dir=args.data_dir)
+        else:
+            records = collect_advisories_sample(plugin_id=plugin)
+        with out_path.open("w", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        print(f"Wrote {len(records)} records to {out_path}")
+        return 0
 
-    with out_path.open("w", encoding="utf-8") as f:
-        for rec in records:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    # Bulk mode
+    if not args.real:
+        # Keep the existing behavior: sample bulk output as a single file.
+        out_path = out_dir / "jenkins_advisories.sample.jsonl"
+        records = collect_advisories_sample(plugin_id=None)
+        with out_path.open("w", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        print(f"Wrote {len(records)} records to {out_path}")
+        return 0
 
-    print(f"Wrote {len(records)} records to {out_path}")
-    return 0
+    # Real bulk mode: iterate registry and write per-plugin files.
+    registry_path = Path(args.registry_path)
+    if not registry_path.exists():
+        raise SystemExit(f"ERROR: registry file not found: {registry_path}")
+
+    max_plugins = int(args.max_plugins) if args.max_plugins is not None else None
+    sleep_s = float(args.sleep)
+    overwrite = bool(args.overwrite)
+
+    processed = 0
+    written = 0
+    skipped = 0
+    no_snapshot = 0
+    errors = 0
+
+    plugins_dir = Path(args.data_dir) / "plugins"
+
+    for plugin_id in _iter_registry_plugin_ids(registry_path):
+        if max_plugins is not None and processed >= max_plugins:
+            break
+        processed += 1
+
+        snapshot_path = plugins_dir / f"{plugin_id}.snapshot.json"
+        if not _nonempty(snapshot_path):
+            # collect_advisories_real expects snapshot metadata to exist for core/version context.
+            no_snapshot += 1
+            continue
+
+        out_path = out_dir / f"{plugin_id}.advisories.real.jsonl"
+        if (not overwrite) and _nonempty(out_path):
+            skipped += 1
+            continue
+
+        try:
+            records = collect_advisories_real(plugin_id=plugin_id, data_dir=args.data_dir)
+            with out_path.open("w", encoding="utf-8") as f:
+                for rec in records:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            written += 1
+        except Exception as e:
+            errors += 1
+            print(f"[ERROR] {plugin_id}: {e}")
+
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+
+    print("Advisories summary")
+    print(f"  Plugins processed:  {processed}")
+    print(f"  Advisories written: {written}")
+    print(f"  Advisories skipped: {skipped}")
+    print(f"  No snapshot:        {no_snapshot}")
+    print(f"  Errors:             {errors}")
+    return 0 if errors == 0 else 2
 
 
 def _cmd_collect_plugin(args: argparse.Namespace) -> int:
-    plugin_id = args.id.strip()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    snapshot = collect_plugin_snapshot(
-        plugin_id=plugin_id,
-        repo_url=args.repo_url,
-        real=args.real,
-    )
+    # Single-plugin mode (backwards compatible).
+    if args.id:
+        plugin_id = args.id.strip()
+        snapshot = collect_plugin_snapshot(
+            plugin_id=plugin_id,
+            repo_url=args.repo_url,
+            real=args.real,
+        )
+        out_path = out_dir / f"{plugin_id}.snapshot.json"
+        out_path.write_text(
+            json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        print(f"Wrote snapshot to {out_path}")
+        return 0
 
-    out_path = out_dir / f"{plugin_id}.snapshot.json"
-    out_path.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    # Bulk mode: iterate registry and write missing snapshots.
+    registry_path = Path(args.registry_path)
+    if not registry_path.exists():
+        raise SystemExit(f"ERROR: registry file not found: {registry_path}")
 
-    print(f"Wrote snapshot to {out_path}")
-    return 0
+    max_plugins = int(args.max_plugins) if args.max_plugins is not None else None
+    sleep_s = float(args.sleep)
+    overwrite = bool(args.overwrite)
+
+    processed = 0
+    written = 0
+    skipped = 0
+    errors = 0
+
+    for plugin_id in _iter_registry_plugin_ids(registry_path):
+        if max_plugins is not None and processed >= max_plugins:
+            break
+        processed += 1
+        out_path = out_dir / f"{plugin_id}.snapshot.json"
+        if (not overwrite) and _nonempty(out_path):
+            skipped += 1
+            continue
+        try:
+            snapshot = collect_plugin_snapshot(
+                plugin_id=plugin_id,
+                repo_url=None,
+                real=args.real,
+            )
+            out_path.write_text(
+                json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            written += 1
+        except Exception as e:
+            errors += 1
+            print(f"[ERROR] {plugin_id}: {e}")
+
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+
+    print("Plugin snapshot summary")
+    print(f"  Plugins processed: {processed}")
+    print(f"  Snapshots written: {written}")
+    print(f"  Snapshots skipped: {skipped}")
+    print(f"  Errors:            {errors}")
+    return 0 if errors == 0 else 2
 
 
 def _cmd_collect_registry(args: argparse.Namespace) -> int:
@@ -338,10 +442,36 @@ def build_parser() -> argparse.ArgumentParser:
     )
     advisories.add_argument("--out-dir", default="data/raw/advisories", help="Output directory")
     advisories.add_argument("--real", action="store_true", help="Fetch live data from Jenkins")
+    advisories.add_argument(
+        "--registry-path",
+        default="data/raw/registry/plugins.jsonl",
+        help="Plugin registry JSONL (used for bulk real collection when --plugin is omitted)",
+    )
+    advisories.add_argument(
+        "--max-plugins",
+        default=None,
+        help="Optional limit for bulk collection (debugging)",
+    )
+    advisories.add_argument(
+        "--sleep",
+        default="0",
+        help="Seconds to sleep between plugins in bulk mode (rate limiting)",
+    )
+    advisories.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing per-plugin files in bulk mode",
+    )
     advisories.set_defaults(func=_cmd_collect_advisories)
 
     plugin = collect_sub.add_parser("plugin", help="Collect a plugin snapshot")
-    plugin.add_argument("--id", required=True, help="Plugin short name (e.g., cucumber-reports)")
+    plugin.add_argument(
+        "--id",
+        required=False,
+        default=None,
+        help="Plugin short name (e.g., cucumber-reports). "
+        "If omitted, run in bulk mode using --registry-path.",
+    )
     plugin.add_argument("--out-dir", default="data/raw/plugins", help="Output directory")
     plugin.add_argument(
         "--repo-url",
@@ -349,6 +479,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="GitHub repo URL (optional; can be inferred/curated for pilots)",
     )
     plugin.add_argument("--real", action="store_true", help="Fetch live data (network)")
+    plugin.add_argument(
+        "--registry-path",
+        default="data/raw/registry/plugins.jsonl",
+        help="Plugin registry JSONL (used for bulk collection when --id is omitted)",
+    )
+    plugin.add_argument(
+        "--max-plugins",
+        default=None,
+        help="Optional limit for bulk collection (debugging)",
+    )
+    plugin.add_argument(
+        "--sleep",
+        default="0",
+        help="Seconds to sleep between plugins in bulk mode (rate limiting)",
+    )
+    plugin.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing snapshot files in bulk mode",
+    )
     plugin.set_defaults(func=_cmd_collect_plugin)
 
     registry = collect_sub.add_parser(
@@ -360,7 +510,7 @@ def build_parser() -> argparse.ArgumentParser:
     registry.add_argument(
         "--raw-out", default=None, help="Optional filename to store raw pages (JSON)"
     )
-    registry.add_argument("--page-size", default=500, help="Registry paging size (default: 500)")
+    registry.add_argument("--page-size", default=2500, help="Registry paging size (default: 2500)")
     registry.add_argument("--max-plugins", default=None, help="Optional cap for quick tests")
     registry.add_argument("--timeout-s", default=30.0, help="Network timeout per request")
     registry.add_argument(

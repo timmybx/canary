@@ -139,44 +139,66 @@ def collect_plugins_registry_real(
 
     Notes:
       - The plugins API's pagination parameters have historically used
-        limit/offset. We use that by default and also attempt to follow a
-        `next` link if present.
+        limit/offset. We try limit/offset first, but if the response includes a
+        `next` link, we follow that until it disappears.
       - We keep `raw_pages` so you can store the exact upstream responses.
+      - This function guards against pagination that doesn't advance and will
+        raise loudly if it detects a repeated page URL.
     """
-
     if page_size <= 0 or page_size > 5000:
         raise ValueError("page_size must be between 1 and 5000")
 
+    base = "https://plugins.jenkins.io"
     collected_at = datetime.now(UTC).isoformat()
+
     registry: list[dict[str, Any]] = []
     raw_pages: list[Any] = []
 
     offset = 0
     next_url: str | None = None
+    seen_urls: set[str] = set()
 
     while True:
+        # Prefer following next_url if present; otherwise use limit/offset.
         if next_url is None:
             qs = urlencode({"limit": str(page_size), "offset": str(offset)})
-            url = f"https://plugins.jenkins.io/api/plugins?{qs}"
+            url = f"{base}/api/plugins?{qs}"
         else:
             url = next_url
+
+        # Fail loudly if pagination gets stuck.
+        if url in seen_urls:
+            raise RuntimeError(f"Registry pagination did not advance (repeated URL): {url}")
+        seen_urls.add(url)
 
         payload = _fetch_json(url, timeout_s=timeout_s)
         raw_pages.append(payload)
 
-        # Common shape: {"plugins": [...], "total": N, ...}
         plugins_list: list[Any]
         total: int | None = None
 
         if isinstance(payload, dict) and isinstance(payload.get("plugins"), list):
             plugins_list = payload["plugins"]
+
+            # total (optional)
             t = payload.get("total")
             total = int(t) if isinstance(t, (int, float, str)) and str(t).isdigit() else None
+
+            # next (optional) - EXPLICITLY reset when absent
             n = payload.get("next")
-            next_url = n if isinstance(n, str) and n.startswith("https://") else None
+            next_url = None
+            if isinstance(n, str):
+                n = n.strip()
+                if n.startswith("https://"):
+                    next_url = n
+                elif n.startswith("/"):
+                    next_url = f"{base}{n}"
+
         elif isinstance(payload, list):
             plugins_list = payload
-            next_url = None
+            total = None
+            next_url = None  # explicit
+
         else:
             raise RuntimeError(
                 f"Unexpected registry payload shape from {url}: {type(payload).__name__}"
@@ -191,14 +213,15 @@ def collect_plugins_registry_real(
                 continue
             rec["collected_at"] = collected_at
             registry.append(rec)
+
             if max_plugins is not None and len(registry) >= max_plugins:
                 return registry, raw_pages
 
-        # Termination conditions
-        if next_url:
-            # If upstream gives an explicit next link, follow it.
+        # If the API provides a `next` link, follow it until it disappears.
+        if next_url is not None:
             continue
 
+        # Otherwise, fall back to limit/offset termination rules.
         if total is not None:
             if offset + len(plugins_list) >= total:
                 break

@@ -30,6 +30,89 @@ def _load_plugin_snapshot(plugin_id: str, data_dir: Path) -> dict[str, Any] | No
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _load_healthscore_record(plugin_id: str, data_dir: Path) -> dict[str, Any] | None:
+    """Load a healthscore record for a plugin.
+
+    Supports two layouts:
+      1) Per-plugin files (collector output):
+         <data_dir>/healthscore/plugins/<plugin_id>.healthscore.json
+         { "plugin_id": ..., "collected_at": ..., "record": {...} }
+
+      2) Aggregated file (optional / imported):
+         <data_dir>/healthscore/plugins.healthscore.json
+         { "collected_at": ..., "plugin_id": "plugins", "record": { "<plugin_id>": {...}, ... } }
+
+    Returns a dict with keys:
+      - value: int|float|None (0..100-ish)
+      - date: str|None
+      - details: Any
+      - collected_at: str|None
+    """
+    base = data_dir / "healthscore"
+
+    # 1) Per-plugin
+    per_plugin = base / "plugins" / f"{plugin_id}.healthscore.json"
+    if per_plugin.exists():
+        try:
+            payload = json.loads(per_plugin.read_text(encoding="utf-8"))
+            rec = payload.get("record") if isinstance(payload, dict) else None
+            if isinstance(rec, dict):
+                return {
+                    "value": rec.get("value") if "value" in rec else rec.get("score"),
+                    "date": rec.get("date") or rec.get("updated") or rec.get("timestamp"),
+                    "details": rec.get("details") if "details" in rec else rec,
+                    "collected_at": payload.get("collected_at"),
+                }
+        except Exception:
+            return None
+
+    # 2) Aggregated
+    # Support both:
+    #   <data_dir>/healthscore/plugins.healthscore.json
+    #   <data_dir>/healthscore/plugins/plugins.healthscore.json   (common collector output)
+    agg_candidates = [
+        base / "plugins.healthscore.json",
+        base / "plugins" / "plugins.healthscore.json",
+    ]
+    for agg in agg_candidates:
+        if not agg.exists():
+            continue
+        try:
+            payload = json.loads(agg.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = None
+        if not isinstance(payload, dict):
+            continue
+        recmap = payload.get("record")
+        if isinstance(recmap, dict):
+            r = recmap.get(plugin_id)
+            if isinstance(r, dict):
+                return {
+                    "value": r.get("value") if "value" in r else r.get("score"),
+                    "date": r.get("date") or r.get("updated") or r.get("timestamp"),
+                    "details": r.get("details") if "details" in r else r,
+                    "collected_at": payload.get("collected_at"),
+                }
+
+    return None
+
+
+def _healthscore_to_risk_points(value: Any) -> int | None:
+    """Convert a 0..100 health score (higher is healthier) into 0..20 risk points."""
+    try:
+        v = float(value)
+    except Exception:
+        return None
+    # clamp to sane range
+    if v < 0:
+        v = 0.0
+    if v > 100:
+        v = 100.0
+    # 100 -> 0 pts, 0 -> 20 pts (linear)
+    pts = int(round((100.0 - v) / 5.0))
+    return max(0, min(20, pts))
+
+
 def _parse_iso_datetime(value: str) -> datetime | None:
     if not value:
         return None
@@ -369,6 +452,28 @@ def score_plugin_baseline(
             reasons.append("Recent release activity suggests active maintenance.")
             score = max(0, score - 3)
 
+    # --- New: plugin health score (plugin-health.jenkins.io) ---
+    features.setdefault("healthscore_value", None)
+    features.setdefault("healthscore_date", None)
+    features.setdefault("healthscore_collected_at", None)
+
+    hs = _load_healthscore_record(plugin_id, Path(data_dir))
+    if hs is not None:
+        features["healthscore_value"] = hs.get("value")
+        features["healthscore_date"] = hs.get("date")
+        features["healthscore_collected_at"] = hs.get("collected_at")
+
+        pts = _healthscore_to_risk_points(hs.get("value"))
+        if pts is not None:
+            score += pts
+            reasons.append(
+                f"Health score: {hs.get('value')} "
+                f"(higher is healthier; +{pts} risk point(s), max 20)."
+            )
+        else:
+            reasons.append("Health score record present but value was not parseable.")
+    else:
+        reasons.append("No health score record found in local dataset (yet).")
     if score == 0:
         score = 5
         reasons.append("No heuristics matched (baseline default).")
