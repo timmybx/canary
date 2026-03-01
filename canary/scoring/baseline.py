@@ -30,6 +30,131 @@ def _load_plugin_snapshot(plugin_id: str, data_dir: Path) -> dict[str, Any] | No
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _extract_dependency_plugin_ids(snapshot: dict[str, Any]) -> list[str]:
+    """Extract Jenkins *plugin* dependency IDs from a plugin snapshot.
+
+    The Jenkins plugins API typically returns dependency objects like:
+      {"name": "token-macro", "version": "...", ...}
+
+    We treat the dependency "name" as the dependent plugin_id.
+    """
+    api = snapshot.get("plugin_api") or {}
+    deps = api.get("dependencies") or []
+    out: list[str] = []
+    if isinstance(deps, list):
+        for d in deps:
+            if not isinstance(d, dict):
+                continue
+            pid = d.get("name")
+            if isinstance(pid, str):
+                pid = pid.strip()
+                if pid:
+                    out.append(pid)
+    # stable output for deterministic JSON/testing
+    return sorted(set(out))
+
+
+def _dependency_points(
+    dep_id: str,
+    *,
+    data_dir: Path,
+    today: date,
+    prefer_real: bool,
+) -> tuple[int, dict[str, Any]]:
+    """Compute per-dependency risk points plus a compact details blob."""
+    # Advisories
+    advisories = _load_advisories_for_plugin(dep_id, data_dir, prefer_real=prefer_real)
+    advisory_count = len(advisories)
+
+    advisory_dates: list[date] = []
+    for rec in advisories:
+        d = _parse_date(str(rec.get("published_date", "")).strip())
+        if d:
+            advisory_dates.append(d)
+
+    latest_adv = max(advisory_dates) if advisory_dates else None
+    recent_365 = bool(latest_adv and (today - latest_adv).days <= 365)
+
+    max_cvss: float | None = None
+    for rec in advisories:
+        ms = _advisory_record_max_cvss(rec)
+        if ms is not None and (max_cvss is None or ms > max_cvss):
+            max_cvss = ms
+
+    # Dependency plugin snapshot (optional) for warnings/maintenance
+    dep_snapshot = _load_plugin_snapshot(dep_id, data_dir)
+    active_warn = 0
+    total_warn = 0
+    if dep_snapshot and isinstance(dep_snapshot, dict):
+        api = dep_snapshot.get("plugin_api") or {}
+        sec_warnings = api.get("securityWarnings") or []
+        if isinstance(sec_warnings, list):
+            total_warn = len(sec_warnings)
+            active_warn = sum(
+                1 for w in sec_warnings if isinstance(w, dict) and w.get("active") is True
+            )
+
+    # Healthscore (optional)
+    hs = _load_healthscore_record(dep_id, data_dir)
+    hs_value = hs.get("value") if isinstance(hs, dict) else None
+
+    # Points (simple + explainable, capped later at the aggregate level)
+    points = 0
+    reasons: list[str] = []
+
+    if advisory_count:
+        adv_pts = min(10, advisory_count * 2)  # +2/advisory, cap 10
+        points += adv_pts
+        reasons.append(f"{advisory_count} advisories (+{adv_pts}).")
+
+    if max_cvss is not None:
+        sev_pts = 0
+        if max_cvss >= 9.0:
+            sev_pts = 6
+        elif max_cvss >= 7.0:
+            sev_pts = 4
+        elif max_cvss >= 4.0:
+            sev_pts = 2
+        points += sev_pts
+        if sev_pts:
+            reasons.append(f"Max CVSS {max_cvss:.1f} (+{sev_pts}).")
+
+    if recent_365:
+        points += 3
+        reasons.append("Recent advisory within 365d (+3).")
+
+    if active_warn:
+        warn_pts = min(10, active_warn * 5)
+        points += warn_pts
+        reasons.append(f"Active security warnings: {active_warn} (+{warn_pts}).")
+
+    if hs_value is not None:
+        try:
+            hv = float(hs_value)
+            hv = max(0.0, min(100.0, hv))
+            hs_pts = int(round((100.0 - hv) / 25.0))  # 0..4
+            hs_pts = max(0, min(4, hs_pts))
+            if hs_pts:
+                points += hs_pts
+                reasons.append(f"Health score {hv:.0f} (+{hs_pts}).")
+        except (TypeError, ValueError):
+            hv = None
+
+    details: dict[str, Any] = {
+        "plugin_id": dep_id,
+        "advisory_count": advisory_count,
+        "latest_advisory_date": latest_adv.isoformat() if latest_adv else None,
+        "recent_advisory_365d": recent_365,
+        "max_cvss": max_cvss,
+        "security_warning_count": total_warn,
+        "active_security_warning_count": active_warn,
+        "healthscore": hs_value,
+        "risk_points": points,
+        "reasons": reasons,
+    }
+    return points, details
+
+
 def _load_healthscore_record(plugin_id: str, data_dir: Path) -> dict[str, Any] | None:
     """Load a healthscore record for a plugin.
 
@@ -394,6 +519,31 @@ def score_plugin_baseline(
     features.setdefault("release_timestamp", None)
     features.setdefault("days_since_release", None)
 
+    # Dependency-risk defaults (present even if snapshot is missing)
+    features.setdefault("dependency_plugins", [])
+    features.setdefault("dependency_total", 0)
+    features.setdefault("dependency_risk_points", 0)
+    features.setdefault(
+        "dependency_risk_summary",
+        {
+            "deps_with_any_advisory": 0,
+            "deps_with_recent_advisory_365d": 0,
+            "deps_with_active_warning": 0,
+            "worst_dep_max_cvss": None,
+            "worst_dep_id": None,
+            "worst_dep_latest_advisory_date": None,
+        },
+    )
+    features.setdefault(
+        "dependency_missing_data",
+        {
+            "snapshot_missing": 0,
+            "advisories_missing": 0,
+            "healthscore_missing": 0,
+        },
+    )
+    features.setdefault("dependency_details_top", [])
+
     if snapshot and isinstance(snapshot, dict):
         api = snapshot.get("plugin_api") or {}
 
@@ -451,6 +601,115 @@ def score_plugin_baseline(
         if isinstance(dsr, int) and dsr <= 180:
             reasons.append("Recent release activity suggests active maintenance.")
             score = max(0, score - 3)
+
+        # --- New: dependency plugin risk (from local datasets) ---
+        dep_ids = _extract_dependency_plugin_ids(snapshot)
+        features["dependency_plugins"] = dep_ids
+        features["dependency_total"] = len(dep_ids)
+
+        dep_details: list[dict[str, Any]] = []
+        missing_snap = 0
+        missing_adv = 0
+        missing_hs = 0
+
+        worst_dep_id: str | None = None
+        worst_dep_cvss: float | None = None
+        worst_dep_latest: str | None = None
+        deps_with_any_adv = 0
+        deps_with_recent_adv_365d = 0
+        deps_with_active_warn = 0
+
+        dep_points_pairs: list[tuple[int, dict[str, Any]]] = []
+        for dep_id in dep_ids:
+            pts, det = _dependency_points(
+                dep_id,
+                data_dir=Path(data_dir),
+                today=today,
+                prefer_real=real,
+            )
+            dep_points_pairs.append((pts, det))
+
+            # missing-data counts (best-effort)
+            if _load_plugin_snapshot(dep_id, Path(data_dir)) is None:
+                missing_snap += 1
+            if not _load_advisories_for_plugin(dep_id, Path(data_dir), prefer_real=real):
+                # Note: empty list can mean "no advisories" OR "missing file".
+                # We treat it as missing if the expected file doesn't exist.
+                adv_path_real = Path(data_dir) / "advisories" / f"{dep_id}.advisories.real.jsonl"
+                adv_path_sample = (
+                    Path(data_dir) / "advisories" / f"{dep_id}.advisories.sample.jsonl"
+                )
+                adv_path_alt = Path(data_dir) / "advisories" / f"{dep_id}.advisories.jsonl"
+                if not (
+                    adv_path_real.exists() or adv_path_sample.exists() or adv_path_alt.exists()
+                ):
+                    missing_adv += 1
+            if _load_healthscore_record(dep_id, Path(data_dir)) is None:
+                missing_hs += 1
+
+            if det.get("advisory_count", 0) and int(det.get("advisory_count", 0)) > 0:
+                deps_with_any_adv += 1
+            if det.get("recent_advisory_365d") is True:
+                deps_with_recent_adv_365d += 1
+            if int(det.get("active_security_warning_count", 0) or 0) > 0:
+                deps_with_active_warn += 1
+
+            mcv = det.get("max_cvss")
+            if isinstance(mcv, (int, float)):
+                if worst_dep_cvss is None or float(mcv) > worst_dep_cvss:
+                    worst_dep_cvss = float(mcv)
+                    worst_dep_id = dep_id
+                    worst_dep_latest = det.get("latest_advisory_date")
+
+        # Summarize + cap: only count top-N risky deps to avoid explosion.
+        dep_points_pairs.sort(key=lambda x: (x[0], x[1].get("max_cvss") or 0), reverse=True)
+        top_n = 5
+        dep_details = [
+            d for _, d in dep_points_pairs[:top_n] if int(d.get("risk_points", 0) or 0) > 0
+        ]
+
+        dep_points_sum = sum(int(p) for p, _ in dep_points_pairs[:top_n])
+        dep_points = max(0, min(20, dep_points_sum))
+        features["dependency_risk_points"] = dep_points
+        features["dependency_risk_summary"] = {
+            "deps_with_any_advisory": deps_with_any_adv,
+            "deps_with_recent_advisory_365d": deps_with_recent_adv_365d,
+            "deps_with_active_warning": deps_with_active_warn,
+            "worst_dep_max_cvss": worst_dep_cvss,
+            "worst_dep_id": worst_dep_id,
+            "worst_dep_latest_advisory_date": worst_dep_latest,
+        }
+        features["dependency_missing_data"] = {
+            "snapshot_missing": missing_snap,
+            "advisories_missing": missing_adv,
+            "healthscore_missing": missing_hs,
+        }
+        features["dependency_details_top"] = dep_details
+
+        # Score contribution
+        score += dep_points
+
+        # Human-readable reasons (keep it tight)
+        if dep_ids:
+            reasons.append(f"Dependency plugins: {len(dep_ids)} declared.")
+            if deps_with_any_adv or deps_with_active_warn:
+                if worst_dep_id and worst_dep_cvss is not None:
+                    reasons.append(
+                        f"Dependency risk: {deps_with_any_adv} deps have advisories; "
+                        f"worst is {worst_dep_id} (CVSS {worst_dep_cvss:.1f}"
+                        + (f", latest {worst_dep_latest}" if worst_dep_latest else "")
+                        + ")."
+                    )
+                else:
+                    reasons.append(
+                        f"Dependency risk: {deps_with_any_adv} deps have advisories; "
+                        f"{deps_with_active_warn} deps have active warnings."
+                    )
+            if dep_points > 0:
+                reasons.append(
+                    f"Dependency risk contribution: +{dep_points} point(s) "
+                    f"(cap 20; top {top_n} deps)."
+                )
 
     # --- New: plugin health score (plugin-health.jenkins.io) ---
     features.setdefault("healthscore_value", None)

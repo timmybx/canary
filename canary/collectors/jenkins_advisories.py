@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterable
@@ -523,9 +524,27 @@ def collect_advisories_real(
     for url in sorted(urls):
         url = _normalize_advisory_url(url)
 
-        html = _fetch_text(url, timeout_s=timeout_s)
-        title = _extract_title(html)
+        # Fetch advisory HTML.
+        # Treat 404s as a non-fatal dead-link and retry once on transient errors.
+        try:
+            html = _fetch_text(url, timeout_s=timeout_s)
+        except RuntimeError as e:
+            msg = str(e)
+            if "Fetch failed (404)" in msg:
+                print(f"[WARN] {plugin_id}: advisory URL returned 404; skipping: {url}")
+                continue
+            print(f"[WARN] {plugin_id}: fetch failed; retrying once: {url} ({msg})")
+            time.sleep(1.0)
+            html = _fetch_text(url, timeout_s=timeout_s)
+        except Exception as e:
+            # e.g., IncompleteRead or other transient read errors
+            print(
+                f"[WARN] {plugin_id}: fetch failed; retrying once: {url} ({type(e).__name__}: {e})"
+            )
+            time.sleep(1.0)
+            html = _fetch_text(url, timeout_s=timeout_s)
 
+        title = _extract_title(html)
         severity_labels = _extract_severity_labels(html)
         cvss_by_sid = _extract_cvss_by_security_id(html)
 
@@ -553,8 +572,7 @@ def collect_advisories_real(
             if wid in cvss_by_sid:
                 v["cvss"] = cvss_by_sid[wid]
 
-            # Jenkins advisories frequently include CVSS but omit a structured
-            # severity label. When missing, derive a label from the CVSS base score.
+            # Derive a severity label from CVSS when missing.
             if v.get("severity_label") in (None, ""):
                 cv = v.get("cvss")
                 if isinstance(cv, dict):
@@ -573,6 +591,7 @@ def collect_advisories_real(
                 sc = cv.get("base_score")
                 if isinstance(sc, (int, float)):
                     max_cvss = float(sc) if max_cvss is None else max(max_cvss, float(sc))
+
         severity_labels_for_max: list[str] = []
         for v in vulnerabilities:
             label = v.get("severity_label")
