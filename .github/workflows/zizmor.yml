@@ -19,20 +19,24 @@ on:
       - ".github/workflows/zizmor.yml"
   workflow_dispatch:
 
-permissions:
-  contents: read
-  security-events: write
+permissions: {}
 
 jobs:
   zizmor:
     name: GitHub Actions security analysis
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
 
     steps:
-      - name: Check out repository
+      - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Run zizmor
         uses: zizmorcore/zizmor-action@v0.5.0
         with:
-          fail-on-severity: high
+          min-severity: medium
+          min-confidence: medium
