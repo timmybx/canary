@@ -7,6 +7,8 @@
 [![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://microsoft.github.io/pyright/)
 [![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 [![ClusterFuzzLite PR fuzzing](https://github.com/timmybx/canary/actions/workflows/cflite_pr.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/cflite_pr.yml)
+[![zizmor](https://github.com/timmybx/canary/actions/workflows/zizmor.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/zizmor.yml)
+[![CodeQL](https://github.com/timmybx/canary/actions/workflows/codeql.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/codeql.yml)
 
 # 🐤 CANARY — Component Anomaly & Near-term Advisory Risk Yardstick
 

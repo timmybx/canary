@@ -24,7 +24,9 @@ repos:
     hooks:
       - id: pip-audit-docker
         name: pip-audit (runtime + dev, docker)
-        entry: docker compose run --rm canary pip-audit -r requirements.txt -r requirements-dev.txt
+        # Audit the already-installed, hash-pinned container environment.
+        # This avoids intermittent failures from pip-audit's requirements bootstrap.
+        entry: docker compose run --rm canary pip-audit
         language: system
         pass_filenames: false
 
