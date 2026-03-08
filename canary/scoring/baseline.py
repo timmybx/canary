@@ -7,6 +7,9 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DATA_ROOT = (_REPO_ROOT / "data" / "raw").resolve()
+
 
 @dataclass(frozen=True)
 class ScoreResult:
@@ -44,8 +47,8 @@ def _safe_plugin_filename(plugin_id: str, suffix: str) -> str | None:
     return f"{safe_id}{suffix}"
 
 
-def _resolved_base_dir(data_dir: str | Path) -> Path:
-    base = Path(data_dir).expanduser().resolve()
+def _resolved_base_dir() -> Path:
+    base = _DATA_ROOT
     if not base.exists() or not base.is_dir():
         raise ValueError("Invalid data directory")
     return base
@@ -422,8 +425,6 @@ def _load_advisories_for_plugin(
 
 def score_plugin_baseline(
     plugin: str,
-    *,
-    data_dir: str | Path = "data/raw",
     real: bool = False,
 ) -> ScoreResult:
     """
@@ -440,7 +441,7 @@ def score_plugin_baseline(
     if plugin_id is None:
         raise ValueError(f"Invalid plugin id: {plugin!r}")
 
-    base_dir = _resolved_base_dir(data_dir)
+    base_dir = _resolved_base_dir()
     name = plugin_id
     score = 0
     reasons: list[str] = []

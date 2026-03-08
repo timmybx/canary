@@ -406,7 +406,7 @@ def _cmd_build_advisories_events(args: argparse.Namespace) -> int:
 
 def _cmd_score(args: argparse.Namespace) -> int:
     plugin = args.plugin.strip()
-    result = score_plugin_baseline(plugin, data_dir=args.data_dir, real=bool(args.real))
+    result = score_plugin_baseline(plugin, real=bool(args.real))
 
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))

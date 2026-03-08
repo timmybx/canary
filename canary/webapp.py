@@ -845,7 +845,6 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 score_result = _score_payload(
                     score_plugin_baseline(
                         plugin,
-                        data_dir=(form.get("data_dir") or DEFAULT_DATA_DIR).strip(),
                         real=_bool_from_form(form.get("real")),
                     )
                 )
