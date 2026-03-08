@@ -44,7 +44,14 @@ def _safe_plugin_filename(plugin_id: str, suffix: str) -> str | None:
     return f"{safe_id}{suffix}"
 
 
-def _safe_join(base: Path, *parts: str) -> Path:
+def _resolved_base_dir(data_dir: str | Path) -> Path:
+    base = Path(data_dir).expanduser().resolve()
+    if not base.exists() or not base.is_dir():
+        raise ValueError("Invalid data directory")
+    return base
+
+
+def _safe_join_under(base: Path, *parts: str) -> Path:
     candidate = (base.joinpath(*parts)).resolve()
     try:
         candidate.relative_to(base)
@@ -68,22 +75,22 @@ def _advisory_candidates(data_dir: Path, plugin_id: str, *, prefer_real: bool) -
         )
     )
 
-    base = data_dir.resolve()
     out: list[Path] = []
+    safe_id = _safe_plugin_id(plugin_id)
+    if safe_id is None:
+        return []
+
     for suffix in suffixes:
-        filename = _safe_plugin_filename(plugin_id, suffix)
-        if filename is None:
-            return []
-        out.append(_safe_join(base, "advisories", filename))
+        out.append(_safe_join_under(data_dir, "advisories", f"{safe_id}{suffix}"))
     return out
 
 
 def _load_plugin_snapshot(plugin_id: str, data_dir: Path) -> dict[str, Any] | None:
-    base = data_dir.resolve()
-    filename = _safe_plugin_filename(plugin_id, ".snapshot.json")
-    if filename is None:
+    safe_id = _safe_plugin_id(plugin_id)
+    if safe_id is None:
         return None
-    path = _safe_join(base, "plugins", filename)
+
+    path = _safe_join_under(data_dir, "plugins", f"{safe_id}.snapshot.json")
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
@@ -215,31 +222,13 @@ def _dependency_points(
 
 
 def _load_healthscore_record(plugin_id: str, data_dir: Path) -> dict[str, Any] | None:
-    """Load a healthscore record for a plugin.
-
-    Supports two layouts:
-      1) Per-plugin files (collector output):
-         <data_dir>/healthscore/plugins/<plugin_id>.healthscore.json
-         { "plugin_id": ..., "collected_at": ..., "record": {...} }
-
-      2) Aggregated file (optional / imported):
-         <data_dir>/healthscore/plugins.healthscore.json
-         { "collected_at": ..., "plugin_id": "plugins", "record": { "<plugin_id>": {...}, ... } }
-
-    Returns a dict with keys:
-      - value: int|float|None (0..100-ish)
-      - date: str|None
-      - details: Any
-      - collected_at: str|None
-    """
     safe_id = _safe_plugin_id(plugin_id)
     if safe_id is None:
         return None
 
-    base = _safe_join(data_dir.resolve(), "healthscore")
+    base = _safe_join_under(data_dir, "healthscore")
 
-    # 1) Per-plugin
-    per_plugin = _safe_join(base, "plugins", f"{safe_id}.healthscore.json")
+    per_plugin = _safe_join_under(base, "plugins", f"{safe_id}.healthscore.json")
     if per_plugin.exists():
         try:
             payload = json.loads(per_plugin.read_text(encoding="utf-8"))
@@ -251,16 +240,12 @@ def _load_healthscore_record(plugin_id: str, data_dir: Path) -> dict[str, Any] |
                     "details": rec.get("details") if "details" in rec else rec,
                     "collected_at": payload.get("collected_at"),
                 }
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             return None
 
-    # 2) Aggregated
-    # Support both:
-    #   <data_dir>/healthscore/plugins.healthscore.json
-    #   <data_dir>/healthscore/plugins/plugins.healthscore.json   (common collector output)
     agg_candidates = [
-        _safe_join(base, "plugins.healthscore.json"),
-        _safe_join(base, "plugins", "plugins.healthscore.json"),
+        _safe_join_under(base, "plugins.healthscore.json"),
+        _safe_join_under(base, "plugins", "plugins.healthscore.json"),
     ]
     for agg in agg_candidates:
         if not agg.exists():
@@ -274,36 +259,6 @@ def _load_healthscore_record(plugin_id: str, data_dir: Path) -> dict[str, Any] |
         recmap = payload.get("record")
         if isinstance(recmap, dict):
             r = recmap.get(safe_id)
-            if isinstance(r, dict):
-                return {
-                    "value": r.get("value") if "value" in r else r.get("score"),
-                    "date": r.get("date") or r.get("updated") or r.get("timestamp"),
-                    "details": r.get("details") if "details" in r else r,
-                    "collected_at": payload.get("collected_at"),
-                }
-
-    return None
-
-    # 2) Aggregated
-    # Support both:
-    #   <data_dir>/healthscore/plugins.healthscore.json
-    #   <data_dir>/healthscore/plugins/plugins.healthscore.json   (common collector output)
-    agg_candidates = [
-        base / "plugins.healthscore.json",
-        base / "plugins" / "plugins.healthscore.json",
-    ]
-    for agg in agg_candidates:
-        if not agg.exists():
-            continue
-        try:
-            payload = json.loads(agg.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            payload = None
-        if not isinstance(payload, dict):
-            continue
-        recmap = payload.get("record")
-        if isinstance(recmap, dict):
-            r = recmap.get(plugin_id)
             if isinstance(r, dict):
                 return {
                     "value": r.get("value") if "value" in r else r.get("score"),
@@ -485,7 +440,7 @@ def score_plugin_baseline(
     if plugin_id is None:
         raise ValueError(f"Invalid plugin id: {plugin!r}")
 
-    base_dir = Path(data_dir).resolve()
+    base_dir = _resolved_base_dir(data_dir)
     name = plugin_id
     score = 0
     reasons: list[str] = []
@@ -711,19 +666,19 @@ def score_plugin_baseline(
         for dep_id in dep_ids:
             pts, det = _dependency_points(
                 dep_id,
-                data_dir=Path(data_dir),
+                data_dir=base_dir,
                 today=today,
                 prefer_real=real,
             )
             dep_points_pairs.append((pts, det))
 
             # missing-data counts (best-effort)
-            if _load_plugin_snapshot(dep_id, Path(data_dir)) is None:
+            if _load_plugin_snapshot(dep_id, base_dir) is None:
                 missing_snap += 1
-            if not _load_advisories_for_plugin(dep_id, Path(data_dir), prefer_real=real):
+            if not _load_advisories_for_plugin(dep_id, base_dir, prefer_real=real):
                 # Note: empty list can mean "no advisories" OR "missing file".
                 # We treat it as missing if the expected file doesn't exist.
-                adv_candidates = _advisory_candidates(Path(data_dir), dep_id, prefer_real=real)
+                adv_candidates = _advisory_candidates(base_dir, dep_id, prefer_real=real)
                 if adv_candidates and not any(path.exists() for path in adv_candidates):
                     missing_adv += 1
             if _load_healthscore_record(dep_id, base_dir) is None:
