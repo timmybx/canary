@@ -4,6 +4,7 @@ import argparse
 import html
 import io
 import json
+import logging
 import mimetypes
 import os
 import shlex
@@ -50,6 +51,7 @@ DEFAULTS: dict[str, Any] = {
 }
 
 STATIC_DIR = Path(__file__).with_name("static")
+logger = logging.getLogger(__name__)
 
 CSS = """
 :root {
@@ -849,11 +851,15 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 )
             else:
                 command_result = _run_command(values["command"], form)
-        except Exception as exc:  # pragma: no cover - UI safety net
+        except Exception:  # pragma: no cover - UI safety net
+            logger.exception("Unhandled webapp error while processing %s", path)
+            public_error = (
+                "Something went wrong while processing your request. Check the server logs."
+            )
             if path == "/score":
-                score_error = str(exc)
+                score_error = public_error
             else:
-                command_error = str(exc)
+                command_error = public_error
 
     html_body = render_page(
         values,
