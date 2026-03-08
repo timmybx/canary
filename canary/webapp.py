@@ -9,6 +9,7 @@ import os
 import shlex
 import urllib.parse
 from contextlib import redirect_stdout
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from wsgiref.simple_server import make_server
@@ -171,6 +172,22 @@ button:hover { filter:brightness(1.05); }
   border-radius: 14px;
   border: 1px solid var(--error-line);
   background: var(--error-bg);
+}
+.field-note {
+  display:block;
+  font-size:.82rem;
+  color:var(--muted);
+  font-weight:500;
+}
+input[readonly] {
+  color: var(--muted);
+  background: rgba(255,255,255,.04);
+  cursor: not-allowed;
+}
+button[disabled] {
+  cursor: not-allowed;
+  opacity: .65;
+  filter: grayscale(.15);
 }
 .result-stack { display:grid; gap:1rem; margin-top:1rem; }
 .score-number { font-size:2.5rem; font-weight:800; }
@@ -440,21 +457,125 @@ def _detect_available_files(plugin_id: str) -> list[str]:
     return [str(path) for path in candidates if path.exists()]
 
 
+@lru_cache(maxsize=32)
+def _load_plugin_choices_cached(registry_path: str, mtime_ns: int) -> list[str]:
+    path = Path(registry_path)
+    plugin_ids: list[str] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            plugin_id = str(record.get("plugin_id") or "").strip()
+            if plugin_id:
+                plugin_ids.append(plugin_id)
+    return sorted(set(plugin_ids))
+
+
+def _load_plugin_choices(registry_path: str) -> list[str]:
+    path = Path(registry_path)
+    if not path.exists() or not path.is_file():
+        return []
+    try:
+        stat = path.stat()
+    except OSError:
+        return []
+    return _load_plugin_choices_cached(str(path.resolve()), stat.st_mtime_ns)
+
+
+def _plugin_known(plugin_id: str, registry_path: str) -> bool:
+    plugin_id = plugin_id.strip()
+    if not plugin_id:
+        return False
+    choices = _load_plugin_choices(registry_path)
+    return not choices or plugin_id in choices
+
+
+def _plugin_picker(name: str, label: str, value: Any, plugin_options: list[str]) -> str:
+    datalist_id = f"{name}-list"
+    options_html = "".join(
+        f'<option value="{_escape(plugin)}"></option>' for plugin in plugin_options
+    )
+    attrs = [
+        'type="text"',
+        f'name="{_escape(name)}"',
+        f'value="{_escape(value)}"',
+        'placeholder="cucumber-reports"',
+        f'list="{_escape(datalist_id)}"',
+        'autocomplete="off"',
+        'spellcheck="false"',
+        'data-plugin-input="true"',
+    ]
+    if plugin_options:
+        note = (
+            '<span class="field-note">Autocomplete is populated from the current registry file. '
+            "Unknown plugin IDs are blocked.</span>"
+        )
+    else:
+        note = (
+            '<span class="field-note">No registry plugin list was found yet, '
+            "so free text is still allowed.</span>"
+        )
+    return (
+        f"<label>{_escape(label)}"
+        f"<input {' '.join(attrs)}>"
+        f'<datalist id="{_escape(datalist_id)}">{options_html}</datalist>'
+        f"{note}</label>"
+    )
+
+
+def _input_text(
+    name: str, label: str, value: Any, placeholder: str = "", *, readonly: bool = False
+) -> str:
+    attrs = [
+        'type="text"',
+        f'name="{_escape(name)}"',
+        f'value="{_escape(value)}"',
+        f'placeholder="{_escape(placeholder)}"',
+    ]
+    if readonly:
+        attrs.append("readonly")
+    note = '<span class="field-note">Shown for reference only.</span>' if readonly else ""
+    return f"<label>{_escape(label)}<input {' '.join(attrs)}>{note}</label>"
+
+
+def _validation_script(plugin_options: list[str]) -> str:
+    if not plugin_options:
+        return ""
+    payload = json.dumps(plugin_options, ensure_ascii=False)
+    return f"""
+<script>
+(() => {{
+  const allowed = new Set({payload});
+  for (const form of document.querySelectorAll('form')) {{
+    const pluginInput = form.querySelector('[data-plugin-input="true"]');
+    if (!pluginInput) continue;
+    const button = form.querySelector('button[type="submit"]');
+    const sync = () => {{
+      const value = pluginInput.value.trim();
+      const valid = value.length > 0 && allowed.has(value);
+      pluginInput.setCustomValidity(valid ? '' : 'Choose a plugin ID from the registry list.');
+      if (button) button.disabled = !valid;
+    }};
+    pluginInput.addEventListener('input', sync);
+    pluginInput.addEventListener('change', sync);
+    sync();
+  }}
+}})();
+</script>
+"""
+
+
 def _score_payload(result: ScoreResult) -> dict[str, Any]:
     payload = result.to_dict()
     payload["pretty_json"] = json.dumps(payload, indent=2, ensure_ascii=False)
     payload["pretty_features"] = json.dumps(payload["features"], indent=2, ensure_ascii=False)
     payload["data_files"] = _detect_available_files(result.plugin)
     return payload
-
-
-def _input_text(name: str, label: str, value: Any, placeholder: str = "") -> str:
-    return (
-        f"<label>{_escape(label)}"
-        f'<input type="text" name="{_escape(name)}" '
-        f'value="{_escape(value)}" placeholder="{_escape(placeholder)}">'
-        "</label>"
-    )
 
 
 def _checkbox(name: str, label: str, checked: bool) -> str:
@@ -477,7 +598,10 @@ def _select(name: str, label: str, current: str, options: list[tuple[str, str]])
 
 
 def _render_score_section(
-    values: dict[str, Any], score_result: dict[str, Any] | None, score_error: str | None
+    values: dict[str, Any],
+    plugin_options: list[str],
+    score_result: dict[str, Any] | None,
+    score_error: str | None,
 ) -> str:
     parts = [
         '<section class="card card--score">',
@@ -485,8 +609,8 @@ def _render_score_section(
         "<h2>Score a plugin</h2></div>"
         '<span class="pill">Recommended first</span></div>',
         '<form method="post" action="/score" class="form-grid">',
-        _input_text("plugin", "Plugin ID", values["plugin"], "cucumber-reports"),
-        _input_text("data_dir", "Data directory", values["data_dir"]),
+        _plugin_picker("plugin", "Plugin ID", values["plugin"], plugin_options),
+        _input_text("data_dir", "Data directory", values["data_dir"], readonly=True),
         _checkbox("real", "Prefer real advisory data", bool(values["real"])),
         '<button type="submit">Score plugin</button></form>',
     ]
@@ -533,7 +657,10 @@ def _render_score_section(
 
 
 def _render_command_section(
-    values: dict[str, Any], command_result: dict[str, Any] | None, command_error: str | None
+    values: dict[str, Any],
+    plugin_options: list[str],
+    command_result: dict[str, Any] | None,
+    command_error: str | None,
 ) -> str:
     options = [
         ("collect-registry", "Collect registry"),
@@ -557,11 +684,13 @@ def _render_command_section(
         '<span class="pill pill--muted">Same backend logic</span></div>',
         '<form method="post" action="/run" class="form-grid">',
         _select("command", "Action", values["command"], options),
-        _input_text("plugin", "Plugin ID", values["plugin"], "workflow-cps"),
-        _input_text("data_dir", "Data directory", values["data_dir"]),
-        _input_text("registry_path", "Registry path", values["registry_path"]),
-        _input_text("out_dir", "Output directory", values["out_dir"]),
-        _input_text("github_out_dir", "GitHub output directory", values["github_out_dir"]),
+        _plugin_picker("plugin", "Plugin ID", values["plugin"], plugin_options),
+        _input_text("data_dir", "Data directory", values["data_dir"], readonly=True),
+        _input_text("registry_path", "Registry path", values["registry_path"], readonly=True),
+        _input_text("out_dir", "Output directory", values["out_dir"], readonly=True),
+        _input_text(
+            "github_out_dir", "GitHub output directory", values["github_out_dir"], readonly=True
+        ),
         _input_text(
             "repo_url", "Repo URL override", values["repo_url"], "https://github.com/jenkinsci/..."
         ),
@@ -569,8 +698,8 @@ def _render_command_section(
         _input_text("sleep", "Sleep seconds", values["sleep"]),
         _input_text("timeout_s", "Timeout seconds", values["timeout_s"]),
         _input_text("page_size", "Page size", values["page_size"]),
-        _input_text("out_name", "Registry output filename", values["out_name"]),
-        _input_text("raw_out", "Raw registry filename", values["raw_out"]),
+        _input_text("out_name", "Registry output filename", values["out_name"], readonly=True),
+        _input_text("raw_out", "Raw registry filename", values["raw_out"], readonly=True),
         _input_text("github_timeout_s", "GitHub timeout seconds", values["github_timeout_s"]),
         _input_text("github_max_pages", "GitHub max pages", values["github_max_pages"]),
         _input_text(
@@ -610,11 +739,13 @@ def _render_command_section(
 def render_page(
     values: dict[str, Any],
     *,
+    plugin_options: list[str] | None = None,
     score_result: dict[str, Any] | None = None,
     score_error: str | None = None,
     command_result: dict[str, Any] | None = None,
     command_error: str | None = None,
 ) -> str:
+    plugin_options = plugin_options or []
     return f"""<!doctype html>
 <html lang="en">
   <head>
@@ -645,10 +776,11 @@ def render_page(
     </header>
     <main class="page-shell">
       <div class="grid">
-        {_render_score_section(values, score_result, score_error)}
-        {_render_command_section(values, command_result, command_error)}
+        {_render_score_section(values, plugin_options, score_result, score_error)}
+        {_render_command_section(values, plugin_options, command_result, command_error)}
       </div>
     </main>
+    {_validation_script(plugin_options)}
   </body>
 </html>"""
 
@@ -691,6 +823,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         return _serve_static_asset(asset_name, start_response)
 
     values = _merge_defaults()
+    plugin_options = _load_plugin_choices(values["registry_path"])
     score_result = None
     score_error = None
     command_result = None
@@ -699,11 +832,14 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
     if method == "POST" and path in {"/score", "/run"}:
         form = parse_form(environ)
         values = _merge_defaults(form)
+        plugin_options = _load_plugin_choices(values["registry_path"])
         try:
             if path == "/score":
                 plugin = (form.get("plugin") or "").strip()
                 if not plugin:
                     raise ValueError("Please enter a plugin ID to score.")
+                if not _plugin_known(plugin, values["registry_path"]):
+                    raise ValueError("Please choose a plugin ID from the current registry list.")
                 score_result = _score_payload(
                     score_plugin_baseline(
                         plugin,
@@ -721,6 +857,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
 
     html_body = render_page(
         values,
+        plugin_options=plugin_options,
         score_result=score_result,
         score_error=score_error,
         command_result=command_result,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from canary.webapp import app, render_page
+from canary.webapp import _load_plugin_choices, app, render_page
 
 
 def _run_app(method: str, path: str, body: bytes = b"") -> tuple[str, list[tuple[str, str]], bytes]:
@@ -85,3 +85,49 @@ def test_index_includes_logo_and_favicon():
     assert status == "200 OK"
     assert "/static/canary-logo.png" in text
     assert "/static/favicon.ico" in text
+
+
+def test_load_plugin_choices_reads_registry(tmp_path):
+    registry = tmp_path / "plugins.jsonl"
+    registry.write_text(
+        """{"plugin_id": "cucumber-reports"}
+{"plugin_id": "workflow-cps"}
+{"plugin_id": "cucumber-reports"}
+""",
+        encoding="utf-8",
+    )
+
+    assert _load_plugin_choices(str(registry)) == ["cucumber-reports", "workflow-cps"]
+
+
+def test_render_page_includes_plugin_autocomplete_and_readonly_fields():
+    html = render_page(
+        {
+            "plugin": "cucumber-reports",
+            "data_dir": "data/raw",
+            "real": True,
+            "command": "collect-registry",
+            "overwrite": False,
+            "out_dir": "data/raw/plugins",
+            "registry_path": "data/raw/registry/plugins.jsonl",
+            "max_plugins": "",
+            "sleep": "0",
+            "repo_url": "",
+            "timeout_s": "30",
+            "page_size": "2500",
+            "raw_out": "",
+            "out_name": "plugins.jsonl",
+            "github_out_dir": "data/raw/github",
+            "github_timeout_s": "20",
+            "github_max_pages": "5",
+            "github_commits_days": "365",
+            "only": "",
+            "healthscore_timeout_s": "30",
+        },
+        plugin_options=["cucumber-reports", "workflow-cps"],
+    )
+    assert 'datalist id="plugin-list"' in html
+    assert 'value="cucumber-reports"' in html
+    assert 'data-plugin-input="true"' in html
+    assert "readonly" in html
+    assert "Unknown plugin IDs are blocked." in html
