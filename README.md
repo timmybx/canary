@@ -1,4 +1,4 @@
-﻿[![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/ci.yml)
+[![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/timmybx/canary/badge)](https://scorecard.dev/viewer/?uri=github.com/timmybx/canary)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Ruff](https://img.shields.io/badge/lint-ruff-2ea44f?logo=ruff)
@@ -51,6 +51,7 @@ This repo is intentionally lightweight right now: a working CLI, collectors, a b
 ├── canary/                         # Python package
 │   ├── __init__.py
 │   ├── cli.py                      # CLI entrypoint (`canary ...`)
+│   ├── webapp.py                   # Local web console (`python -m canary.webapp`)
 │   ├── collectors/                 # Data collectors
 │   │   ├── github_repo.py
 │   │   ├── jenkins_advisories.py
@@ -144,7 +145,26 @@ docker compose build
 docker compose run --rm canary canary --help
 ```
 
-### 3) Collect the plugin registry (the “universe snapshot”)
+### 3) Start the local web console
+```bash
+docker compose up canary-web
+```
+
+Then open:
+- `http://localhost:8000`
+
+The web console is designed for local demos and day-to-day use. It lets you:
+- score a plugin and view the JSON/reasons in the browser
+- run the main collection/enrichment commands without remembering all the flags
+- see the command preview and captured console output
+- display the bundled CANARY logo and favicon for a more polished demo experience
+
+You can also run it directly inside the container with:
+```bash
+docker compose run --rm --service-ports canary-web
+```
+
+### 4) Collect the plugin registry (the “universe snapshot”)
 ```bash
 docker compose run --rm canary canary collect registry --real
 ```
@@ -167,7 +187,7 @@ PY
 
 If `unique << lines`, something is wrong with paging/collection and downstream “bulk” collection will only cover a small subset.
 
-### 4) Collect snapshots + advisories in batch (recommended path)
+### 5) Collect snapshots + advisories in batch (recommended path)
 Batch-enrich from the registry (snapshot + advisories + github + healthscore, resume-by-file-exists):
 ```bash
 docker compose run --rm canary canary collect enrich --real --max-plugins 25
@@ -186,7 +206,7 @@ docker compose run --rm canary canary collect enrich --real --only github     --
 docker compose run --rm canary canary collect enrich --real --only healthscore
 ```
 
-### 5) (Optional) Bulk snapshot collection (fan out over registry)
+### 6) (Optional) Bulk snapshot collection (fan out over registry)
 `collect plugin` supports bulk mode when `--id` is omitted. Use `--sleep` to be polite to upstream services.
 
 ```bash
@@ -198,7 +218,7 @@ Useful knobs:
 - `--max-plugins N`
 - `--overwrite`
 
-### 6) (Optional) Collect a single plugin snapshot
+### 7) (Optional) Collect a single plugin snapshot
 Curated snapshot (no network):
 ```bash
 docker compose run --rm canary canary collect plugin --id cucumber-reports
@@ -209,7 +229,7 @@ Real snapshot from the Jenkins plugins API:
 docker compose run --rm canary canary collect plugin --id cucumber-reports --real
 ```
 
-### 7) (Optional) Collect advisories for a single plugin
+### 8) (Optional) Collect advisories for a single plugin
 Sample (offline / deterministic):
 ```bash
 docker compose run --rm canary canary collect advisories --plugin cucumber-reports --out-dir data/raw/advisories

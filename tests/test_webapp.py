@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+from io import BytesIO
+
+from canary.webapp import app, render_page
+
+
+def _run_app(method: str, path: str, body: bytes = b"") -> tuple[str, list[tuple[str, str]], bytes]:
+    status: str | None = None
+    headers: list[tuple[str, str]] = []
+
+    def start_response(resp_status: str, resp_headers: list[tuple[str, str]]) -> None:
+        nonlocal status, headers
+        status = resp_status
+        headers = resp_headers
+
+    environ = {
+        "REQUEST_METHOD": method,
+        "PATH_INFO": path,
+        "CONTENT_LENGTH": str(len(body)),
+        "wsgi.input": BytesIO(body),
+    }
+    response = b"".join(app(environ, start_response))
+    assert status is not None
+    return (status, headers, response)
+
+
+def test_health_endpoint():
+    status, headers, body = _run_app("GET", "/health")
+    assert status == "200 OK"
+    assert ("Content-Type", "application/json; charset=utf-8") in headers
+    assert body == b'{"status": "ok"}'
+
+
+def test_index_renders_console():
+    status, headers, body = _run_app("GET", "/")
+    text = body.decode("utf-8")
+    assert status == "200 OK"
+    assert ("Content-Type", "text/html; charset=utf-8") in headers
+    assert "CANARY Web Console" in text
+    assert "Score a plugin" in text
+    assert "Run a collection step" in text
+
+
+def test_render_page_shows_errors():
+    html = render_page(
+        {
+            "plugin": "",
+            "data_dir": "data/raw",
+            "real": True,
+            "command": "collect-registry",
+            "overwrite": False,
+            "out_dir": "data/raw/plugins",
+            "registry_path": "data/raw/registry/plugins.jsonl",
+            "max_plugins": "",
+            "sleep": "0",
+            "repo_url": "",
+            "timeout_s": "30",
+            "page_size": "2500",
+            "raw_out": "",
+            "out_name": "plugins.jsonl",
+            "github_out_dir": "data/raw/github",
+            "github_timeout_s": "20",
+            "github_max_pages": "5",
+            "github_commits_days": "365",
+            "only": "",
+            "healthscore_timeout_s": "30",
+        },
+        score_error="boom",
+    )
+    assert "boom" in html
+    assert "Prefer real advisory data" in html
+
+
+def test_static_logo_route():
+    status, headers, body = _run_app("GET", "/static/canary-logo.png")
+    assert status == "200 OK"
+    assert any(name == "Content-Type" and value == "image/png" for name, value in headers)
+    assert body[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_index_includes_logo_and_favicon():
+    status, headers, body = _run_app("GET", "/")
+    text = body.decode("utf-8")
+    assert status == "200 OK"
+    assert "/static/canary-logo.png" in text
+    assert "/static/favicon.ico" in text

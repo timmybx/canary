@@ -24,6 +24,7 @@ dev = [
 
 [project.scripts]
 canary = "canary.cli:main"
+canary-web = "canary.webapp:main"
 
 [build-system]
 requires = ["setuptools>=69", "wheel"]

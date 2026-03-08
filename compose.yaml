@@ -10,3 +10,17 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
     entrypoint: ["sh", "/app/docker-entrypoint.sh"]
     command: ["pytest", "-q"]
+  canary-web:
+    build: .
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      - CANARY_DATA_DIR=/app/data
+      - PIP_DISABLE_PIP_VERSION_CHECK=1
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+    entrypoint: ["sh", "/app/docker-entrypoint.sh"]
+    command: ["python", "-m", "canary.webapp"]
+    ports:
+      - "8000:8000"
+
