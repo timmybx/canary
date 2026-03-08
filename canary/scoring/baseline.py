@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -23,8 +24,41 @@ class ScoreResult:
         }
 
 
+_PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _safe_plugin_id(plugin_id: str) -> str | None:
+    """Return a filesystem-safe plugin id or None when invalid."""
+    candidate = plugin_id.strip()
+    if not candidate:
+        return None
+    if not _PLUGIN_ID_RE.fullmatch(candidate):
+        return None
+    return candidate
+
+
+def _advisory_candidates(data_dir: Path, plugin_id: str, *, prefer_real: bool) -> list[Path]:
+    safe_id = _safe_plugin_id(plugin_id)
+    if safe_id is None:
+        return []
+    if prefer_real:
+        return [
+            data_dir / "advisories" / f"{safe_id}.advisories.real.jsonl",
+            data_dir / "advisories" / f"{safe_id}.advisories.sample.jsonl",
+            data_dir / "advisories" / f"{safe_id}.advisories.jsonl",
+        ]
+    return [
+        data_dir / "advisories" / f"{safe_id}.advisories.sample.jsonl",
+        data_dir / "advisories" / f"{safe_id}.advisories.real.jsonl",
+        data_dir / "advisories" / f"{safe_id}.advisories.jsonl",
+    ]
+
+
 def _load_plugin_snapshot(plugin_id: str, data_dir: Path) -> dict[str, Any] | None:
-    path = data_dir / "plugins" / f"{plugin_id}.snapshot.json"
+    safe_id = _safe_plugin_id(plugin_id)
+    if safe_id is None:
+        return None
+    path = data_dir / "plugins" / f"{safe_id}.snapshot.json"
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
@@ -174,10 +208,11 @@ def _load_healthscore_record(plugin_id: str, data_dir: Path) -> dict[str, Any] |
       - collected_at: str|None
     """
     base = data_dir / "healthscore"
+    safe_id = _safe_plugin_id(plugin_id)
 
     # 1) Per-plugin
-    per_plugin = base / "plugins" / f"{plugin_id}.healthscore.json"
-    if per_plugin.exists():
+    per_plugin = (base / "plugins" / f"{safe_id}.healthscore.json") if safe_id else None
+    if per_plugin is not None and per_plugin.exists():
         try:
             payload = json.loads(per_plugin.read_text(encoding="utf-8"))
             rec = payload.get("record") if isinstance(payload, dict) else None
@@ -352,21 +387,12 @@ def _load_advisories_for_plugin(
     Use prefer_real=True to prefer the *.real.jsonl file when both exist.
     """
     candidates = [
-        # Prefer exact suffix matches first so unit tests can use sample while
-        # real pipelines can opt into real data explicitly.
-        data_dir / "advisories" / f"{plugin_id}.advisories.real.jsonl",
-        data_dir / "advisories" / f"{plugin_id}.advisories.sample.jsonl",
-        # Back-compat / alternate naming
-        data_dir / "advisories" / f"{plugin_id}.advisories.jsonl",
+        *_advisory_candidates(data_dir, plugin_id, prefer_real=True),
     ]
 
     if not prefer_real:
         # In sample mode, prefer sample over real if both exist.
-        candidates = [
-            data_dir / "advisories" / f"{plugin_id}.advisories.sample.jsonl",
-            data_dir / "advisories" / f"{plugin_id}.advisories.real.jsonl",
-            data_dir / "advisories" / f"{plugin_id}.advisories.jsonl",
-        ]
+        candidates = _advisory_candidates(data_dir, plugin_id, prefer_real=False)
 
     for path in candidates:
         if path.exists():
@@ -635,14 +661,8 @@ def score_plugin_baseline(
             if not _load_advisories_for_plugin(dep_id, Path(data_dir), prefer_real=real):
                 # Note: empty list can mean "no advisories" OR "missing file".
                 # We treat it as missing if the expected file doesn't exist.
-                adv_path_real = Path(data_dir) / "advisories" / f"{dep_id}.advisories.real.jsonl"
-                adv_path_sample = (
-                    Path(data_dir) / "advisories" / f"{dep_id}.advisories.sample.jsonl"
-                )
-                adv_path_alt = Path(data_dir) / "advisories" / f"{dep_id}.advisories.jsonl"
-                if not (
-                    adv_path_real.exists() or adv_path_sample.exists() or adv_path_alt.exists()
-                ):
+                adv_candidates = _advisory_candidates(Path(data_dir), dep_id, prefer_real=real)
+                if adv_candidates and not any(path.exists() for path in adv_candidates):
                     missing_adv += 1
             if _load_healthscore_record(dep_id, Path(data_dir)) is None:
                 missing_hs += 1
