@@ -37,11 +37,29 @@ def _safe_plugin_id(plugin_id: str) -> str | None:
     return candidate
 
 
+def _resolved_base_dir(data_dir: str | Path) -> Path:
+    """Return a validated, resolved base directory for local scoring data."""
+    base = Path(data_dir).expanduser().resolve()
+    if not base.exists() or not base.is_dir():
+        raise ValueError(f"Invalid data_dir: {data_dir}")
+    return base
+
+
+def _safe_join_under(base: Path, *parts: str) -> Path:
+    """Join path segments under a trusted base directory and forbid traversal."""
+    candidate = base.joinpath(*parts).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(f"Unsafe path outside base dir: {candidate}") from exc
+    return candidate
+
+
 def _advisory_candidates(data_dir: Path, plugin_id: str, *, prefer_real: bool) -> list[Path]:
     safe_id = _safe_plugin_id(plugin_id)
     if safe_id is None:
         return []
-    base = data_dir.resolve()
+    base = _resolved_base_dir(data_dir)
     if prefer_real:
         parts = (
             ("advisories", f"{safe_id}.advisories.real.jsonl"),
@@ -57,9 +75,8 @@ def _advisory_candidates(data_dir: Path, plugin_id: str, *, prefer_real: bool) -
 
     out: list[Path] = []
     for seg_a, seg_b in parts:
-        candidate = (base / seg_a / seg_b).resolve()
         try:
-            candidate.relative_to(base)
+            candidate = _safe_join_under(base, seg_a, seg_b)
         except ValueError:
             continue
         out.append(candidate)
@@ -70,10 +87,9 @@ def _load_plugin_snapshot(plugin_id: str, data_dir: Path) -> dict[str, Any] | No
     safe_id = _safe_plugin_id(plugin_id)
     if safe_id is None:
         return None
-    base = data_dir.resolve()
-    path = (base / "plugins" / f"{safe_id}.snapshot.json").resolve()
+    base = _resolved_base_dir(data_dir)
     try:
-        path.relative_to(base)
+        path = _safe_join_under(base, "plugins", f"{safe_id}.snapshot.json")
     except ValueError:
         return None
     if not path.exists():
@@ -98,9 +114,9 @@ def _extract_dependency_plugin_ids(snapshot: dict[str, Any]) -> list[str]:
                 continue
             pid = d.get("name")
             if isinstance(pid, str):
-                pid = pid.strip()
-                if pid:
-                    out.append(pid)
+                safe_id = _safe_plugin_id(pid)
+                if safe_id:
+                    out.append(safe_id)
     # stable output for deterministic JSON/testing
     return sorted(set(out))
 
@@ -224,14 +240,14 @@ def _load_healthscore_record(plugin_id: str, data_dir: Path) -> dict[str, Any] |
       - details: Any
       - collected_at: str|None
     """
-    base = data_dir.resolve() / "healthscore"
+    base = _safe_join_under(_resolved_base_dir(data_dir), "healthscore")
     safe_id = _safe_plugin_id(plugin_id)
 
     # 1) Per-plugin
-    per_plugin = (base / "plugins" / f"{safe_id}.healthscore.json").resolve() if safe_id else None
-    if per_plugin is not None:
+    per_plugin = None
+    if safe_id:
         try:
-            per_plugin.relative_to(base)
+            per_plugin = _safe_join_under(base, "plugins", f"{safe_id}.healthscore.json")
         except ValueError:
             per_plugin = None
     if per_plugin is not None and per_plugin.exists():
@@ -253,8 +269,8 @@ def _load_healthscore_record(plugin_id: str, data_dir: Path) -> dict[str, Any] |
     #   <data_dir>/healthscore/plugins.healthscore.json
     #   <data_dir>/healthscore/plugins/plugins.healthscore.json   (common collector output)
     agg_candidates = [
-        base / "plugins.healthscore.json",
-        base / "plugins" / "plugins.healthscore.json",
+        _safe_join_under(base, "plugins.healthscore.json"),
+        _safe_join_under(base, "plugins", "plugins.healthscore.json"),
     ]
     for agg in agg_candidates:
         if not agg.exists():
@@ -446,6 +462,8 @@ def score_plugin_baseline(
       plugins/<plugin>.snapshot.json
     """
     name = plugin.lower().strip()
+    plugin_id = _safe_plugin_id(name)
+    base_dir = _resolved_base_dir(data_dir)
     score = 0
     reasons: list[str] = []
     features: dict[str, Any] = {"matched_core_keywords": [], "matched_scm_keywords": []}
@@ -468,8 +486,9 @@ def score_plugin_baseline(
         reasons.append("Name suggests SCM/integration surface area (baseline heuristic).")
 
     # --- New: advisory-backed signals ---
-    plugin_id = name  # for now, plugin arg is the id
-    advisories = _load_advisories_for_plugin(plugin_id, Path(data_dir), prefer_real=real)
+    advisories = (
+        _load_advisories_for_plugin(plugin_id, base_dir, prefer_real=real) if plugin_id else []
+    )
     advisory_count = len(advisories)
     features["advisory_count"] = advisory_count
 
@@ -556,7 +575,7 @@ def score_plugin_baseline(
         reasons.append("No advisories found in local dataset (yet).")
 
     # --- New: plugin snapshot signals (plugins API) ---
-    snapshot = _load_plugin_snapshot(plugin_id, Path(data_dir))
+    snapshot = _load_plugin_snapshot(plugin_id, base_dir) if plugin_id else None
     features["has_plugin_snapshot"] = snapshot is not None
 
     # defaults so JSON always has keys
@@ -671,22 +690,22 @@ def score_plugin_baseline(
         for dep_id in dep_ids:
             pts, det = _dependency_points(
                 dep_id,
-                data_dir=Path(data_dir),
+                data_dir=base_dir,
                 today=today,
                 prefer_real=real,
             )
             dep_points_pairs.append((pts, det))
 
             # missing-data counts (best-effort)
-            if _load_plugin_snapshot(dep_id, Path(data_dir)) is None:
+            if _load_plugin_snapshot(dep_id, base_dir) is None:
                 missing_snap += 1
-            if not _load_advisories_for_plugin(dep_id, Path(data_dir), prefer_real=real):
+            if not _load_advisories_for_plugin(dep_id, base_dir, prefer_real=real):
                 # Note: empty list can mean "no advisories" OR "missing file".
                 # We treat it as missing if the expected file doesn't exist.
-                adv_candidates = _advisory_candidates(Path(data_dir), dep_id, prefer_real=real)
+                adv_candidates = _advisory_candidates(base_dir, dep_id, prefer_real=real)
                 if adv_candidates and not any(path.exists() for path in adv_candidates):
                     missing_adv += 1
-            if _load_healthscore_record(dep_id, Path(data_dir)) is None:
+            if _load_healthscore_record(dep_id, base_dir) is None:
                 missing_hs += 1
 
             if det.get("advisory_count", 0) and int(det.get("advisory_count", 0)) > 0:
@@ -758,7 +777,7 @@ def score_plugin_baseline(
     features.setdefault("healthscore_date", None)
     features.setdefault("healthscore_collected_at", None)
 
-    hs = _load_healthscore_record(plugin_id, Path(data_dir))
+    hs = _load_healthscore_record(plugin_id, base_dir) if plugin_id else None
     if hs is not None:
         features["healthscore_value"] = hs.get("value")
         features["healthscore_date"] = hs.get("date")
