@@ -41,24 +41,41 @@ def _advisory_candidates(data_dir: Path, plugin_id: str, *, prefer_real: bool) -
     safe_id = _safe_plugin_id(plugin_id)
     if safe_id is None:
         return []
+    base = data_dir.resolve()
     if prefer_real:
-        return [
-            data_dir / "advisories" / f"{safe_id}.advisories.real.jsonl",
-            data_dir / "advisories" / f"{safe_id}.advisories.sample.jsonl",
-            data_dir / "advisories" / f"{safe_id}.advisories.jsonl",
-        ]
-    return [
-        data_dir / "advisories" / f"{safe_id}.advisories.sample.jsonl",
-        data_dir / "advisories" / f"{safe_id}.advisories.real.jsonl",
-        data_dir / "advisories" / f"{safe_id}.advisories.jsonl",
-    ]
+        parts = (
+            ("advisories", f"{safe_id}.advisories.real.jsonl"),
+            ("advisories", f"{safe_id}.advisories.sample.jsonl"),
+            ("advisories", f"{safe_id}.advisories.jsonl"),
+        )
+    else:
+        parts = (
+            ("advisories", f"{safe_id}.advisories.sample.jsonl"),
+            ("advisories", f"{safe_id}.advisories.real.jsonl"),
+            ("advisories", f"{safe_id}.advisories.jsonl"),
+        )
+
+    out: list[Path] = []
+    for seg_a, seg_b in parts:
+        candidate = (base / seg_a / seg_b).resolve()
+        try:
+            candidate.relative_to(base)
+        except ValueError:
+            continue
+        out.append(candidate)
+    return out
 
 
 def _load_plugin_snapshot(plugin_id: str, data_dir: Path) -> dict[str, Any] | None:
     safe_id = _safe_plugin_id(plugin_id)
     if safe_id is None:
         return None
-    path = data_dir / "plugins" / f"{safe_id}.snapshot.json"
+    base = data_dir.resolve()
+    path = (base / "plugins" / f"{safe_id}.snapshot.json").resolve()
+    try:
+        path.relative_to(base)
+    except ValueError:
+        return None
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
@@ -207,11 +224,16 @@ def _load_healthscore_record(plugin_id: str, data_dir: Path) -> dict[str, Any] |
       - details: Any
       - collected_at: str|None
     """
-    base = data_dir / "healthscore"
+    base = data_dir.resolve() / "healthscore"
     safe_id = _safe_plugin_id(plugin_id)
 
     # 1) Per-plugin
-    per_plugin = (base / "plugins" / f"{safe_id}.healthscore.json") if safe_id else None
+    per_plugin = (base / "plugins" / f"{safe_id}.healthscore.json").resolve() if safe_id else None
+    if per_plugin is not None:
+        try:
+            per_plugin.relative_to(base)
+        except ValueError:
+            per_plugin = None
     if per_plugin is not None and per_plugin.exists():
         try:
             payload = json.loads(per_plugin.read_text(encoding="utf-8"))
