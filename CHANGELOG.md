@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.3] - 2026-03-08
+### Added
+- Web UI with `canary-web` entry point, static assets, and autocomplete-backed search flow.
+- NGINX deployment configuration for serving the web frontend.
+- New data collection and build capabilities for GitHub plugin metadata, plugin registry snapshots, healthscore data, and advisory event assembly.
+- CVSS score collection and severity-category support for Jenkins advisories.
+- Expanded Makefile targets and data directory scaffolding (`raw`, `processed`, `cache`) for repeatable pipeline runs.
+
+### Changed
+- Baseline scoring logic iterated across dependency scoring, real-data scoring pathways, and broader scoring refinements.
+- CLI orchestration expanded to cover new collection and enrichment workflows.
+- CI and security automation updated across CodeQL, Scorecard, ClusterFuzzLite, Dependabot, pre-commit autoupdate, and new Zizmor workflow checks.
+- Docker and compose configuration updated for frontend serving and additional hardening tied to CodeQL findings.
+- Repository governance and docs updates including CODEOWNERS, README flow updates, and citation metadata refresh.
+
+### Fixed
+- Plugin registry ingestion and GitHub link handling fixes to reduce collector edge-case failures.
+- Collection/scoring integration fixes and follow-up stability fixes in baseline processing and webapp paths.
+- Security audit and static-analysis warning remediation across application and container config.
+
 ## [0.1.2] - 2026-02-08
 ### Added
 - CodeQL workflow for `main` push/PR and weekly scheduled analysis across `python` and `actions`.
