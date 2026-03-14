@@ -59,7 +59,11 @@ def _parse_yyyymmdd(value: str) -> date:
     return datetime.strptime(value, "%Y%m%d").date()
 
 
-def _existing_day_tables(client: Any, start_yyyymmdd: str, end_yyyymmdd: str) -> set[str]:
+def _existing_day_tables(
+    client: Any,
+    start_yyyymmdd: str,
+    end_yyyymmdd: str,
+) -> set[str]:
     bigquery = _import_bigquery()
     sql = """
     SELECT table_name
@@ -317,7 +321,7 @@ def main() -> None:
         "--sample-percent",
         type=float,
         default=5.0,
-        help="Percent of each daily table to scan with TABLESAMPLE SYSTEM (default: 5).",
+        help=("Percent of each daily table to scan with TABLESAMPLE SYSTEM (default: 5)."),
     )
     args = parser.parse_args()
 

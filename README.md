@@ -111,6 +111,9 @@ Raw:
 - `data/raw/plugins/<plugin>.snapshot.json` — plugin snapshot
 - `data/raw/advisories/<plugin>.advisories.{sample|real}.jsonl` — advisories (per plugin)
 - `data/raw/healthscore/plugins/plugins.healthscore.json` — aggregated healthscore dataset (bulk)
+- `data/raw/gharchive/windows/<start>_<end>.gharchive.jsonl` — historical GH Archive features by window
+- `data/raw/gharchive/plugins/<plugin>.gharchive.jsonl` — historical GH Archive timeline per plugin
+- `data/raw/gharchive/gharchive_index.json` — GH Archive collection run summary
 
 Processed:
 - `data/processed/events/advisories.jsonl` — normalized/deduped advisory events stream
@@ -271,10 +274,11 @@ Output includes:
 
 ---
 
-## Google BigQuery GH Archive PoC (Jenkins Plugins)
+## Google BigQuery GH Archive Collector (Historical Plugin Activity)
 
-This repo includes a small proof-of-concept query in `canary/datasets/gharchive.py` that pulls
-GitHub Archive activity for Jenkins plugin repos (`jenkinsci/*-plugin`) from BigQuery.
+CANARY now includes a first-class collector for historical GitHub activity windows pulled from
+GH Archive via BigQuery. Unlike the older CSV proof-of-concept, this collector writes CANARY-style
+JSON artifacts under `data/raw/gharchive/` so the historical data lines up with the rest of the repo.
 
 ### 1) One-time local setup (Google Cloud CLI + ADC)
 
@@ -302,42 +306,87 @@ gcloud auth application-default login
 gcloud auth application-default set-quota-project <YOUR_PROJECT_ID>
 ```
 
-Install Python dependency (local environment):
+Install Python dependency in the environment that will run the collector:
 
 ```bash
 pip install google-cloud-bigquery
 ```
 
-### 2) Run the sample query
+### 2) Make sure plugin snapshots exist
 
-Default run (last 7 complete UTC days):
+The GH Archive collector uses plugin snapshots to resolve each plugin to a GitHub repository.
+
 ```bash
-make gharchive-sample
+docker compose run --rm canary canary collect enrich --real --only snapshot --max-plugins 200
 ```
 
-If `make` is unavailable on your platform:
+Or for one plugin:
+
 ```bash
-python -m canary.datasets.gharchive
+docker compose run --rm canary canary collect plugin --id cucumber-reports --real
 ```
 
-Custom date range/output:
+### 3) Collect historical windows
+
+Example: collect monthly-ish 30-day windows for January through March 2026 across the registry:
+
 ```bash
-python -m canary.datasets.gharchive --start 20260201 --end 20260207 --out data/processed/gharchive_sample.csv
+docker compose run --rm canary canary collect gharchive \
+  --start 20260101 \
+  --end 20260331 \
+  --bucket-days 30
 ```
 
-### 3) Cost guardrail
+Single-plugin example:
 
-The script sets `maximum_bytes_billed` to 2GB by default. You can override it:
 ```bash
-python -m canary.datasets.gharchive --max-bytes-billed 500000000
+docker compose run --rm canary canary collect gharchive \
+  --plugin cucumber-reports \
+  --start 20260101 \
+  --end 20260331 \
+  --bucket-days 30
 ```
 
-The script also samples each day table to keep costs low (default: `--sample-percent 5`).
-To sample less/more:
+This writes:
+- `data/raw/gharchive/windows/<start>_<end>.gharchive.jsonl`
+- `data/raw/gharchive/plugins/<plugin>.gharchive.jsonl`
+- `data/raw/gharchive/gharchive_index.json`
+
+Each record includes a plugin id, repo name, time window, and historical activity features such as:
+- pushes / committers / active days
+- PR open/close/merge counts
+- issue open/close/reopen counts
+- merge/close latency proxies
+- churn / owner concentration / security-label proxy
+
+### 4) Cost guardrails
+
+The collector sets `maximum_bytes_billed` per window query to 2GB by default and samples each daily
+GH Archive table at 5% by default. You can tune both:
+
 ```bash
-python -m canary.datasets.gharchive --sample-percent 2
-python -m canary.datasets.gharchive --sample-percent 20
+docker compose run --rm canary canary collect gharchive \
+  --start 20260101 \
+  --end 20260331 \
+  --bucket-days 30 \
+  --sample-percent 2 \
+  --max-bytes-billed 500000000
 ```
+
+### 5) Fallback behavior
+
+If a snapshot lacks an explicit GitHub repo mapping, you can optionally fall back to the common
+`jenkinsci/<plugin>-plugin` naming convention:
+
+```bash
+docker compose run --rm canary canary collect gharchive \
+  --start 20260101 \
+  --end 20260331 \
+  --allow-jenkinsci-fallback
+```
+
+The older `canary/datasets/gharchive.py` script is still available as a standalone experiment, but
+the recommended path for CANARY data collection is now `canary collect gharchive`.
 
 ---
 

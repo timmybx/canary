@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from canary.build.advisories_events import build_advisories_events
+from canary.collectors.gharchive_history import collect_gharchive_history_real
 from canary.collectors.github_plugin import collect_github_plugin_real
 from canary.collectors.healthscore import collect_health_scores
 from canary.collectors.jenkins_advisories import collect_advisories_real, collect_advisories_sample
@@ -234,6 +235,24 @@ def _cmd_collect_github(args: argparse.Namespace) -> int:
         max_pages=int(args.max_pages),
         commits_days=int(args.commits_days),
         overwrite=bool(args.overwrite),
+    )
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _cmd_collect_gharchive(args: argparse.Namespace) -> int:
+    result = collect_gharchive_history_real(
+        data_dir=args.data_dir,
+        registry_path=args.registry_path,
+        out_dir=args.out_dir,
+        plugin_id=args.plugin,
+        start_yyyymmdd=str(args.start),
+        end_yyyymmdd=str(args.end),
+        bucket_days=int(args.bucket_days),
+        sample_percent=float(args.sample_percent),
+        max_bytes_billed=int(args.max_bytes_billed),
+        overwrite=bool(args.overwrite),
+        allow_jenkinsci_fallback=bool(args.allow_jenkinsci_fallback),
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0
@@ -540,6 +559,62 @@ def build_parser() -> argparse.ArgumentParser:
         "--overwrite", action="store_true", help="Overwrite existing GitHub JSON files"
     )
     github.set_defaults(func=_cmd_collect_github)
+
+    gharchive = collect_sub.add_parser(
+        "gharchive",
+        help=(
+            "Collect historical GitHub activity windows for Jenkins plugins "
+            "from GH Archive/BigQuery"
+        ),
+    )
+    gharchive.add_argument(
+        "--plugin",
+        default=None,
+        help="Optional single plugin id (default: bulk mode using --registry-path)",
+    )
+    gharchive.add_argument(
+        "--data-dir",
+        default="data/raw",
+        help="Raw dataset root (reads plugins/<id>.snapshot.json)",
+    )
+    gharchive.add_argument(
+        "--registry-path",
+        default="data/raw/registry/plugins.jsonl",
+        help="Plugin registry JSONL used in bulk mode",
+    )
+    gharchive.add_argument(
+        "--out-dir",
+        default="data/raw/gharchive",
+        help="Output directory for GH Archive JSON artifacts",
+    )
+    gharchive.add_argument("--start", required=True, help="Start date in YYYYMMDD")
+    gharchive.add_argument("--end", required=True, help="End date in YYYYMMDD")
+    gharchive.add_argument(
+        "--bucket-days",
+        default=30,
+        help="Window size in days for historical feature buckets (default: 30)",
+    )
+    gharchive.add_argument(
+        "--sample-percent",
+        default=5.0,
+        help="Percent of each GH Archive day table to scan (default: 5)",
+    )
+    gharchive.add_argument(
+        "--max-bytes-billed",
+        default=2_000_000_000,
+        help="BigQuery maximum bytes billed per window query",
+    )
+    gharchive.add_argument(
+        "--allow-jenkinsci-fallback",
+        action="store_true",
+        help="Fall back to jenkinsci/<plugin>-plugin when a snapshot lacks repo mapping",
+    )
+    gharchive.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing GH Archive window files",
+    )
+    gharchive.set_defaults(func=_cmd_collect_gharchive)
 
     healthscore = collect_sub.add_parser(
         "healthscore",

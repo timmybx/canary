@@ -28,6 +28,8 @@ From the registry you can fan out to per-plugin collectors:
 - `data/raw/plugins/<plugin_id>.snapshot.json` — Jenkins plugin snapshot (`collect plugin`)
 - `data/raw/advisories/<plugin_id>.advisories.real.jsonl` — plugin advisories (`collect advisories --real`)
 - `data/raw/github/<plugin_id>.*.json` — raw GitHub API payloads (`collect github`)
+- `data/raw/gharchive/windows/<start>_<end>.gharchive.jsonl` — historical GH Archive feature windows (`collect gharchive`)
+- `data/raw/gharchive/plugins/<plugin_id>.gharchive.jsonl` — historical GH Archive timeline per plugin (`collect gharchive`)
 
 ## Processed datasets
 
@@ -40,6 +42,7 @@ From the registry you can fan out to per-plugin collectors:
 canary collect registry --real
 canary collect enrich --real --max-plugins 50
 canary build advisories-events
+canary collect gharchive --start 20260101 --end 20260331 --bucket-days 30
 ```
 
 This gets you a consistent raw/processed dataset set that can later be converted

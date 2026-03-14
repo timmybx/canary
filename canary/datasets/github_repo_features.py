@@ -335,7 +335,12 @@ def list_repos_for_org(
         batch = _get_json(
             session,
             url,
-            params={"type": "public", "sort": "pushed", "per_page": per_page, "page": page},
+            params={
+                "type": "public",
+                "sort": "pushed",
+                "per_page": per_page,
+                "page": page,
+            },
         )
         if not isinstance(batch, list) or not batch:
             break
@@ -534,7 +539,7 @@ def main() -> None:
     has_token = bool(os.getenv("GITHUB_TOKEN"))
     if not has_token and args.max_repos > 10:
         print(
-            "No GITHUB_TOKEN detected; capping --max-repos to 10 to reduce rate-limit failures.",
+            ("No GITHUB_TOKEN detected; capping --max-repos to 10 to reduce rate-limit failures."),
             file=sys.stderr,
         )
         args.max_repos = 10
