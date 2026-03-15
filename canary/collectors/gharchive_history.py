@@ -41,6 +41,143 @@ WHERE repo.name IN UNNEST(@repo_names)
 """
 
 
+def _split_repo_full_name(repo_full_name: str) -> tuple[str | None, str | None]:
+    repo_full_name = (repo_full_name or "").strip()
+    if not repo_full_name or "/" not in repo_full_name:
+        return None, None
+    owner, repo = repo_full_name.split("/", 1)
+    owner = owner.strip() or None
+    repo = repo.strip() or None
+    return owner, repo
+
+
+def _coerce_bool_or_none(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v == "true":
+            return True
+        if v == "false":
+            return False
+    return None
+
+
+def _event_yyyymm_from_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m")
+    if isinstance(value, date):
+        return value.strftime("%Y-%m")
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        if re.fullmatch(r"\d{4}-\d{2}", s):
+            return s
+        for parser in (datetime.fromisoformat,):
+            try:
+                dt = parser(s.replace("Z", "+00:00"))
+                return dt.strftime("%Y-%m")
+            except ValueError:
+                pass
+        try:
+            d = date.fromisoformat(s[:10])
+            return d.strftime("%Y-%m")
+        except ValueError:
+            return None
+    return None
+
+
+def _normalize_timestamp_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        s = value.strip()
+        return s or None
+    return str(value)
+
+
+def _normalize_date_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        try:
+            return date.fromisoformat(s[:10]).isoformat()
+        except ValueError:
+            return s[:10]
+    return str(value)
+
+
+def _build_normalized_event_row(
+    raw_row: dict[str, Any],
+    plugin_id: str,
+    repo_full_name: str,
+    *,
+    collected_at: str,
+    sample_percent: float,
+    registry_path: str,
+    source_window_start_yyyymmdd: str,
+    source_window_end_yyyymmdd: str,
+) -> dict[str, Any]:
+    owner, repo_name = _split_repo_full_name(repo_full_name)
+    event_ts = _normalize_timestamp_value(raw_row.get("event_ts"))
+    event_date = _normalize_date_value(raw_row.get("event_date"))
+    event_yyyymm = _event_yyyymm_from_value(raw_row.get("event_ts")) or _event_yyyymm_from_value(
+        raw_row.get("event_date")
+    )
+    event_year = None
+    event_month = None
+    if event_yyyymm:
+        event_year = int(event_yyyymm[:4])
+        event_month = int(event_yyyymm[5:7])
+
+    text_blob = raw_row.get("text_blob")
+    if isinstance(text_blob, str):
+        text_blob = text_blob.strip() or None
+    else:
+        text_blob = None if text_blob is None else str(text_blob)
+
+    return {
+        "source": "gharchive_bigquery",
+        "collected_at": collected_at,
+        "sample_percent": sample_percent,
+        "registry_path": registry_path,
+        "source_window_start_yyyymmdd": source_window_start_yyyymmdd,
+        "source_window_end_yyyymmdd": source_window_end_yyyymmdd,
+        "plugin_id": plugin_id,
+        "repo_full_name": repo_full_name,
+        "repo_owner": owner,
+        "repo_name": repo_name,
+        "event_type": raw_row.get("event_type"),
+        "event_ts": event_ts,
+        "event_date": event_date,
+        "event_year": event_year,
+        "event_month": event_month,
+        "event_yyyymm": event_yyyymm,
+        "actor_login": raw_row.get("actor_login"),
+        "action": raw_row.get("action"),
+        "pr_merged": _coerce_bool_or_none(raw_row.get("pr_merged")),
+        "pr_created_ts": _normalize_timestamp_value(raw_row.get("pr_created_ts")),
+        "pr_closed_ts": _normalize_timestamp_value(raw_row.get("pr_closed_ts")),
+        "issue_created_ts": _normalize_timestamp_value(raw_row.get("issue_created_ts")),
+        "issue_closed_ts": _normalize_timestamp_value(raw_row.get("issue_closed_ts")),
+        "text_blob": text_blob,
+    }
+
+
 FEATURE_KEYS = [
     "events_total",
     "actors_unique",

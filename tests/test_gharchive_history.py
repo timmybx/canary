@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from canary.collectors.gharchive_history import (
+    _build_normalized_event_row,
     _build_query_with_sampling,
     _iter_windows,
     collect_gharchive_history_real,
@@ -176,3 +177,87 @@ def test_collect_gharchive_history_writes_window_and_plugin_files(tmp_path: Path
     assert window_rows[0]["plugin_id"] == "cucumber-reports"
     assert window_rows[0]["repo_full_name"] == "jenkinsci/cucumber-reports-plugin"
     assert window_rows[0]["events_total"] == 25
+
+
+def test_build_normalized_event_row_schema():
+    raw_row = {
+        "event_type": "PullRequestEvent",
+        "event_ts": "2025-07-18T12:34:56Z",
+        "event_date": "2025-07-18",
+        "actor_login": "octocat",
+        "action": "closed",
+        "pr_merged": "true",
+        "pr_created_ts": "2025-07-10T09:00:00Z",
+        "pr_closed_ts": "2025-07-18T12:34:00Z",
+        "issue_created_ts": None,
+        "issue_closed_ts": None,
+        "text_blob": "  fix retry logic  ",
+    }
+
+    row = _build_normalized_event_row(
+        raw_row,
+        "kubernetes",
+        "jenkinsci/kubernetes-plugin",
+        collected_at="2026-03-15T13:34:56+00:00",
+        sample_percent=1.0,
+        registry_path="data/raw/registry/plugins.jsonl",
+        source_window_start_yyyymmdd="20250701",
+        source_window_end_yyyymmdd="20250731",
+    )
+
+    assert row["source"] == "gharchive_bigquery"
+    assert row["plugin_id"] == "kubernetes"
+    assert row["repo_full_name"] == "jenkinsci/kubernetes-plugin"
+    assert row["repo_owner"] == "jenkinsci"
+    assert row["repo_name"] == "kubernetes-plugin"
+    assert row["event_type"] == "PullRequestEvent"
+    assert row["event_ts"] == "2025-07-18T12:34:56Z"
+    assert row["event_date"] == "2025-07-18"
+    assert row["event_yyyymm"] == "2025-07"
+    assert row["event_year"] == 2025
+    assert row["event_month"] == 7
+    assert row["actor_login"] == "octocat"
+    assert row["action"] == "closed"
+    assert row["pr_merged"] is True
+    assert row["pr_created_ts"] == "2025-07-10T09:00:00Z"
+    assert row["pr_closed_ts"] == "2025-07-18T12:34:00Z"
+    assert row["issue_created_ts"] is None
+    assert row["issue_closed_ts"] is None
+    assert row["text_blob"] == "fix retry logic"
+    assert row["sample_percent"] == 1.0
+    assert row["registry_path"] == "data/raw/registry/plugins.jsonl"
+    assert row["source_window_start_yyyymmdd"] == "20250701"
+    assert row["source_window_end_yyyymmdd"] == "20250731"
+
+
+def test_build_normalized_event_row_handles_missing_repo_parts_and_false_bool():
+    raw_row = {
+        "event_type": "IssuesEvent",
+        "event_ts": None,
+        "event_date": "2025-08-01",
+        "actor_login": "someone",
+        "action": "reopened",
+        "pr_merged": "false",
+        "text_blob": "",
+    }
+
+    row = _build_normalized_event_row(
+        raw_row,
+        "example-plugin",
+        "not-a-full-name",
+        collected_at="2026-03-15T13:34:56+00:00",
+        sample_percent=5.0,
+        registry_path="data/raw/registry/plugins.jsonl",
+        source_window_start_yyyymmdd="20250801",
+        source_window_end_yyyymmdd="20250831",
+    )
+
+    assert row["repo_owner"] is None
+    assert row["repo_name"] is None
+    assert row["event_ts"] is None
+    assert row["event_date"] == "2025-08-01"
+    assert row["event_yyyymm"] == "2025-08"
+    assert row["event_year"] == 2025
+    assert row["event_month"] == 8
+    assert row["pr_merged"] is False
+    assert row["text_blob"] is None
