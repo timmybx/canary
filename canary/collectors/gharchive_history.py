@@ -421,14 +421,26 @@ def _build_window_job_config(
     dry_run: bool,
 ) -> Any:
     bigquery = _import_bigquery()
-    return bigquery.QueryJobConfig(
-        query_parameters=[
+    kwargs = {
+        "query_parameters": [
             bigquery.ArrayQueryParameter("repo_names", "STRING", repo_names),
         ],
-        maximum_bytes_billed=max_bytes_billed,
-        dry_run=dry_run,
-        use_query_cache=not dry_run,
-    )
+        "maximum_bytes_billed": max_bytes_billed,
+        "dry_run": dry_run,
+        "use_query_cache": not dry_run,
+    }
+    try:
+        return bigquery.QueryJobConfig(**kwargs)
+    except TypeError:
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=kwargs["query_parameters"],
+            maximum_bytes_billed=max_bytes_billed,
+        )
+        if hasattr(job_config, "dry_run"):
+            job_config.dry_run = dry_run
+        if hasattr(job_config, "use_query_cache"):
+            job_config.use_query_cache = not dry_run
+        return job_config
 
 
 def _estimate_window_bytes(
@@ -507,7 +519,10 @@ def collect_gharchive_history_real(
     """
     bigquery = _import_bigquery()
     project = os.getenv("GOOGLE_CLOUD_PROJECT") or None
-    client = bigquery.Client(project=project)
+    try:
+        client = bigquery.Client(project=project) if project else bigquery.Client()
+    except TypeError:
+        client = bigquery.Client()
 
     targets = resolve_plugin_repo_targets(
         data_dir=data_dir,
