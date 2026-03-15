@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import re
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
@@ -413,6 +414,48 @@ def _normalize_bigquery_row(row: Any) -> dict[str, Any]:
         return {k: row[k] for k in keys}
 
 
+def _build_window_job_config(
+    *,
+    repo_names: list[str],
+    max_bytes_billed: int,
+    dry_run: bool,
+) -> Any:
+    bigquery = _import_bigquery()
+    return bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("repo_names", "STRING", repo_names),
+        ],
+        maximum_bytes_billed=max_bytes_billed,
+        dry_run=dry_run,
+        use_query_cache=not dry_run,
+    )
+
+
+def _estimate_window_bytes(
+    client: Any,
+    *,
+    repo_names: list[str],
+    start_yyyymmdd: str,
+    end_yyyymmdd: str,
+    sample_percent: float,
+    max_bytes_billed: int,
+) -> int:
+    available_tables = _existing_day_tables(client, start_yyyymmdd, end_yyyymmdd)
+    sql = _build_query_with_sampling(
+        start_yyyymmdd=start_yyyymmdd,
+        end_yyyymmdd=end_yyyymmdd,
+        available_tables=available_tables,
+        sample_percent=sample_percent,
+    )
+    job_config = _build_window_job_config(
+        repo_names=repo_names,
+        max_bytes_billed=max_bytes_billed,
+        dry_run=True,
+    )
+    query_job = client.query(sql, job_config=job_config)
+    return int(query_job.total_bytes_processed or 0)
+
+
 def _query_window_rows(
     client: Any,
     *,
@@ -422,7 +465,6 @@ def _query_window_rows(
     sample_percent: float,
     max_bytes_billed: int,
 ) -> tuple[list[dict[str, Any]], int]:
-    bigquery = _import_bigquery()
     available_tables = _existing_day_tables(client, start_yyyymmdd, end_yyyymmdd)
     sql = _build_query_with_sampling(
         start_yyyymmdd=start_yyyymmdd,
@@ -430,11 +472,10 @@ def _query_window_rows(
         available_tables=available_tables,
         sample_percent=sample_percent,
     )
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ArrayQueryParameter("repo_names", "STRING", repo_names),
-        ],
-        maximum_bytes_billed=max_bytes_billed,
+    job_config = _build_window_job_config(
+        repo_names=repo_names,
+        max_bytes_billed=max_bytes_billed,
+        dry_run=False,
     )
     query_job = client.query(sql, job_config=job_config)
     rows = [_normalize_bigquery_row(r) for r in query_job.result()]
@@ -455,6 +496,7 @@ def collect_gharchive_history_real(
     max_bytes_billed: int = 2_000_000_000,
     overwrite: bool = False,
     allow_jenkinsci_fallback: bool = False,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Collect GH Archive historical features and write CANARY-style JSON artifacts.
 
@@ -464,7 +506,8 @@ def collect_gharchive_history_real(
       - gharchive_index.json
     """
     bigquery = _import_bigquery()
-    client = bigquery.Client()
+    project = os.getenv("GOOGLE_CLOUD_PROJECT") or None
+    client = bigquery.Client(project=project)
 
     targets = resolve_plugin_repo_targets(
         data_dir=data_dir,
@@ -502,7 +545,12 @@ def collect_gharchive_history_real(
         "sample_percent": sample_percent,
         "max_bytes_billed": max_bytes_billed,
         "targets_resolved": len(targets),
+        "targets": [
+            {"plugin_id": pid, "repo_full_name": repo} for pid, repo in sorted(targets.items())
+        ],
+        "dry_run": dry_run,
         "windows": [],
+        "skipped_window_details": [],
         "plugins_written": 0,
         "rows_written": 0,
         "bytes_scanned_total": 0,
@@ -511,8 +559,39 @@ def collect_gharchive_history_real(
 
     for window_start, window_end in windows:
         window_path = windows_dir / f"{window_start}_{window_end}.gharchive.jsonl"
-        if window_path.exists() and (not overwrite):
+        if window_path.exists() and not overwrite and not dry_run:
             result["skipped_windows"] += 1
+            result["skipped_window_details"].append(
+                {
+                    "window_start_yyyymmdd": window_start,
+                    "window_end_yyyymmdd": window_end,
+                    "path": str(window_path),
+                    "reason": "existing_output_use_overwrite",
+                }
+            )
+            continue
+
+        if dry_run:
+            estimated_bytes = _estimate_window_bytes(
+                client,
+                repo_names=repo_names,
+                start_yyyymmdd=window_start,
+                end_yyyymmdd=window_end,
+                sample_percent=sample_percent,
+                max_bytes_billed=max_bytes_billed,
+            )
+            result["windows"].append(
+                {
+                    "window_start_yyyymmdd": window_start,
+                    "window_end_yyyymmdd": window_end,
+                    "rows": None,
+                    "bytes_scanned": 0,
+                    "estimated_bytes_scanned": estimated_bytes,
+                    "path": str(window_path),
+                    "dry_run": True,
+                }
+            )
+            result["bytes_scanned_total"] += estimated_bytes
             continue
 
         rows, scanned = _query_window_rows(
@@ -567,6 +646,18 @@ def collect_gharchive_history_real(
         )
         _write_jsonl(plugins_dir / f"{pid}.gharchive.jsonl", records)
         result["plugins_written"] += 1
+
+    if result["skipped_windows"] and not overwrite:
+        result["note"] = (
+            "One or more windows were skipped because output files already existed. "
+            "Re-run with overwrite=True or pass --overwrite from the CLI to refresh them."
+        )
+
+    if dry_run:
+        result["note"] = (
+            "Dry run only: BigQuery estimated bytes were collected, "
+            "but no window or plugin records were written."
+        )
 
     _write_json(out_base / "gharchive_index.json", result)
     return result

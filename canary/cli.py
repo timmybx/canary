@@ -253,6 +253,7 @@ def _cmd_collect_gharchive(args: argparse.Namespace) -> int:
         max_bytes_billed=int(args.max_bytes_billed),
         overwrite=bool(args.overwrite),
         allow_jenkinsci_fallback=bool(args.allow_jenkinsci_fallback),
+        dry_run=bool(args.dry_run),
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0
@@ -614,6 +615,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Overwrite existing GH Archive window files",
     )
+    gharchive.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Estimate bytes scanned and return planned windows without writing output files",
+    )
+
     gharchive.set_defaults(func=_cmd_collect_gharchive)
 
     healthscore = collect_sub.add_parser(
