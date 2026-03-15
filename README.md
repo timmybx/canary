@@ -12,91 +12,86 @@
 
 # 🐤 CANARY — Component Anomaly & Near-term Advisory Risk Yardstick
 
-CANARY is a starter scaffold for a research prototype that collects software ecosystem signals (starting with Jenkins plugins + advisories) and produces a transparent, explainable “risk” score for components/plugins.
+CANARY is a research prototype for collecting software ecosystem signals for Jenkins plugins and turning them into transparent, explainable risk indicators.
 
-This repo is intentionally lightweight right now: a working CLI, collectors, a baseline scorer, and unit tests.
+Today, CANARY has a working Docker-based CLI, a local web console, first-class collectors for registry/snapshot/advisory/healthscore/GitHub-historical data, and a baseline scorer. The project is now past the “proof of concept” stage and into integrated data collection for downstream analytics and ML.
 
 > **Dependency source of truth:** `pyproject.toml` is the source of dependency declarations.  
 > `requirements*.txt` files are generated lockfiles used for reproducible installs.
 
 ---
 
-## 🔥 What This Does (Right Now)
+## 🔥 What CANARY Does Right Now
 
-- ✅ **Collect the Jenkins plugin registry (“universe snapshot”)** as JSONL
-- ✅ **Collect a per-plugin snapshot**
-  - curated/pilot by default (no network)
-  - real mode pulls the Jenkins plugins API
-  - bulk mode available (fan out over registry)
-- ✅ **Collect Jenkins advisories** as newline-delimited JSON (`.jsonl`)
+- ✅ Collects the Jenkins plugin registry (“universe snapshot”) as JSONL
+- ✅ Collects per-plugin snapshot data
+  - curated/offline mode for deterministic testing
+  - real mode via the Jenkins plugins API
+  - bulk mode over the registry
+- ✅ Collects Jenkins advisories as JSONL
   - sample mode (offline / deterministic)
-  - real mode (plugin-specific) via snapshot → `securityWarnings` → advisory URLs
-  - batch mode available via `collect enrich`
-- ✅ **Collect Jenkins plugin Health Score dataset** (bulk) from `plugin-health.jenkins.io`
-- ✅ **Batch-enrich plugins from the registry** with resume-by-file-exists
-  - snapshot + advisories + GitHub + healthscore in one command (`collect enrich`)
-- ✅ **Build a normalized advisory events dataset** (deduped) for downstream analytics/ML
-- ✅ **Score a plugin** using explainable signals:
-  - name heuristics
-  - advisory history + CVSS
-  - plugin snapshot metadata (dependencies, required core, release recency, security warnings)
-  - healthscore (higher = healthier; mapped into a small “risk points” contribution)
-- ✅ **Run tests + lint/security checks** in a consistent Docker environment
+  - real mode via plugin snapshot → `securityWarnings` → advisory URLs
+  - batch mode via `collect enrich`
+- ✅ Collects the Jenkins Plugin Health Score dataset in bulk
+- ✅ Batch-enriches plugins from the registry with snapshot + advisories + GitHub + healthscore
+- ✅ Collects historical GitHub activity windows from GH Archive via BigQuery
+- ✅ Builds normalized advisory events for downstream analytics / ML
+- ✅ Scores a plugin using explainable signals from multiple data sources
+- ✅ Runs tests, linting, fuzzing, and security checks in a consistent Docker environment
+
+---
+
+## 📌 Current Status
+
+Recent milestones:
+
+- Integrated GH Archive collection into the main `canary collect gharchive` workflow
+- Removed the earlier standalone proof-of-concept path so the repo has one primary historical collection path
+- Validated historical collection at **full-registry scale**
+- Successfully collected **full-year (2025-01-01 through 2025-12-31)** historical data at **1% sample** with:
+  - `plugins_written`: **469**
+  - `rows_written`: **927**
+  - `bytes_scanned_total`: **46,188,385,363**
+  - `skipped_windows`: **0**
+
+That means CANARY now has a working historical collection subsystem that scales predictably with time range while staying operationally manageable.
 
 ---
 
 ## 📦 Project Structure
 
-```
+```text
 ├── canary/                         # Python package
-│   ├── __init__.py
 │   ├── cli.py                      # CLI entrypoint (`canary ...`)
 │   ├── webapp.py                   # Local web console (`python -m canary.webapp`)
 │   ├── collectors/                 # Data collectors
 │   │   ├── github_repo.py
+│   │   ├── gharchive_history.py
 │   │   ├── jenkins_advisories.py
 │   │   ├── plugin_snapshot.py
-│   │   └── plugins_registry.py     # Jenkins plugin universe registry collector
-│   ├── build/                      # Dataset builders/normalizers (processed outputs)
-│   │   └── advisories_events.py    # Normalize advisories -> events JSONL (deduped)
-│   ├── datasets/                   # Dataset builders / feature extraction scripts
-│   │   ├── gharchive.py            # BigQuery GH Archive feature PoC
-│   │   └── github_repo_features.py # GitHub API repo features (+ Scorecard/alerts/advisories)
+│   │   └── plugins_registry.py
+│   ├── build/                      # Dataset builders / normalizers
+│   │   └── advisories_events.py
+│   ├── datasets/                   # Remaining standalone dataset / feature scripts
+│   │   └── github_repo_features.py
 │   └── scoring/
 │       └── baseline.py             # Baseline scorer (explainable)
 ├── fuzzers/
 │   └── jenkins_url_fuzzer.py
 ├── tests/
-│   ├── fixtures/
-│   │   └── plugins_api_cucumber-reports.json
-│   ├── test_collectors.py
-│   ├── test_github_repo.py
-│   ├── test_jenkins_advisories_real.py
-│   ├── test_plugin_snapshot.py
-│   ├── test_scoring.py
-│   └── test_smoke.py
 ├── data/
-│   ├── raw/                        # Collected raw artifacts (gitkept; generated)
-│   │   ├── registry/               # plugins.jsonl (the “spine”)
-│   │   ├── plugins/                # <plugin>.snapshot.json
-│   │   ├── advisories/             # <plugin>.advisories.real.jsonl
-│   │   ├── github/                 # <plugin>.* GitHub payloads (best-effort)
-│   │   └── healthscore/            # Healthscore dataset (bulk)
-│   └── processed/                  # Derived datasets/features (gitkept; generated)
-│       └── events/                 # advisories.jsonl (normalized/deduped)
+│   ├── raw/                        # Collected raw artifacts (generated)
+│   │   ├── registry/
+│   │   ├── plugins/
+│   │   ├── advisories/
+│   │   ├── github/
+│   │   ├── healthscore/
+│   │   └── gharchive/
+│   └── processed/                  # Derived datasets / features (generated)
+│       └── events/
 ├── .github/
-│   ├── CODEOWNERS
-│   ├── SECURITY.md
-│   ├── dependabot.yml
 │   ├── workflows/
-│   │   ├── ci.yml
-│   │   ├── cflite_pr.yml
-│   │   ├── codeql.yml
-│   │   ├── pre-commit-autoupdate.yml
-│   │   ├── scorecard.yml
-│   │   └── pre-commit-autoupdate.yml
 │   └── rulesets/
-│       └── main-branch-protection.json
 ├── Dockerfile
 ├── compose.yaml
 ├── Makefile
@@ -110,7 +105,8 @@ Raw:
 - `data/raw/registry/plugins.jsonl` — plugin registry (the universe snapshot)
 - `data/raw/plugins/<plugin>.snapshot.json` — plugin snapshot
 - `data/raw/advisories/<plugin>.advisories.{sample|real}.jsonl` — advisories (per plugin)
-- `data/raw/healthscore/plugins/plugins.healthscore.json` — aggregated healthscore dataset (bulk)
+- `data/raw/healthscore/plugins/plugins.healthscore.json` — bulk healthscore dataset
+- `data/raw/github/<plugin>.*` — best-effort GitHub API payloads
 - `data/raw/gharchive/windows/<start>_<end>.gharchive.jsonl` — historical GH Archive features by window
 - `data/raw/gharchive/plugins/<plugin>.gharchive.jsonl` — historical GH Archive timeline per plugin
 - `data/raw/gharchive/gharchive_index.json` — GH Archive collection run summary
@@ -120,15 +116,16 @@ Processed:
 
 ---
 
-## ✅ Prerequisites (Docker)
+## ✅ Prerequisites
 
-To run CANARY locally, the recommended approach is Docker Compose.
+The recommended local workflow is Docker Compose.
 
-### Required
-- **Docker Desktop** (includes Docker Engine and Docker Compose v2)
-- An internet connection (to pull base images and install Python dependencies during image build)
+Required:
+- Docker Desktop (includes Docker Engine and Docker Compose v2)
+- Internet access for image pulls / dependency installation
 
-### Verify your install
+Verify install:
+
 ```bash
 docker --version
 docker compose version
@@ -136,19 +133,22 @@ docker compose version
 
 ---
 
-## 🚀 Quickstart (Docker Compose)
+## 🚀 Quickstart
 
 ### 1) Build the image
+
 ```bash
 docker compose build
 ```
 
 ### 2) Show CLI help
+
 ```bash
 docker compose run --rm canary canary --help
 ```
 
 ### 3) Start the local web console
+
 ```bash
 docker compose up canary-web
 ```
@@ -156,31 +156,34 @@ docker compose up canary-web
 Then open:
 - `http://localhost:8000`
 
-The web console is designed for local demos and day-to-day use. It lets you:
-- score a plugin and view the JSON/reasons in the browser
-- run the main collection/enrichment commands without remembering all the flags
-- see the command preview and captured console output
-- display the bundled CANARY logo and favicon for a more polished demo experience
+The web console is currently aimed at local demos and day-to-day use. It can:
+- score a plugin and show the JSON / reasons in the browser
+- run collection / enrichment commands without memorizing flags
+- show command preview and captured console output
+- display the bundled CANARY logo and favicon
 
 You can also run it directly inside the container with:
+
 ```bash
 docker compose run --rm --service-ports canary-web
 ```
 
-### 4) Collect the plugin registry (the “universe snapshot”)
+### 4) Collect the plugin registry
+
 ```bash
 docker compose run --rm canary canary collect registry --real
 ```
 
-This writes:
+Writes:
 - `data/raw/registry/plugins.jsonl`
 
-> **Sanity check:** ensure your registry has mostly unique `plugin_id`s.
+Sanity check for duplicate plugin IDs:
+
 ```bash
 docker compose run --rm canary python - <<'PY'
 import json
 pids=[]
-for line in open("data/raw/registry/plugins.jsonl","r",encoding="utf-8"):
+for line in open("data/raw/registry/plugins.jsonl", "r", encoding="utf-8"):
     if line.strip():
         pids.append(json.loads(line)["plugin_id"])
 print("lines:", len(pids))
@@ -188,20 +191,22 @@ print("unique:", len(set(pids)))
 PY
 ```
 
-If `unique << lines`, something is wrong with paging/collection and downstream “bulk” collection will only cover a small subset.
+### 5) Batch-enrich plugins (recommended path)
 
-### 5) Collect snapshots + advisories in batch (recommended path)
-Batch-enrich from the registry (snapshot + advisories + github + healthscore, resume-by-file-exists):
+Run all main collection stages for a smaller batch:
+
 ```bash
 docker compose run --rm canary canary collect enrich --real --max-plugins 25
 ```
 
-Run all stages for a larger batch:
+Run a larger batch:
+
 ```bash
 docker compose run --rm canary canary collect enrich --real --max-plugins 200
 ```
 
-Stage-specific runs:
+Stage-specific examples:
+
 ```bash
 docker compose run --rm canary canary collect enrich --real --only snapshot   --max-plugins 200
 docker compose run --rm canary canary collect enrich --real --only advisories --max-plugins 200
@@ -209,42 +214,35 @@ docker compose run --rm canary canary collect enrich --real --only github     --
 docker compose run --rm canary canary collect enrich --real --only healthscore
 ```
 
-### 6) (Optional) Bulk snapshot collection (fan out over registry)
-`collect plugin` supports bulk mode when `--id` is omitted. Use `--sleep` to be polite to upstream services.
+### 6) Collect a single plugin snapshot
 
-```bash
-docker compose run --rm canary canary collect plugin --real --sleep 0.2
-```
+Curated snapshot (offline):
 
-Useful knobs:
-- `--registry data/raw/registry/plugins.jsonl`
-- `--max-plugins N`
-- `--overwrite`
-
-### 7) (Optional) Collect a single plugin snapshot
-Curated snapshot (no network):
 ```bash
 docker compose run --rm canary canary collect plugin --id cucumber-reports
 ```
 
-Real snapshot from the Jenkins plugins API:
+Real snapshot:
+
 ```bash
 docker compose run --rm canary canary collect plugin --id cucumber-reports --real
 ```
 
-### 8) (Optional) Collect advisories for a single plugin
-Sample (offline / deterministic):
+### 7) Collect advisories for a single plugin
+
+Sample mode:
+
 ```bash
 docker compose run --rm canary canary collect advisories --plugin cucumber-reports --out-dir data/raw/advisories
 ```
 
-Real (plugin-specific; uses the plugin snapshot’s `securityWarnings` to discover advisory URLs):
+Real mode:
+
 ```bash
 docker compose run --rm canary canary collect advisories --plugin cucumber-reports --real --data-dir data/raw --out-dir data/raw/advisories
 ```
 
 ### 8) Collect healthscores (bulk)
-This fetches the Jenkins Plugin Health Score dataset from `plugin-health.jenkins.io` and writes an aggregated JSON file:
 
 ```bash
 docker compose run --rm canary canary collect healthscore
@@ -253,7 +251,8 @@ docker compose run --rm canary canary collect healthscore
 Writes:
 - `data/raw/healthscore/plugins/plugins.healthscore.json`
 
-### 9) Build the normalized advisory events dataset (deduped)
+### 9) Build normalized advisory events
+
 ```bash
 docker compose run --rm canary canary build advisories-events
 ```
@@ -262,7 +261,7 @@ Writes:
 - `data/processed/events/advisories.jsonl`
 
 ### 10) Score a plugin
-JSON output (recommended for now):
+
 ```bash
 docker compose run --rm canary canary score cucumber-reports --real --json
 ```
@@ -270,43 +269,28 @@ docker compose run --rm canary canary score cucumber-reports --real --json
 Output includes:
 - final numeric score
 - human-readable reasons
-- raw feature values (including `healthscore_*` fields when available)
+- raw feature values
 
 ---
 
-## Google BigQuery GH Archive Collector (Historical Plugin Activity)
+## 📚 Historical GitHub Activity via GH Archive (BigQuery)
 
-CANARY now includes a first-class collector for historical GitHub activity windows pulled from
-GH Archive via BigQuery. Unlike the older CSV proof-of-concept, this collector writes CANARY-style
-JSON artifacts under `data/raw/gharchive/` so the historical data lines up with the rest of the repo.
+CANARY includes a first-class collector for historical GitHub activity windows pulled from GH Archive via BigQuery. The collector writes CANARY-style JSON artifacts under `data/raw/gharchive/` so the historical data lines up with the rest of the project.
 
 ### 1) One-time local setup (Google Cloud CLI + ADC)
 
-Install Google Cloud CLI:
-- https://cloud.google.com/sdk/docs/install
-
-Then run in your local terminal/PowerShell:
+Install Google Cloud CLI, then initialize and authenticate:
 
 ```bash
 gcloud --version
 gcloud init
-```
-
-Set your project and enable BigQuery API:
-
-```bash
 gcloud config set project <YOUR_PROJECT_ID>
 gcloud services enable bigquery.googleapis.com --project <YOUR_PROJECT_ID>
-```
-
-Authenticate Application Default Credentials (ADC):
-
-```bash
 gcloud auth application-default login
 gcloud auth application-default set-quota-project <YOUR_PROJECT_ID>
 ```
 
-Install Python dependency in the environment that will run the collector:
+Install the Python dependency in the environment that will run the collector:
 
 ```bash
 pip install google-cloud-bigquery
@@ -314,7 +298,7 @@ pip install google-cloud-bigquery
 
 ### 2) Make sure plugin snapshots exist
 
-The GH Archive collector uses plugin snapshots to resolve each plugin to a GitHub repository.
+The GH Archive collector uses plugin snapshots to resolve plugins to GitHub repositories.
 
 ```bash
 docker compose run --rm canary canary collect enrich --real --only snapshot --max-plugins 200
@@ -328,13 +312,17 @@ docker compose run --rm canary canary collect plugin --id cucumber-reports --rea
 
 ### 3) Collect historical windows
 
-Example: collect monthly-ish 30-day windows for January through March 2026 across the registry:
+Example: full registry, full year, 30-day windows, 1% sample:
 
 ```bash
 docker compose run --rm canary canary collect gharchive \
-  --start 20260101 \
-  --end 20260331 \
-  --bucket-days 30
+  --registry-path ./data/raw/registry/plugins.jsonl \
+  --start 20250101 \
+  --end 20251231 \
+  --bucket-days 30 \
+  --sample-percent 1.0 \
+  --max-bytes-billed 600000000000 \
+  --overwrite
 ```
 
 Single-plugin example:
@@ -342,89 +330,77 @@ Single-plugin example:
 ```bash
 docker compose run --rm canary canary collect gharchive \
   --plugin cucumber-reports \
-  --start 20260101 \
-  --end 20260331 \
+  --start 20250101 \
+  --end 20250331 \
   --bucket-days 30
 ```
 
-This writes:
+Writes:
 - `data/raw/gharchive/windows/<start>_<end>.gharchive.jsonl`
 - `data/raw/gharchive/plugins/<plugin>.gharchive.jsonl`
 - `data/raw/gharchive/gharchive_index.json`
 
 Each record includes a plugin id, repo name, time window, and historical activity features such as:
 - pushes / committers / active days
-- PR open/close/merge counts
-- issue open/close/reopen counts
-- merge/close latency proxies
+- PR open / close / merge counts
+- issue open / close / reopen counts
+- merge / close latency proxies
 - churn / owner concentration / security-label proxy
 
-### 4) Cost guardrails
+### 4) Practical notes on cost and sampling
 
-The collector sets `maximum_bytes_billed` per window query to 2GB by default and samples each daily
-GH Archive table at 5% by default. You can tune both:
-
-```bash
-docker compose run --rm canary canary collect gharchive \
-  --start 20260101 \
-  --end 20260331 \
-  --bucket-days 30 \
-  --sample-percent 2 \
-  --max-bytes-billed 500000000
-```
+- Queries are executed window-by-window, which keeps collection manageable and easier to reason about.
+- `--max-bytes-billed` is your main safety rail for BigQuery cost control.
+- `--sample-percent 1.0` means **1% TABLESAMPLE**, not 100%.
+- In practice, scan volume has scaled primarily with **time range**, while adding more plugins mainly increased matches returned.
 
 ### 5) Fallback behavior
 
-If a snapshot lacks an explicit GitHub repo mapping, you can optionally fall back to the common
-`jenkinsci/<plugin>-plugin` naming convention:
+If a snapshot lacks an explicit GitHub repo mapping, you can optionally fall back to the common `jenkinsci/<plugin>-plugin` naming convention:
 
 ```bash
 docker compose run --rm canary canary collect gharchive \
-  --start 20260101 \
-  --end 20260331 \
+  --start 20250101 \
+  --end 20250331 \
   --allow-jenkinsci-fallback
 ```
 
-The older `canary/datasets/gharchive.py` script is still available as a standalone experiment, but
-the recommended path for CANARY data collection is now `canary collect gharchive`.
-
 ---
 
-## GitHub Repo Feature PoC (API)
+## GitHub Repo Feature Script
 
 Use this to collect repo metadata and process/security posture features for Jenkins plugin repos.
 
-### 1) Optional: set a GitHub token
-
-Unauthenticated API usage is heavily rate-limited. For smoother runs, export `GITHUB_TOKEN` first.
+Optional: set a GitHub token first:
 
 ```bash
 export GITHUB_TOKEN=<your_token>
 ```
 
 PowerShell:
+
 ```powershell
 $env:GITHUB_TOKEN="<your_token>"
 ```
 
-### 2) Run
+Examples:
 
-Default (up to 10 `jenkinsci/*-plugin` repos):
 ```bash
 make github-features
 ```
 
-Direct Python command with options:
 ```bash
 python -m canary.datasets.github_repo_features --org jenkinsci --repo-suffix -plugin --max-repos 25 --out data/processed/github_repo_features.csv
 ```
 
-Skip Scorecard API enrichment (faster, fewer external calls):
+Skip Scorecard API enrichment:
+
 ```bash
 python -m canary.datasets.github_repo_features --skip-scorecard
 ```
 
-Include Dependabot/code-scanning alert metrics (best-effort):
+Include Dependabot / code-scanning alert metrics:
+
 ```bash
 python -m canary.datasets.github_repo_features --include-alerts
 ```
@@ -437,11 +413,8 @@ python -m canary.datasets.github_repo_features --include-alerts
 docker compose run --rm canary pytest
 ```
 
-### Coverage
+Generate HTML coverage:
 
-Coverage is enabled by default (via `pytest-cov`) and prints missing lines in the terminal.
-
-Generate an HTML report:
 ```bash
 docker compose run --rm canary pytest --cov-report=html
 ```
@@ -450,14 +423,16 @@ Then open `htmlcov/index.html`.
 
 ---
 
-## 🧹 Linting & Formatting (Ruff)
+## 🧹 Linting & Formatting
 
-Fix lint issues Ruff knows how to auto-fix:
+Fix lint issues Ruff can auto-fix:
+
 ```bash
 docker compose run --rm canary ruff check . --fix
 ```
 
 Format code:
+
 ```bash
 docker compose run --rm canary ruff format .
 ```
@@ -468,58 +443,92 @@ docker compose run --rm canary ruff format .
 
 CANARY aims to be reproducible and supply-chain aware:
 
-- Dependencies are **hash-locked** (`requirements*.txt`) and installed with `--require-hashes` in containers/CI.
-- Vulnerability auditing runs in Docker to avoid OS-specific dependency drift.
-- GitHub Actions are pinned to commit SHAs where possible.
-- OpenSSF Scorecard is enabled to track supply-chain posture over time.
+- dependencies are hash-locked (`requirements*.txt`) and installed with `--require-hashes` in containers / CI
+- vulnerability auditing runs in Docker to reduce OS-specific drift
+- GitHub Actions are pinned to commit SHAs where practical
+- OpenSSF Scorecard is enabled to track supply-chain posture over time
 
 ---
 
-## 🧠 How Scoring Works (Baseline)
+## 🧠 How Baseline Scoring Works
 
 CANARY’s current scorer is intentionally simple and explainable. It combines:
 
-- **Name heuristics** (e.g., keywords that suggest auth/security or SCM surface area)
-- **Advisory features** (from local JSONL):
+- **name heuristics** (keywords that suggest auth/security or SCM surface area)
+- **advisory features**
   - advisory count
   - most recent advisory date
   - recency-weighted advisory risk
-- **Plugin snapshot features** (from `data/raw/plugins/<plugin>.snapshot.json` when available):
+- **plugin snapshot features**
   - required Jenkins core
   - dependency count (surface area proxy)
-  - security warnings (active warnings are a strong risk signal)
-  - release recency (used as a light “maintenance” signal)
-- **Healthscore features** (from the bulk healthscore dataset when available):
+  - security warnings
+  - release recency
+- **healthscore features**
   - healthscore value/date
-  - a small risk-points mapping (higher health = lower risk)
+  - small risk-points mapping (higher health = lower risk)
 
-Outputs include the final score, a human-readable list of reasons, and the raw feature values (JSON mode).
+Output includes the final score, human-readable reasons, and raw feature values in JSON mode.
 
 ---
 
-## 🗺️ Roadmap (Next Steps)
+## 🧩 Near-Term Integration Work
+
+The next technical layer for CANARY is less about adding isolated collectors and more about connecting them cleanly.
+
+Good next steps include:
+
+- per-plugin feature bundles such as `data/processed/features/<plugin>.features.json`
+- a unifying dataset builder that joins:
+  - registry
+  - plugin snapshot
+  - advisories / advisory events
+  - healthscore
+  - GitHub API signals
+  - GH Archive historical windows
+- time-sliced “as-of date” datasets for ML experiments
+- lightweight schema/version metadata for generated datasets
+- GUI updates that expose more collection options without requiring CLI-only workflows
+  - date pickers / calendar widgets for historical collection
+  - preset ranges such as 30 days / 90 days / 1 year
+  - sample / byte-cap fields surfaced in the web UI
+  - collection progress and output summaries
+
+---
+
+## 🗺️ Roadmap
 
 - [x] CLI scaffold (`collect`, `score`) with Docker Compose workflow
 - [x] Plugin snapshot collection (curated + `--real` via Jenkins plugins API)
-- [x] Plugin registry collection (`collect registry`) to snapshot the Jenkins plugin universe
-- [x] Advisory collection:
-  - [x] sample (offline) mode
-  - [x] real (plugin-specific) mode via snapshot → `securityWarnings` → advisory URLs
+- [x] Plugin registry collection (`collect registry`)
+- [x] Advisory collection (sample + real)
 - [x] Healthscore bulk collector
-- [x] Baseline scoring with explainable features (name + advisories + snapshot metadata + healthscore)
-- [ ] Add GitHub signals (stars, recent activity, issues/PRs) as first-class collectors (then add to `collect enrich`)
+- [x] Historical GH Archive collector integrated into the main workflow
+- [x] Baseline scoring with explainable features
+- [ ] Add GitHub signals as first-class collectors in `collect enrich`
 - [ ] Build per-plugin feature bundles (`data/processed/features/<plugin>.features.json`)
-- [ ] Time-sliced dataset builder for ML (as-of date + prediction horizon)
+- [ ] Build a unified training / analysis dataset from collected sources
+- [ ] Add time-sliced dataset builders for ML (`as_of_date`, prediction horizon)
+- [ ] Expand the web UI with collection forms, date widgets, and richer output summaries
 
 ---
 
 ## 🧯 Troubleshooting
 
-### Registry has duplicates (unique << lines)
-If you see far fewer unique `plugin_id`s than lines in `plugins.jsonl`, downstream bulk collection will only cover that smaller set.
-Re-run `collect registry --real` and verify uniqueness with the snippet in Quickstart step 3.
+### Registry has duplicates (`unique << lines`)
+
+If you see far fewer unique `plugin_id`s than lines in `plugins.jsonl`, downstream bulk collection will only cover that smaller set. Re-run `collect registry --real` and verify uniqueness with the snippet above.
+
+### `FileNotFoundError` for `--registry-path`
+
+If the file exists in the repo but the command cannot find it, double-check the relative path you passed inside the containerized working directory. For example, this commonly works:
+
+```bash
+--registry-path ./data/raw/registry/plugins.jsonl
+```
 
 ### Rebuild if Docker cached something weird
+
 ```bash
 docker compose build --no-cache canary
 ```
@@ -528,13 +537,13 @@ docker compose build --no-cache canary
 
 ## 📄 License
 
-License: Apache-2.0
+Apache-2.0
 
 ---
 
 ## ⚠️ Disclaimer
 
-This is a research/prototype scaffold. Scores are **not** security guarantees and should not be used as the sole basis for operational risk decisions.
+This is a research prototype. Scores are **not** security guarantees and should not be used as the sole basis for operational risk decisions.
 
 ---
 
