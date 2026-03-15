@@ -26,6 +26,12 @@ data/cache/**
 !data/raw/healthscore/
 !data/raw/healthscore/plugins/
 !data/raw/healthscore/plugins/.gitkeep
+!data/raw/gharchive/
+!data/raw/gharchive/plugins/
+!data/raw/gharchive/windows/
+!data/raw/gharchive/.gitkeep
+!data/raw/gharchive/plugins/.gitkeep
+!data/raw/gharchive/windows/.gitkeep
 
 # (Optional) Keep docs/samples in data/
 !data/**/README.md
