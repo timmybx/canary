@@ -8,6 +8,8 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+from canary.scoring.baseline import _load_healthscore_record
+
 
 def _iter_registry_records(registry_path: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
@@ -215,7 +217,7 @@ def _load_snapshot_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any
         "snapshot_categories": categories,
         "snapshot_security_warning_count": len(sec_warnings),
         "snapshot_active_security_warning_count": sum(
-            1 for w in sec_warnings if isinstance(w, dict) and w.get("active") is True
+            1 for w in sec_warnings if w.get("active") is True
         ),
         "snapshot_latest_release_timestamp": latest_release,
         "snapshot_first_release": plugin_api.get("firstRelease"),
@@ -291,24 +293,21 @@ def _load_advisory_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any
 
 
 def _load_healthscore_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
-    path = data_raw_dir / "healthscore" / "plugins" / f"{plugin_id}.healthscore.json"
-    if not path.exists():
+    hs = _load_healthscore_record(plugin_id, data_raw_dir.resolve())
+
+    if not isinstance(hs, dict):
         return {
             "healthscore_present": False,
             "healthscore_value": None,
+            "healthscore_date": None,
             "healthscore_collected_at": None,
         }
-    payload = _read_json(path)
-    record = payload.get("record") if isinstance(payload, dict) else None
-    if not isinstance(record, dict):
-        record = {}
-    value = record.get("value") if "value" in record else record.get("score")
+
     return {
-        "healthscore_present": True,
-        "healthscore_value": _safe_float(value),
-        "healthscore_collected_at": payload.get("collected_at")
-        if isinstance(payload, dict)
-        else None,
+        "healthscore_present": hs.get("value") is not None,
+        "healthscore_value": hs.get("value"),
+        "healthscore_date": hs.get("date"),
+        "healthscore_collected_at": hs.get("collected_at"),
     }
 
 
