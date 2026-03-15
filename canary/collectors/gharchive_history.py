@@ -541,6 +541,17 @@ def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+def _append_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        for rec in records:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def _normalized_events_month_path(out_base: Path, event_yyyymm: str) -> Path:
+    return out_base / "normalized-events" / f"{event_yyyymm}.gharchive.events.jsonl"
+
+
 def _normalize_bigquery_row(row: Any) -> dict[str, Any]:
     if isinstance(row, dict):
         return dict(row)
@@ -647,12 +658,14 @@ def collect_gharchive_history_real(
     allow_jenkinsci_fallback: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Collect GH Archive historical features and write CANARY-style JSON artifacts.
+    """Collect GH Archive event history and write normalized CANARY-style monthly JSONL files.
 
     Outputs (default under data/raw/gharchive):
-      - windows/<start>_<end>.gharchive.jsonl
-      - plugins/<plugin_id>.gharchive.jsonl
+      - normalized-events/YYYY-MM.gharchive.events.jsonl
       - gharchive_index.json
+
+    Query execution is still batched by date window for cost control, but the collected
+    artifacts are written by calendar month based on each normalized event row.
     """
     bigquery = _import_bigquery()
     project = os.getenv("GOOGLE_CLOUD_PROJECT") or None
@@ -675,14 +688,13 @@ def collect_gharchive_history_real(
 
     windows = _iter_windows(start_yyyymmdd, end_yyyymmdd, bucket_days)
     out_base = Path(out_dir)
-    windows_dir = out_base / "windows"
-    plugins_dir = out_base / "plugins"
-    windows_dir.mkdir(parents=True, exist_ok=True)
-    plugins_dir.mkdir(parents=True, exist_ok=True)
+    normalized_dir = out_base / "normalized-events"
+    normalized_dir.mkdir(parents=True, exist_ok=True)
 
-    repo_to_plugin = {repo: pid for pid, repo in targets.items()}
-    repo_names = sorted(repo_to_plugin.keys())
-    per_plugin_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    repo_to_plugins: dict[str, list[str]] = defaultdict(list)
+    for pid, repo in targets.items():
+        repo_to_plugins[repo].append(pid)
+    repo_names = sorted(repo_to_plugins.keys())
 
     result: dict[str, Any] = {
         "source": "gharchive_bigquery",
@@ -690,6 +702,7 @@ def collect_gharchive_history_real(
         "data_dir": data_dir,
         "registry_path": registry_path,
         "out_dir": str(out_base),
+        "normalized_events_dir": str(normalized_dir),
         "plugin_filter": plugin_id,
         "window_start_yyyymmdd": start_yyyymmdd,
         "window_end_yyyymmdd": end_yyyymmdd,
@@ -705,24 +718,18 @@ def collect_gharchive_history_real(
         "skipped_window_details": [],
         "plugins_written": 0,
         "rows_written": 0,
+        "events_written": 0,
+        "months_written": 0,
+        "month_files_written": [],
         "bytes_scanned_total": 0,
         "skipped_windows": 0,
     }
 
-    for window_start, window_end in windows:
-        window_path = windows_dir / f"{window_start}_{window_end}.gharchive.jsonl"
-        if window_path.exists() and not overwrite and not dry_run:
-            result["skipped_windows"] += 1
-            result["skipped_window_details"].append(
-                {
-                    "window_start_yyyymmdd": window_start,
-                    "window_end_yyyymmdd": window_end,
-                    "path": str(window_path),
-                    "reason": "existing_output_use_overwrite",
-                }
-            )
-            continue
+    months_cleared: set[str] = set()
+    plugins_seen: set[str] = set()
+    months_seen: set[str] = set()
 
+    for window_start, window_end in windows:
         if dry_run:
             estimated_bytes = _estimate_window_bytes(
                 client,
@@ -739,7 +746,7 @@ def collect_gharchive_history_real(
                     "rows": None,
                     "bytes_scanned": 0,
                     "estimated_bytes_scanned": estimated_bytes,
-                    "path": str(window_path),
+                    "path": None,
                     "dry_run": True,
                 }
             )
@@ -754,61 +761,79 @@ def collect_gharchive_history_real(
             sample_percent=sample_percent,
             max_bytes_billed=max_bytes_billed,
         )
-        normalized_rows: list[dict[str, Any]] = []
+
+        rows_by_month: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        normalized_count = 0
         for row in rows:
             repo_full_name = str(row.get("repo") or "").strip()
-            plugin = repo_to_plugin.get(repo_full_name)
-            if not plugin:
+            plugins = repo_to_plugins.get(repo_full_name, [])
+            if not plugins:
                 continue
-            rec = {
-                "source": "gharchive_bigquery",
-                "type": "historical_activity_window",
-                "plugin_id": plugin,
-                "repo_full_name": repo_full_name,
-                "window_start_yyyymmdd": row.get("window_start_yyyymmdd") or window_start,
-                "window_end_yyyymmdd": row.get("window_end_yyyymmdd") or window_end,
-                "collected_at": result["collected_at"],
-                "sample_percent": sample_percent,
-            }
-            for key in FEATURE_KEYS:
-                rec[key] = row.get(key)
-            normalized_rows.append(rec)
-            per_plugin_records[plugin].append(rec)
+            for pid in plugins:
+                rec = _build_normalized_event_row(
+                    row,
+                    pid,
+                    repo_full_name,
+                    collected_at=result["collected_at"],
+                    sample_percent=sample_percent,
+                    registry_path=registry_path,
+                    source_window_start_yyyymmdd=window_start,
+                    source_window_end_yyyymmdd=window_end,
+                )
+                event_yyyymm = rec.get("event_yyyymm")
+                if not isinstance(event_yyyymm, str) or not event_yyyymm:
+                    continue
+                rows_by_month[event_yyyymm].append(rec)
+                plugins_seen.add(pid)
+                months_seen.add(event_yyyymm)
+                normalized_count += 1
 
-        normalized_rows.sort(key=lambda r: (str(r["plugin_id"]), str(r["repo_full_name"])))
-        _write_jsonl(window_path, normalized_rows)
+        month_paths: list[str] = []
+        for event_yyyymm, month_rows in sorted(rows_by_month.items()):
+            month_rows.sort(
+                key=lambda r: (
+                    str(r.get("plugin_id") or ""),
+                    str(r.get("event_ts") or ""),
+                    str(r.get("event_type") or ""),
+                    str(r.get("actor_login") or ""),
+                )
+            )
+            month_path = _normalized_events_month_path(out_base, event_yyyymm)
+            if overwrite and event_yyyymm not in months_cleared and month_path.exists():
+                month_path.unlink()
+            months_cleared.add(event_yyyymm)
+            _append_jsonl(month_path, month_rows)
+            month_paths.append(str(month_path))
+
         result["windows"].append(
             {
                 "window_start_yyyymmdd": window_start,
                 "window_end_yyyymmdd": window_end,
-                "rows": len(normalized_rows),
+                "rows": normalized_count,
                 "bytes_scanned": scanned,
-                "path": str(window_path),
+                "months_touched": sorted(rows_by_month.keys()),
+                "paths": month_paths,
             }
         )
-        result["rows_written"] += len(normalized_rows)
+        result["rows_written"] += normalized_count
+        result["events_written"] += normalized_count
         result["bytes_scanned_total"] += scanned
 
-    for pid, records in per_plugin_records.items():
-        records.sort(
-            key=lambda r: (
-                str(r.get("window_start_yyyymmdd") or ""),
-                str(r.get("window_end_yyyymmdd") or ""),
-            )
-        )
-        _write_jsonl(plugins_dir / f"{pid}.gharchive.jsonl", records)
-        result["plugins_written"] += 1
-
-    if result["skipped_windows"] and not overwrite:
-        result["note"] = (
-            "One or more windows were skipped because output files already existed. "
-            "Re-run with overwrite=True or pass --overwrite from the CLI to refresh them."
-        )
+    result["plugins_written"] = len(plugins_seen)
+    result["months_written"] = len(months_seen)
+    result["month_files_written"] = [
+        str(_normalized_events_month_path(out_base, month)) for month in sorted(months_seen)
+    ]
 
     if dry_run:
         result["note"] = (
             "Dry run only: BigQuery estimated bytes were collected, "
-            "but no window or plugin records were written."
+            "but no normalized event files were written."
+        )
+    elif not overwrite:
+        result["note"] = (
+            "Normalized monthly event files are appended when overwrite=False. "
+            "Use --overwrite on reruns to avoid duplicate rows in month files."
         )
 
     _write_json(out_base / "gharchive_index.json", result)
