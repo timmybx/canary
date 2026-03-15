@@ -26,6 +26,8 @@ data/cache/**
 !data/raw/healthscore/plugins/
 !data/raw/healthscore/plugins/.gitkeep
 !data/raw/gharchive/
+!data/raw/gharchive/normalized-events/
+!data/raw/gharchive/normalized-events/.gitkeep
 !data/raw/gharchive/plugins/
 !data/raw/gharchive/windows/
 !data/raw/gharchive/.gitkeep

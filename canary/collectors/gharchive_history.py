@@ -63,62 +63,91 @@ def _coerce_bool_or_none(value: object) -> bool | None:
     return None
 
 
-def _event_yyyymm_from_value(value: object) -> str | None:
+def _event_yyyymm_from_value(value: Any) -> str | None:
     if value is None:
         return None
+
     if isinstance(value, datetime):
-        return value.strftime("%Y-%m")
+        return f"{value.year:04d}-{value.month:02d}"
+
     if isinstance(value, date):
-        return value.strftime("%Y-%m")
+        return f"{value.year:04d}-{value.month:02d}"
+
     if isinstance(value, str):
-        s = value.strip()
-        if not s:
+        text = value.strip()
+        if not text:
             return None
-        if re.fullmatch(r"\d{4}-\d{2}", s):
-            return s
-        for parser in (datetime.fromisoformat,):
+
+        if len(text) >= 7 and text[4] == "-":
+            return text[:7]
+
+        ts = _normalize_timestamp_value(text)
+        if ts:
             try:
-                dt = parser(s.replace("Z", "+00:00"))
-                return dt.strftime("%Y-%m")
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                return f"{dt.year:04d}-{dt.month:02d}"
             except ValueError:
-                pass
-        try:
-            d = date.fromisoformat(s[:10])
-            return d.strftime("%Y-%m")
-        except ValueError:
-            return None
+                return None
+
     return None
 
 
-def _normalize_timestamp_value(value: object) -> str | None:
+def _normalize_timestamp_value(value: Any) -> str | None:
     if value is None:
         return None
+
     if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, date):
-        return value.isoformat()
+        dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
     if isinstance(value, str):
-        s = value.strip()
-        return s or None
-    return str(value)
+        text = value.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+    return None
 
 
-def _normalize_date_value(value: object) -> str | None:
+def _normalize_date_value(value: Any) -> str | None:
     if value is None:
         return None
+
     if isinstance(value, datetime):
         return value.date().isoformat()
+
     if isinstance(value, date):
         return value.isoformat()
+
     if isinstance(value, str):
-        s = value.strip()
-        if not s:
+        text = value.strip()
+        if not text:
             return None
+        if "T" in text:
+            ts = _normalize_timestamp_value(text)
+            if ts:
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    return dt.date().isoformat()
+                except ValueError:
+                    return None
         try:
-            return date.fromisoformat(s[:10]).isoformat()
+            d = date.fromisoformat(text)
+            return d.isoformat()
         except ValueError:
-            return s[:10]
-    return str(value)
+            return None
+
+    return None
 
 
 def _build_normalized_event_row(
@@ -135,9 +164,7 @@ def _build_normalized_event_row(
     owner, repo_name = _split_repo_full_name(repo_full_name)
     event_ts = _normalize_timestamp_value(raw_row.get("event_ts"))
     event_date = _normalize_date_value(raw_row.get("event_date"))
-    event_yyyymm = _event_yyyymm_from_value(raw_row.get("event_ts")) or _event_yyyymm_from_value(
-        raw_row.get("event_date")
-    )
+    event_yyyymm = _event_yyyymm_from_value(event_date) or _event_yyyymm_from_value(event_ts)
     event_year = None
     event_month = None
     if event_yyyymm:

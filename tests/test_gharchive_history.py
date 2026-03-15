@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from canary.collectors.gharchive_history import (
@@ -249,3 +250,35 @@ def test_build_normalized_event_row_handles_missing_repo_parts_and_false_bool():
     assert row["event_month"] == 8
     assert row["pr_merged"] is False
     assert row["text_blob"] is None
+
+
+def test_build_normalized_event_row_accepts_python_datetime_objects():
+    raw_row = {
+        "event_type": "PushEvent",
+        "event_ts": datetime(2025, 1, 15, 12, 34, 56, tzinfo=UTC),
+        "event_date": date(2025, 1, 15),
+        "actor_login": "octocat",
+        "action": None,
+        "pr_merged": None,
+        "pr_created_ts": None,
+        "pr_closed_ts": None,
+        "issue_created_ts": None,
+        "issue_closed_ts": None,
+        "text_blob": None,
+    }
+
+    row = _build_normalized_event_row(
+        raw_row,
+        plugin_id="example-plugin",
+        repo_full_name="jenkinsci/example-plugin",
+        collected_at="2026-03-15T00:00:00Z",
+        sample_percent=1.0,
+        registry_path="data/raw/registry/plugins.jsonl",
+        source_window_start_yyyymmdd="20250101",
+        source_window_end_yyyymmdd="20250131",
+    )
+
+    assert row["event_date"] == "2025-01-15"
+    assert row["event_yyyymm"] == "2025-01"
+    assert row["event_year"] == 2025
+    assert row["event_month"] == 1
