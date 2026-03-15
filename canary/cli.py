@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from canary.build.advisories_events import build_advisories_events
+from canary.build.features_bundle import build_feature_bundle
 from canary.collectors.gharchive_history import collect_gharchive_history_real
 from canary.collectors.github_plugin import collect_github_plugin_real
 from canary.collectors.healthscore import collect_health_scores
@@ -256,6 +257,22 @@ def _cmd_collect_gharchive(args: argparse.Namespace) -> int:
         dry_run=bool(args.dry_run),
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _cmd_build_feature_bundle(args: argparse.Namespace) -> int:
+    records = build_feature_bundle(
+        data_raw_dir=args.data_raw_dir,
+        registry_path=args.registry,
+        out_path=args.out,
+        out_csv_path=args.out_csv,
+        summary_path=args.summary_out,
+    )
+    print(f"Wrote {len(records)} feature rows to {args.out}")
+    if args.out_csv:
+        print(f"Wrote feature CSV to {args.out_csv}")
+    if args.summary_out:
+        print(f"Wrote feature summary to {args.summary_out}")
     return 0
 
 
@@ -694,6 +711,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output path for deduped events JSONL",
     )
     adv_events.set_defaults(func=_cmd_build_advisories_events)
+
+    features = build_sub.add_parser(
+        "features",
+        help="Join raw collector outputs into a unified per-plugin feature bundle",
+    )
+    features.add_argument(
+        "--data-raw-dir", default="data/raw", help="Raw data root containing collected artifacts"
+    )
+    features.add_argument(
+        "--registry",
+        default="data/raw/registry/plugins.jsonl",
+        help="Registry JSONL used as the plugin universe",
+    )
+    features.add_argument(
+        "--out",
+        default="data/processed/features/plugins.features.jsonl",
+        help="Output JSONL path for unified plugin feature rows",
+    )
+    features.add_argument(
+        "--out-csv",
+        default="data/processed/features/plugins.features.csv",
+        help="Optional CSV companion output path",
+    )
+    features.add_argument(
+        "--summary-out",
+        default="data/processed/features/plugins.features.summary.json",
+        help="Optional summary JSON path",
+    )
+    features.set_defaults(func=_cmd_build_feature_bundle)
 
     score = sub.add_parser("score", help="Score a component/plugin")
     score.add_argument("plugin", help="Plugin short name (e.g. workflow-cps)")
