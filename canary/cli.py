@@ -10,6 +10,7 @@ from pathlib import Path
 
 from canary.build.advisories_events import build_advisories_events
 from canary.build.features_bundle import build_feature_bundle
+from canary.build.monthly_features import build_monthly_feature_bundle
 from canary.collectors.gharchive_history import collect_gharchive_history_real
 from canary.collectors.github_plugin import collect_github_plugin_real
 from canary.collectors.healthscore import collect_health_scores
@@ -273,6 +274,22 @@ def _cmd_build_feature_bundle(args: argparse.Namespace) -> int:
         print(f"Wrote feature CSV to {args.out_csv}")
     if args.summary_out:
         print(f"Wrote feature summary to {args.summary_out}")
+    return 0
+
+
+def _cmd_build_monthly_feature_bundle(args: argparse.Namespace) -> int:
+    records = build_monthly_feature_bundle(
+        data_raw_dir=args.data_raw_dir,
+        registry_path=args.registry,
+        start_month=args.start,
+        end_month=args.end,
+        out_path=args.out,
+        out_csv_path=args.out_csv,
+        summary_path=args.summary_out,
+    )
+    print(f"Wrote {len(records)} monthly feature rows to {args.out}")
+    print(f"Wrote monthly feature CSV to {args.out_csv}")
+    print(f"Wrote monthly feature summary to {args.summary_out}")
     return 0
 
 
@@ -740,6 +757,45 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional summary JSON path",
     )
     features.set_defaults(func=_cmd_build_feature_bundle)
+
+    monthly_features = build_sub.add_parser(
+        "monthly-features",
+        help="Build a dense per-plugin-per-month feature dataset from collected artifacts",
+    )
+    monthly_features.add_argument(
+        "--data-raw-dir", default="data/raw", help="Raw data root containing collected artifacts"
+    )
+    monthly_features.add_argument(
+        "--registry",
+        default="data/raw/registry/plugins.jsonl",
+        help="Registry JSONL used as the plugin universe",
+    )
+    monthly_features.add_argument(
+        "--start",
+        required=True,
+        help="Start month in YYYY-MM format",
+    )
+    monthly_features.add_argument(
+        "--end",
+        required=True,
+        help="End month in YYYY-MM format",
+    )
+    monthly_features.add_argument(
+        "--out",
+        default="data/processed/features/plugins.monthly.features.jsonl",
+        help="Output JSONL path for unified monthly feature rows",
+    )
+    monthly_features.add_argument(
+        "--out-csv",
+        default="data/processed/features/plugins.monthly.features.csv",
+        help="Optional CSV companion output path",
+    )
+    monthly_features.add_argument(
+        "--summary-out",
+        default="data/processed/features/plugins.monthly.features.summary.json",
+        help="Optional summary JSON path",
+    )
+    monthly_features.set_defaults(func=_cmd_build_monthly_feature_bundle)
 
     score = sub.add_parser("score", help="Score a component/plugin")
     score.add_argument("plugin", help="Plugin short name (e.g. workflow-cps)")
