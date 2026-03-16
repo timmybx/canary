@@ -38,7 +38,52 @@ SELECT
   ) AS text_blob
 FROM `{table_name}` {tablesample_clause}
 WHERE repo.name IN UNNEST(@repo_names)
+  AND type IN (
+    'PushEvent',
+    'PullRequestEvent',
+    'PullRequestReviewEvent',
+    'IssuesEvent',
+    'ReleaseEvent'
+  )
 """
+
+
+def _build_raw_event_query_with_sampling(
+    *,
+    start_yyyymmdd: str,
+    end_yyyymmdd: str,
+    available_tables: set[str],
+    sample_percent: float,
+) -> str:
+    if sample_percent <= 0 or sample_percent > 100:
+        raise ValueError("sample_percent must be > 0 and <= 100")
+
+    tablesample_clause = ""
+    if sample_percent < 100:
+        tablesample_clause = f"TABLESAMPLE SYSTEM ({sample_percent} PERCENT)"
+
+    start_date = _parse_yyyymmdd(start_yyyymmdd)
+    end_date = _parse_yyyymmdd(end_yyyymmdd)
+
+    raw_parts: list[str] = []
+    current = start_date
+    while current <= end_date:
+        day = current.strftime("%Y%m%d")
+        if day in available_tables:
+            raw_parts.append(
+                RAW_SELECT_TEMPLATE.format(
+                    table_name=f"githubarchive.day.{day}",
+                    tablesample_clause=tablesample_clause,
+                )
+            )
+        current += timedelta(days=1)
+
+    if not raw_parts:
+        raise ValueError(
+            "No GH Archive daily tables found in the requested date range. Try an older range."
+        )
+
+    return "\nUNION ALL\n".join(raw_parts)
 
 
 def _split_repo_full_name(repo_full_name: str) -> tuple[str | None, str | None]:
@@ -628,7 +673,7 @@ def _estimate_window_bytes(
     max_bytes_billed: int,
 ) -> int:
     available_tables = _existing_day_tables(client, start_yyyymmdd, end_yyyymmdd)
-    sql = _build_query_with_sampling(
+    sql = _build_raw_event_query_with_sampling(
         start_yyyymmdd=start_yyyymmdd,
         end_yyyymmdd=end_yyyymmdd,
         available_tables=available_tables,
@@ -653,7 +698,9 @@ def _query_window_rows(
     max_bytes_billed: int,
 ) -> tuple[list[dict[str, Any]], int]:
     available_tables = _existing_day_tables(client, start_yyyymmdd, end_yyyymmdd)
-    sql = _build_query_with_sampling(
+    # Normalized-event collection needs raw event rows, not the older per-repo
+    # aggregate query used by the legacy window feature pipeline.
+    sql = _build_raw_event_query_with_sampling(
         start_yyyymmdd=start_yyyymmdd,
         end_yyyymmdd=end_yyyymmdd,
         available_tables=available_tables,
