@@ -3,7 +3,6 @@ services:
     build: .
     volumes:
       - .:/app
-      - C:\Users\Timmy\AppData\Roaming\gcloud:/app/secrets:ro
     working_dir: /app
     environment:
       - CANARY_DATA_DIR=/app/data
@@ -18,7 +17,6 @@ services:
     build: .
     volumes:
       - .:/app:ro
-      - C:\Users\Timmy\AppData\Roaming\gcloud:/app/secrets:ro
     working_dir: /app
     environment:
       - CANARY_DATA_DIR=/app/data

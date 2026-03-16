@@ -8,6 +8,7 @@ dist/
 *.egg-info/
 .DS_Store
 .env
+compose.override.yaml
 
 # --- Generated data outputs (ignore by default) ---
 data/archive/**
