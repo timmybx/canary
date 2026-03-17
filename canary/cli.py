@@ -22,6 +22,7 @@ from canary.collectors.plugins_registry import (
     collect_plugins_registry_sample,
 )
 from canary.scoring.baseline import score_plugin_baseline
+from canary.train.baseline import train_baseline
 
 
 def _nonempty(path: Path) -> bool:
@@ -41,6 +42,31 @@ def _iter_registry_plugin_ids(registry_path: Path) -> Iterable[str]:
             pid = (rec.get("plugin_id") or "").strip()
             if pid:
                 yield pid
+
+
+def _cmd_train_baseline(args: argparse.Namespace) -> int:
+    extra_exclude = set()
+    if args.exclude_cols:
+        extra_exclude = {col.strip() for col in args.exclude_cols.split(",") if col.strip()}
+
+    metrics = train_baseline(
+        in_path=args.in_path,
+        target_col=args.target_col,
+        out_dir=args.out_dir,
+        test_start_month=args.test_start_month,
+        extra_exclude=extra_exclude,
+    )
+
+    print(f"Trained baseline for target {metrics['target_col']}")
+    print(f"Train rows: {metrics['train_row_count']}  positives: {metrics['train_positive_count']}")
+    print(f"Test rows:  {metrics['test_row_count']}  positives: {metrics['test_positive_count']}")
+    print(f"Features:   {metrics['feature_count']}")
+    print(f"ROC-AUC:    {metrics['roc_auc']}")
+    print(f"AvgPrec:    {metrics['average_precision']}")
+    print(f"Wrote metrics to {args.out_dir}/metrics.json")
+    print(f"Wrote predictions to {args.out_dir}/test_predictions.csv")
+
+    return 0
 
 
 def _cmd_collect_advisories(args: argparse.Namespace) -> int:
@@ -538,6 +564,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing per-plugin files in bulk mode",
     )
     advisories.set_defaults(func=_cmd_collect_advisories)
+
+    train_parser = sub.add_parser("train", help="Train models")
+    train_subparsers = train_parser.add_subparsers(dest="train_command", required=True)
+
+    train_baseline_parser = train_subparsers.add_parser(
+        "baseline",
+        help="Train a logistic regression baseline on labeled monthly plugin data",
+    )
+    train_baseline_parser.add_argument(
+        "--in-path",
+        default="data/processed/features/plugins.monthly.labeled.jsonl",
+        help="Input labeled JSONL",
+    )
+    train_baseline_parser.add_argument(
+        "--target-col",
+        default="label_advisory_within_6m",
+        help="Target label column",
+    )
+    train_baseline_parser.add_argument(
+        "--out-dir",
+        default="data/processed/models/baseline_6m",
+        help="Directory for metrics/predictions outputs",
+    )
+    train_baseline_parser.add_argument(
+        "--test-start-month",
+        default="2025-10",
+        help="First month to include in test split (YYYY-MM)",
+    )
+    train_baseline_parser.add_argument(
+        "--exclude-cols",
+        default="",
+        help="Comma-separated additional columns to exclude from training",
+    )
+    train_baseline_parser.set_defaults(func=_cmd_train_baseline)
 
     plugin = collect_sub.add_parser("plugin", help="Collect a plugin snapshot")
     plugin.add_argument(

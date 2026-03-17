@@ -35,4 +35,11 @@ repos:
     rev: v1.1.408
     hooks:
       - id: pyright
+        additional_dependencies:
+          - requests>=2.32.0
+          - beautifulsoup4>=4.12.0
+          - google-cloud-bigquery>=3.35.0
+          - numpy>=1.26
+          - pandas>=2.2
+          - scikit-learn>=1.5
 
