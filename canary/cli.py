@@ -11,6 +11,7 @@ from pathlib import Path
 from canary.build.advisories_events import build_advisories_events
 from canary.build.features_bundle import build_feature_bundle
 from canary.build.monthly_features import build_monthly_feature_bundle
+from canary.build.monthly_labels import build_monthly_labels
 from canary.collectors.gharchive_history import collect_gharchive_history_real
 from canary.collectors.github_plugin import collect_github_plugin_real
 from canary.collectors.healthscore import collect_health_scores
@@ -126,6 +127,26 @@ def _cmd_collect_advisories(args: argparse.Namespace) -> int:
     print(f"  No snapshot:        {no_snapshot}")
     print(f"  Errors:             {errors}")
     return 0 if errors == 0 else 2
+
+
+def _cmd_build_monthly_labels(args: argparse.Namespace) -> int:
+    horizons = tuple(int(x.strip()) for x in args.horizons.split(",") if x.strip())
+
+    rows = build_monthly_labels(
+        in_path=args.in_path,
+        out_path=args.out_path,
+        out_csv_path=args.out_csv_path,
+        summary_path=args.summary_path,
+        horizons=horizons,
+    )
+
+    print(f"Wrote {len(rows)} labeled monthly rows to {args.out_path}")
+    if args.out_csv_path:
+        print(f"Wrote labeled monthly CSV to {args.out_csv_path}")
+    if args.summary_path:
+        print(f"Wrote labeled monthly summary to {args.summary_path}")
+
+    return 0
 
 
 def _cmd_collect_plugin(args: argparse.Namespace) -> int:
@@ -757,6 +778,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional summary JSON path",
     )
     features.set_defaults(func=_cmd_build_feature_bundle)
+
+    build_monthly_labels_parser = build_sub.add_parser(
+        "monthly-labels",
+        help="Build future advisory labels for monthly plugin feature rows",
+    )
+    build_monthly_labels_parser.add_argument(
+        "--in-path",
+        default="data/processed/features/plugins.monthly.features.jsonl",
+        help="Input monthly feature JSONL",
+    )
+    build_monthly_labels_parser.add_argument(
+        "--out-path",
+        default="data/processed/features/plugins.monthly.labeled.jsonl",
+        help="Output labeled JSONL",
+    )
+    build_monthly_labels_parser.add_argument(
+        "--out-csv-path",
+        default="data/processed/features/plugins.monthly.labeled.csv",
+        help="Optional output labeled CSV",
+    )
+    build_monthly_labels_parser.add_argument(
+        "--summary-path",
+        default="data/processed/features/plugins.monthly.labeled.summary.json",
+        help="Optional output summary JSON",
+    )
+    build_monthly_labels_parser.add_argument(
+        "--horizons",
+        default="1,3,6,12",
+        help="Comma-separated advisory horizons in months",
+    )
+    build_monthly_labels_parser.set_defaults(func=_cmd_build_monthly_labels)
 
     monthly_features = build_sub.add_parser(
         "monthly-features",
