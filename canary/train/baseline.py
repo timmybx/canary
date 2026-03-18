@@ -98,6 +98,7 @@ def _select_feature_columns(
     *,
     target_col: str,
     extra_exclude: set[str] | None = None,
+    include_prefixes: tuple[str, ...] | None = None,
 ) -> list[str]:
     exclude = set(DEFAULT_EXCLUDE_COLUMNS)
     exclude.add(target_col)
@@ -106,11 +107,24 @@ def _select_feature_columns(
 
     candidate_cols = sorted({k for row in rows for k in row.keys()} - exclude)
 
+    if include_prefixes:
+        candidate_cols = [
+            col
+            for col in candidate_cols
+            if any(col.startswith(prefix) for prefix in include_prefixes)
+        ]
+
     selected: list[str] = []
     for col in candidate_cols:
         values = [row.get(col) for row in rows]
-        if all(_is_numeric_like(v) for v in values):
-            selected.append(col)
+        if not all(_is_numeric_like(v) for v in values):
+            continue
+
+        observed = [_coerce_numeric(v) for v in values]
+        if all(v is None for v in observed):
+            continue
+
+        selected.append(col)
 
     return selected
 
@@ -156,6 +170,7 @@ def train_baseline(
     out_dir: str | Path = "data/processed/models/baseline_6m",
     test_start_month: str = "2025-10",
     extra_exclude: set[str] | None = None,
+    include_prefixes: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """
     Train a simple logistic regression baseline on monthly plugin rows.
@@ -181,6 +196,7 @@ def train_baseline(
         usable_rows,
         target_col=target_col,
         extra_exclude=extra_exclude,
+        include_prefixes=include_prefixes,
     )
     if not feature_cols:
         raise ValueError("No usable numeric feature columns found.")
@@ -246,6 +262,7 @@ def train_baseline(
         "input_path": str(in_path),
         "target_col": target_col,
         "test_start_month": test_start_month,
+        "include_prefixes": list(include_prefixes) if include_prefixes else [],
         "train_row_count": int(len(train_rows)),
         "test_row_count": int(len(test_rows)),
         "train_positive_count": int(y_train.sum()),

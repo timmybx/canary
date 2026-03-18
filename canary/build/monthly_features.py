@@ -294,6 +294,102 @@ def _load_advisory_monthly_features(
     return out
 
 
+def _num(row: dict[str, Any], key: str) -> float:
+    value = row.get(key)
+    if value is None:
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _trailing_sum(rows: list[dict[str, Any]], idx: int, key: str, window: int) -> float:
+    start = max(0, idx - window + 1)
+    return sum(_num(rows[j], key) for j in range(start, idx + 1))
+
+
+def _previous_window_sum(rows: list[dict[str, Any]], idx: int, key: str, window: int) -> float:
+    end = idx - window
+    if end < 0:
+        return 0.0
+    start = max(0, end - window + 1)
+    return sum(_num(rows[j], key) for j in range(start, end + 1))
+
+
+def _months_since_last_nonzero(rows: list[dict[str, Any]], idx: int, key: str) -> int | None:
+    for offset in range(0, idx + 1):
+        j = idx - offset
+        if _num(rows[j], key) > 0:
+            return offset
+    return None
+
+
+def _safe_div(numer: float, denom: float) -> float | None:
+    if denom <= 0:
+        return None
+    return numer / denom
+
+
+def _add_rolling_gharchive_features(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = sorted(rows, key=lambda r: str(r.get("month") or ""))
+
+    count_keys = [
+        "gharchive_events_total",
+        "gharchive_push_events",
+        "gharchive_pull_request_events",
+        "gharchive_pull_request_merged_events",
+        "gharchive_issues_events",
+        "gharchive_issues_closed_events",
+        "gharchive_release_events",
+        "gharchive_unique_actors",
+        "gharchive_days_active",
+    ]
+
+    for i, row in enumerate(rows):
+        for key in count_keys:
+            row[f"{key}_trailing_3m"] = _trailing_sum(rows, i, key, 3)
+            row[f"{key}_trailing_6m"] = _trailing_sum(rows, i, key, 6)
+
+        row["gharchive_months_since_push"] = _months_since_last_nonzero(
+            rows, i, "gharchive_push_events"
+        )
+        row["gharchive_months_since_pr"] = _months_since_last_nonzero(
+            rows, i, "gharchive_pull_request_events"
+        )
+        row["gharchive_months_since_issue"] = _months_since_last_nonzero(
+            rows, i, "gharchive_issues_events"
+        )
+        row["gharchive_months_since_release"] = _months_since_last_nonzero(
+            rows, i, "gharchive_release_events"
+        )
+        row["gharchive_months_since_any_activity"] = _months_since_last_nonzero(
+            rows, i, "gharchive_events_total"
+        )
+
+        push_3m = _num(row, "gharchive_push_events_trailing_3m")
+        pr_3m = _num(row, "gharchive_pull_request_events_trailing_3m")
+        merged_3m = _num(row, "gharchive_pull_request_merged_events_trailing_3m")
+        issues_3m = _num(row, "gharchive_issues_events_trailing_3m")
+        issues_closed_3m = _num(row, "gharchive_issues_closed_events_trailing_3m")
+        actors_3m = _num(row, "gharchive_unique_actors_trailing_3m")
+        active_days_3m = _num(row, "gharchive_days_active_trailing_3m")
+
+        row["gharchive_push_events_trailing_3m_delta_prev_3m"] = push_3m - _previous_window_sum(
+            rows, i, "gharchive_push_events", 3
+        )
+        row["gharchive_pull_request_events_trailing_3m_delta_prev_3m"] = (
+            pr_3m - _previous_window_sum(rows, i, "gharchive_pull_request_events", 3)
+        )
+
+        row["gharchive_prs_per_push_3m"] = _safe_div(pr_3m, push_3m)
+        row["gharchive_merge_rate_3m"] = _safe_div(merged_3m, pr_3m)
+        row["gharchive_issue_close_rate_3m"] = _safe_div(issues_closed_3m, issues_3m)
+        row["gharchive_actors_per_active_day_3m"] = _safe_div(actors_3m, active_days_3m)
+
+    return rows
+
+
 def build_monthly_feature_bundle(
     *,
     data_raw_dir: str | Path = "data/raw",
@@ -348,6 +444,14 @@ def build_monthly_feature_bundle(
             row.update(dict(GHARCHIVE_ZERO_DEFAULTS))
             row.update(gharchive_monthly.get((plugin_id, month["month"]), {}))
             rows.append(row)
+    rows_by_plugin: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        rows_by_plugin[str(row.get("plugin_id") or "")].append(row)
+
+    rows = []
+    for plugin_id in sorted(rows_by_plugin):
+        rows.extend(_add_rolling_gharchive_features(rows_by_plugin[plugin_id]))
+
     rows.sort(key=lambda r: (str(r.get("plugin_id") or ""), str(r.get("month") or "")))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:

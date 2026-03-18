@@ -49,12 +49,19 @@ def _cmd_train_baseline(args: argparse.Namespace) -> int:
     if args.exclude_cols:
         extra_exclude = {col.strip() for col in args.exclude_cols.split(",") if col.strip()}
 
+    include_prefixes: tuple[str, ...] | None = None
+    if args.include_prefixes:
+        include_prefixes = tuple(
+            prefix.strip() for prefix in args.include_prefixes.split(",") if prefix.strip()
+        )
+
     metrics = train_baseline(
         in_path=args.in_path,
         target_col=args.target_col,
         out_dir=args.out_dir,
         test_start_month=args.test_start_month,
         extra_exclude=extra_exclude,
+        include_prefixes=include_prefixes,
     )
 
     print(f"Trained baseline for target {metrics['target_col']}")
@@ -596,6 +603,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--exclude-cols",
         default="",
         help="Comma-separated additional columns to exclude from training",
+    )
+    train_baseline_parser.add_argument(
+        "--include-prefixes",
+        default="",
+        help="Comma-separated feature name prefixes to include (for example: gharchive_,window_)",
     )
     train_baseline_parser.set_defaults(func=_cmd_train_baseline)
 
