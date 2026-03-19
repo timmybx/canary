@@ -22,6 +22,8 @@ data/cache/**
 # --- Keep directory structure in git via .gitkeep ---
 !data/raw/**/.gitkeep
 !data/processed/**/.gitkeep
+!data/processed/models/
+!data/processed/models/.gitkeep
 !data/cache/**/.gitkeep
 !data/raw/healthscore/
 !data/raw/healthscore/plugins/
