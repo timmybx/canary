@@ -16,6 +16,7 @@ jobs:
   analysis:
     name: Scorecard analysis
     runs-on: ubuntu-latest
+    environment: scorecard
 
     permissions:
       contents: read          # checkout + read repo contents

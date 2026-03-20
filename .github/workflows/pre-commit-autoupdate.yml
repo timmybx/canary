@@ -13,6 +13,7 @@ permissions:
 jobs:
   autoupdate:
     runs-on: ubuntu-latest
+    environment: pre-commit-autoupdate
 
     # Keep job token read-only as well (writes happen via PR_BOT_TOKEN)
     permissions:
