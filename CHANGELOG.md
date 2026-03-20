@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.4] - 2026-03-20
+### Added
+- GH Archive and BigQuery-backed collection workflow for plugin event history, including CLI support and data directory scaffolding for raw and normalized monthly event outputs.
+- Feature engineering pipeline for plugin risk modeling, including feature bundle generation, monthly feature bundle generation, and monthly label generation commands.
+- Baseline training workflow with a dedicated CLI entry point and logistic baseline training support.
+- Rolling GH Archive feature calculations with include-prefix support for building time-windowed training data.
+- Model output directory tracking via `data/processed/models/.gitkeep`.
+
+### Changed
+- GH Archive ingestion moved from earlier proof-of-concept code to normalized monthly event builders with improved timestamp handling and sampling-aware raw event queries.
+- Feature bundle assembly was refined to incorporate normalized GH Archive history and corrected healthscore integration behavior.
+- Local development and cloud execution setup were updated for Google Cloud / BigQuery usage, including compose cleanup and ignoring local override configuration.
+- Tooling and maintenance updates landed across pre-commit hooks, the Zizmor GitHub Action, and build requirements with a `setuptools` bump to `82.0.1`.
+- README and data documentation were refreshed to reflect the new data pipeline and training workflow.
+
+### Fixed
+- Timestamp normalization and event-row generation issues in GH Archive history processing, with regression tests covering the monthly history pipeline.
+- Healthscore feature assembly issues in the bundled feature output.
+
 ## [0.1.3] - 2026-03-08
 ### Added
 - Web UI with `canary-web` entry point, static assets, and autocomplete-backed search flow.
