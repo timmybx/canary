@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any
 from wsgiref.simple_server import make_server
 
+try:
+    from waitress import serve as waitress_serve
+except ImportError:  # pragma: no cover
+    waitress_serve = None
+
 from canary.cli import (
     _cmd_build_monthly_feature_bundle,
     _cmd_build_monthly_labels,
@@ -1431,9 +1436,25 @@ def main() -> None:
         port = int(os.getenv("CANARY_WEB_PORT", "8000"))
     except ValueError:
         port = 8000
+    try:
+        threads = int(os.getenv("CANARY_WEB_THREADS", "8"))
+    except ValueError:
+        threads = 8
+    try:
+        connection_limit = int(os.getenv("CANARY_WEB_CONNECTION_LIMIT", "200"))
+    except ValueError:
+        connection_limit = 200
 
+    print(f"CANARY web console running on http://{host}:{port}")
+    if waitress_serve is not None:
+        print(f"Using waitress with threads={threads} and connection_limit={connection_limit}")
+        waitress_serve(
+            app, host=host, port=port, threads=threads, connection_limit=connection_limit
+        )
+        return
+
+    print("Waitress is not installed; falling back to wsgiref.simple_server")
     with make_server(host, port, app) as httpd:
-        print(f"CANARY web console running on http://{host}:{port}")
         httpd.serve_forever()
 
 

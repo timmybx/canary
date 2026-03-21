@@ -28,7 +28,7 @@ def test_canonicalize_plugin_id_uses_curated_alias_file(tmp_path: Path) -> None:
     ]
 
 
-def test_plugin_known_accepts_alias_from_curated_map(tmp_path: Path) -> None:
+def test_plugin_known_checks_registry_membership_literally(tmp_path: Path) -> None:
     data_raw = tmp_path / "data" / "raw"
     registry_dir = data_raw / "registry"
     registry_dir.mkdir(parents=True, exist_ok=True)
@@ -38,8 +38,8 @@ def test_plugin_known_accepts_alias_from_curated_map(tmp_path: Path) -> None:
         json.dumps({"old-name": "new-name"}), encoding="utf-8"
     )
 
-    assert _plugin_known("old-name", str(registry)) is True
     assert _plugin_known("new-name", str(registry)) is True
+    assert _plugin_known("old-name", str(registry)) is False
     assert _plugin_known("totally-unknown", str(registry)) is False
 
 
