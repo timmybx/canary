@@ -39,7 +39,7 @@ def test_index_renders_console():
     assert ("Content-Type", "text/html; charset=utf-8") in headers
     assert "CANARY Web Console" in text
     assert "Score a plugin" in text
-    assert "Run a collection step" in text
+    assert "Data collection" in text
 
 
 def test_render_page_shows_errors():

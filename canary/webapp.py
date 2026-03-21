@@ -1142,7 +1142,7 @@ def _render_confusion_matrix(confusion: Any) -> str:
         '<div class="matrix-axis">Rows = actual class, columns = predicted class.</div>'
         '<table class="matrix-grid" aria-label="Confusion matrix">'
         "<thead>"
-        '<tr><th class="corner">Actual \ Predicted</th><th>Negative</th><th>Positive</th></tr>'
+        '<tr><th class="corner">Actual vs Predicted</th><th>Negative</th><th>Positive</th></tr>'
         "</thead>"
         "<tbody>"
         f'<tr><th class="matrix-side">Negative</th><td class="matrix-cell--tn"><span class="matrix-count">{tn}</span><span class="matrix-label">True negative</span></td><td class="matrix-cell--fp"><span class="matrix-count">{fp}</span><span class="matrix-label">False positive</span></td></tr>'

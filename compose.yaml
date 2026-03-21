@@ -3,6 +3,7 @@ services:
     build: .
     volumes:
       - .:/app
+      - "C:/canary-data/data:/app/data"
     working_dir: /app
     environment:
       - CANARY_DATA_DIR=/app/data
@@ -17,6 +18,7 @@ services:
     build: .
     volumes:
       - .:/app:ro
+      - "C:/canary-data/data:/app/data"
     working_dir: /app
     environment:
       - CANARY_DATA_DIR=/app/data
