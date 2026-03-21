@@ -21,6 +21,7 @@ from canary.collectors.plugins_registry import (
     collect_plugins_registry_real,
     collect_plugins_registry_sample,
 )
+from canary.plugin_aliases import canonicalize_plugin_id
 from canary.scoring.baseline import score_plugin_baseline
 from canary.train.baseline import train_baseline
 
@@ -41,7 +42,7 @@ def _iter_registry_plugin_ids(registry_path: Path) -> Iterable[str]:
             rec = json.loads(line)
             pid = (rec.get("plugin_id") or "").strip()
             if pid:
-                yield pid
+                yield canonicalize_plugin_id(pid, registry_path=registry_path)
 
 
 def _cmd_train_baseline(args: argparse.Namespace) -> int:

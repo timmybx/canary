@@ -8,6 +8,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+from canary.plugin_aliases import canonicalize_plugin_id
 from canary.scoring.baseline import _load_healthscore_record
 
 
@@ -159,6 +160,7 @@ def _cvss_candidates(rec: dict[str, Any]) -> list[float]:
 
 
 def _load_snapshot_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
+    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
     path = data_raw_dir / "plugins" / f"{plugin_id}.snapshot.json"
     row: dict[str, Any] = {"snapshot_present": False}
     if not path.exists():
@@ -236,6 +238,7 @@ def _load_snapshot_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any
 
 
 def _load_advisory_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
+    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
     advisories_dir = data_raw_dir / "advisories"
     candidates = [
         advisories_dir / f"{plugin_id}.advisories.real.jsonl",
@@ -293,6 +296,7 @@ def _load_advisory_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any
 
 
 def _load_healthscore_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
+    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
     hs = _load_healthscore_record(plugin_id, data_raw_dir.resolve())
 
     if not isinstance(hs, dict):
@@ -312,6 +316,7 @@ def _load_healthscore_features(plugin_id: str, data_raw_dir: Path) -> dict[str, 
 
 
 def _load_github_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
+    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
     github_dir = data_raw_dir / "github"
     index_path = github_dir / f"{plugin_id}.github_index.json"
     repo_path = github_dir / f"{plugin_id}.repo.json"
@@ -414,6 +419,7 @@ def _load_github_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
 
 
 def _load_gharchive_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
+    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
     path = data_raw_dir / "gharchive" / "plugins" / f"{plugin_id}.gharchive.jsonl"
     rows = _read_jsonl(path)
     if not rows:

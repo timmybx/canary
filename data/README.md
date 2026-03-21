@@ -88,3 +88,17 @@ dataset builder.
 Older proof-of-concept big-data paths are no longer the primary workflow. The
 integrated `collect gharchive` + `build features` pipeline is now the supported
 path for historical collection and dataset building.
+
+## Plugin alias overrides
+
+Use `data/raw/registry/plugin_aliases.json` to map historical plugin IDs to the current canonical ID when a plugin has been renamed.
+
+Example:
+
+```json
+{
+  "old-plugin-id": "current-plugin-id"
+}
+```
+
+CANARY will resolve aliases during scoring, feature generation, health score ingestion, and web-console plugin validation so historical data can still roll up under the current plugin ID.

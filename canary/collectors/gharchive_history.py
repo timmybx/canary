@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from canary.collectors.github_repo import parse_github_owner_repo
+from canary.plugin_aliases import canonicalize_plugin_id
 
 RAW_SELECT_TEMPLATE = """
 --standardSQL
@@ -301,7 +302,7 @@ def _iter_registry_plugin_ids(registry_path: Path) -> list[str]:
             rec = json.loads(line)
             pid = (rec.get("plugin_id") or "").strip()
             if pid:
-                plugin_ids.append(pid)
+                plugin_ids.append(canonicalize_plugin_id(pid, registry_path=registry_path))
     return plugin_ids
 
 

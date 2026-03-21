@@ -99,6 +99,9 @@ def _plugin_to_registry_record(plugin_obj: dict[str, Any]) -> dict[str, Any] | N
         ("title", "plugin_title"),
         ("excerpt", "plugin_excerpt"),
         ("labels", "plugin_labels"),
+        ("previousNames", "historical_plugin_ids"),
+        ("previous_names", "historical_plugin_ids"),
+        ("aliases", "aliases"),
     ):
         v = plugin_obj.get(src_key)
         if v is not None:

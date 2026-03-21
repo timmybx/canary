@@ -7,6 +7,8 @@ from typing import Any
 
 import requests
 
+from canary.plugin_aliases import canonicalize_plugin_id
+
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
@@ -109,6 +111,8 @@ def collect_health_scores(
 
     for rec in records:
         plugin_id = _extract_plugin_id(rec)
+        if plugin_id:
+            plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_dir)
         if not plugin_id:
             continue
 

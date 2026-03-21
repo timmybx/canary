@@ -23,6 +23,7 @@ from canary.cli import (
     _cmd_collect_plugin,
     _cmd_collect_registry,
 )
+from canary.plugin_aliases import canonicalize_plugin_id
 from canary.scoring.baseline import ScoreResult, score_plugin_baseline
 
 DEFAULT_DATA_DIR = "data/raw"
@@ -449,6 +450,7 @@ def _run_command(command_name: str, form: dict[str, str]) -> dict[str, Any]:
 
 def _detect_available_files(plugin_id: str) -> list[str]:
     base = Path(DEFAULT_DATA_DIR)
+    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=base)
     candidates = [
         base / "plugins" / f"{plugin_id}.snapshot.json",
         base / "advisories" / f"{plugin_id}.advisories.real.jsonl",
@@ -474,7 +476,11 @@ def _load_plugin_choices_cached(registry_path: str, mtime_ns: int) -> list[str]:
                 continue
             plugin_id = str(record.get("plugin_id") or "").strip()
             if plugin_id:
-                plugin_ids.append(plugin_id)
+                plugin_ids.append(
+                    canonicalize_plugin_id(
+                        plugin_id, registry_path=path, data_dir=path.parent.parent
+                    )
+                )
     return sorted(set(plugin_ids))
 
 
@@ -490,7 +496,9 @@ def _load_plugin_choices(registry_path: str) -> list[str]:
 
 
 def _plugin_known(plugin_id: str, registry_path: str) -> bool:
-    plugin_id = plugin_id.strip()
+    plugin_id = canonicalize_plugin_id(
+        plugin_id.strip(), registry_path=registry_path, data_dir=Path(registry_path).parent.parent
+    )
     if not plugin_id:
         return False
     choices = _load_plugin_choices(registry_path)

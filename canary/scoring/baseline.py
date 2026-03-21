@@ -7,6 +7,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from canary.plugin_aliases import alias_candidates, canonicalize_plugin_id
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DATA_ROOT = (_REPO_ROOT / "data" / "raw").resolve()
 
@@ -79,12 +81,14 @@ def _advisory_candidates(data_dir: Path, plugin_id: str, *, prefer_real: bool) -
     )
 
     out: list[Path] = []
-    safe_id = _safe_plugin_id(plugin_id)
-    if safe_id is None:
-        return []
-
-    for suffix in suffixes:
-        out.append(_safe_join_under(data_dir, "advisories", f"{safe_id}{suffix}"))
+    seen: set[str] = set()
+    for candidate_id in alias_candidates(plugin_id, data_dir=data_dir):
+        safe_id = _safe_plugin_id(candidate_id)
+        if safe_id is None or safe_id in seen:
+            continue
+        seen.add(safe_id)
+        for suffix in suffixes:
+            out.append(_safe_join_under(data_dir, "advisories", f"{safe_id}{suffix}"))
     return out
 
 
@@ -437,7 +441,9 @@ def score_plugin_baseline(
       advisories/<plugin>.advisories*.jsonl
       plugins/<plugin>.snapshot.json
     """
-    plugin_id = _safe_plugin_id(plugin.lower().strip())
+    plugin_id = _safe_plugin_id(
+        canonicalize_plugin_id(plugin.lower().strip(), data_dir=_resolved_base_dir())
+    )
     if plugin_id is None:
         raise ValueError(f"Invalid plugin id: {plugin!r}")
 
@@ -776,4 +782,4 @@ def score_plugin_baseline(
         reasons.append("No heuristics matched (baseline default).")
 
     score = max(0, min(100, score))
-    return ScoreResult(plugin=plugin, score=score, reasons=tuple(reasons), features=features)
+    return ScoreResult(plugin=plugin_id, score=score, reasons=tuple(reasons), features=features)

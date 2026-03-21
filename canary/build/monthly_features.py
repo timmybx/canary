@@ -16,6 +16,7 @@ from canary.build.features_bundle import (
     _safe_float,
     _to_csv_scalar,
 )
+from canary.plugin_aliases import canonicalize_plugin_id
 
 
 def _parse_month(month_str: str) -> date:
@@ -141,7 +142,9 @@ def _load_gharchive_monthly_features(data_raw_dir: Path) -> dict[tuple[str, str]
     for path in sorted(gharchive_dir.glob("*.gharchive.events.jsonl")):
         rows = _read_jsonl(path)
         for row in rows:
-            plugin_id = str(row.get("plugin_id") or "").strip()
+            plugin_id = canonicalize_plugin_id(
+                str(row.get("plugin_id") or "").strip(), data_dir=data_raw_dir
+            )
             month_key = str(row.get("event_yyyymm") or "").strip()
             if not plugin_id or not month_key:
                 continue
@@ -193,6 +196,7 @@ def _load_gharchive_monthly_features(data_raw_dir: Path) -> dict[tuple[str, str]
 
 
 def _load_advisory_records(plugin_id: str, data_raw_dir: Path) -> list[dict[str, Any]]:
+    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
     advisories_dir = data_raw_dir / "advisories"
     candidates = [
         advisories_dir / f"{plugin_id}.advisories.real.jsonl",
@@ -409,14 +413,18 @@ def build_monthly_feature_bundle(
     summary = Path(summary_path) if summary_path is not None else None
     registry = _iter_registry_records(registry_path)
     plugin_ids = sorted(
-        {plugin_id for rec in registry if (plugin_id := str(rec.get("plugin_id") or "").strip())}
+        {
+            canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+            for rec in registry
+            if (plugin_id := str(rec.get("plugin_id") or "").strip())
+        }
     )
     months = iter_months(start_month, end_month)
     static_by_plugin = _load_static_feature_rows(plugin_ids, data_raw_dir)
     gharchive_monthly = _load_gharchive_monthly_features(data_raw_dir)
     advisory_monthly = _load_advisory_monthly_features(data_raw_dir, plugin_ids, months)
     registry_by_plugin = {
-        str(rec.get("plugin_id") or "").strip(): rec
+        canonicalize_plugin_id(str(rec.get("plugin_id") or "").strip(), data_dir=data_raw_dir): rec
         for rec in registry
         if str(rec.get("plugin_id") or "").strip()
     }

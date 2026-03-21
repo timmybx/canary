@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
+from canary.plugin_aliases import canonicalize_plugin_id
+
 _ALLOWED_NETLOCS = {"plugins.jenkins.io"}
 
 
@@ -39,12 +41,40 @@ def _fetch_plugin_api_json(plugin_id: str, *, timeout_s: float = 15.0) -> dict[s
         raise RuntimeError(f"Plugin API response was not valid JSON for {url}") from e
 
 
+def _extract_historical_plugin_ids(api: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    for key in (
+        "previousNames",
+        "previous_names",
+        "formerNames",
+        "former_names",
+        "aliases",
+        "legacyNames",
+        "legacy_names",
+    ):
+        value = api.get(key)
+        if isinstance(value, str) and value.strip():
+            out.append(value.strip())
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    out.append(item.strip())
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in out:
+        if item not in seen:
+            seen.add(item)
+            deduped.append(item)
+    return deduped
+
+
 def collect_plugin_snapshot(
     *,
     plugin_id: str,
     repo_url: str | None = None,
     real: bool = False,
 ) -> dict[str, Any]:
+    plugin_id = canonicalize_plugin_id(plugin_id)
     plugin_site_url = f"https://plugins.jenkins.io/{plugin_id}/"
 
     # v0 curated mapping for pilot plugin
@@ -88,6 +118,7 @@ def collect_plugin_snapshot(
         snapshot["plugin_title"] = api.get("title")
         snapshot["plugin_excerpt"] = api.get("excerpt")
         snapshot["plugin_labels"] = api.get("labels") or []
+        snapshot["historical_plugin_ids"] = _extract_historical_plugin_ids(api)
 
         # Current release info tends to be useful
         current_release = api.get("currentRelease") or {}
