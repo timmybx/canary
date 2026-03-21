@@ -200,11 +200,31 @@ input[readonly] { color:var(--muted); background:rgba(255,255,255,.04); cursor:n
 }
 .metrics-row { margin-top:.2rem; }
 .metric { min-width: 145px; flex: 1 1 145px; }
+.metric--details {
+  min-width: 145px; flex: 1 1 145px;
+}
+.metric--details summary {
+  list-style: none; cursor: pointer;
+}
+.metric--details summary::-webkit-details-marker { display: none; }
+.metric--details[open] {
+  border-color: rgba(111,177,255,.45);
+  box-shadow: inset 0 0 0 1px rgba(111,177,255,.12);
+}
+.metric--details:hover { filter: brightness(1.05); }
 .metric__label { display:block; color:var(--muted); font-size:.9rem; }
 .metric__value { display:block; margin-top:.35rem; font-size:1.4rem; font-weight:700; }
 .metric__value--good { color: var(--good); }
 .metric__value--warn { color: var(--warn); }
+.metric__hint { display:block; margin-top:.45rem; color:var(--accent2); font-size:.82rem; font-weight:600; }
 .bullet-list { margin:0; padding-left:1.2rem; }
+.feature-list {
+  margin: 0; padding-left: 1.2rem;
+}
+.feature-list li { break-inside: avoid; margin-bottom: .35rem; }
+.feature-list-wrap {
+  margin-top: .9rem; padding-top: .85rem; border-top: 1px solid rgba(255,255,255,.08);
+}
 .muted { color:var(--muted); }
 .code-block, pre {
   white-space: pre-wrap; word-break: break-word; margin:0; padding:1rem; border-radius:14px;
@@ -601,7 +621,7 @@ def _detect_available_files(plugin_id: str) -> list[str]:
 
 
 @lru_cache(maxsize=32)
-def _load_plugin_choices_cached(registry_path: str, mtime_ns: int) -> list[str]:
+def _load_registry_plugin_choices_cached(registry_path: str, mtime_ns: int) -> tuple[str, ...]:
     path = Path(registry_path)
     plugin_ids: list[str] = []
     with path.open("r", encoding="utf-8") as handle:
@@ -615,14 +635,8 @@ def _load_plugin_choices_cached(registry_path: str, mtime_ns: int) -> list[str]:
                 continue
             plugin_id = str(record.get("plugin_id") or "").strip()
             if plugin_id:
-                plugin_ids.append(
-                    canonicalize_plugin_id(
-                        plugin_id,
-                        registry_path=path,
-                        data_dir=path.parent.parent,
-                    )
-                )
-    return sorted(set(plugin_ids))
+                plugin_ids.append(plugin_id)
+    return tuple(sorted(set(plugin_ids)))
 
 
 def _load_plugin_choices(registry_path: str) -> list[str]:
@@ -633,15 +647,11 @@ def _load_plugin_choices(registry_path: str) -> list[str]:
         stat = path.stat()
     except OSError:
         return []
-    return _load_plugin_choices_cached(str(path.resolve()), stat.st_mtime_ns)
+    return list(_load_registry_plugin_choices_cached(str(path.resolve()), stat.st_mtime_ns))
 
 
 def _plugin_known(plugin_id: str, registry_path: str) -> bool:
-    plugin_id = canonicalize_plugin_id(
-        plugin_id.strip(),
-        registry_path=registry_path,
-        data_dir=Path(registry_path).parent.parent,
-    )
+    plugin_id = plugin_id.strip()
     if not plugin_id:
         return False
     choices = _load_plugin_choices(registry_path)
@@ -814,27 +824,6 @@ def _validation_script(plugin_options: list[str], active_tab: str) -> str:
     }}
   }}
 
-  const links = Array.from(document.querySelectorAll('[data-tab-link]'));
-  const panels = Array.from(document.querySelectorAll('[data-tab-panel]'));
-  const hiddenInputs = Array.from(document.querySelectorAll('input[name="active_tab"]'));
-
-  const activate = (tab) => {{
-    links.forEach((link) => link.classList.toggle('is-active', link.dataset.tabLink === tab));
-    panels.forEach((panel) => panel.classList.toggle('is-active', panel.dataset.tabPanel === tab));
-    hiddenInputs.forEach((input) => input.value = tab);
-    const nextUrl = new URL(window.location.href);
-    nextUrl.searchParams.set('tab', tab);
-    window.history.replaceState(null, '', nextUrl.toString());
-  }};
-
-  links.forEach((link) => {{
-    link.addEventListener('click', (event) => {{
-      event.preventDefault();
-      activate(link.dataset.tabLink);
-    }});
-  }});
-
-  activate({_escape(json.dumps(active_tab))});
 }})();
 </script>
 """
@@ -1062,12 +1051,40 @@ def _metric_value(value: Any, *, digits: int = 3) -> str:
     return str(value)
 
 
+def _render_feature_columns_panel(feature_columns: Any) -> str:
+    if not isinstance(feature_columns, list):
+        return ""
+    items = [item for item in feature_columns if isinstance(item, str) and item.strip()]
+    if not items:
+        return ""
+    list_html = "".join(f"<li><code>{_escape(item)}</code></li>" for item in items)
+    return (
+        '<div class="feature-list-wrap">'
+        "<h4>All feature columns</h4>"
+        f'<ul class="feature-list">{list_html}</ul>'
+        "</div>"
+    )
+
+
 def _render_ml_metrics(metrics: dict[str, Any] | None) -> str:
     if not metrics:
         return '<p class="muted">Train a baseline or load metrics from an existing model run to surface results here.</p>'
     ranking = metrics.get("ranking_metrics") or {}
     positive = metrics.get("top_positive_features") or []
     negative = metrics.get("top_negative_features") or []
+    feature_panel = _render_feature_columns_panel(metrics.get("feature_columns"))
+    features_metric = (
+        '<details class="metric metric--details">'
+        "<summary>"
+        '<span class="metric__label">Features</span>'
+        f'<span class="metric__value">{_metric_value(metrics.get("feature_count"), digits=0)}</span>'
+        '<span class="metric__hint">Click to show all</span>'
+        "</summary>"
+        f"{feature_panel}"
+        "</details>"
+        if feature_panel
+        else f'<div class="metric"><span class="metric__label">Features</span><span class="metric__value">{_metric_value(metrics.get("feature_count"), digits=0)}</span></div>'
+    )
     positive_items = (
         "".join(
             f"<li><code>{_escape(item.get('feature'))}</code> ({_metric_value(item.get('coefficient'), digits=3)})</li>"
@@ -1089,7 +1106,7 @@ def _render_ml_metrics(metrics: dict[str, Any] | None) -> str:
         f'<div class="metric"><span class="metric__label">Average Precision</span><span class="metric__value metric__value--good">{_metric_value(metrics.get("average_precision"))}</span></div>'
         f'<div class="metric"><span class="metric__label">Train rows</span><span class="metric__value">{_metric_value(metrics.get("train_row_count"), digits=0)}</span></div>'
         f'<div class="metric"><span class="metric__label">Test rows</span><span class="metric__value">{_metric_value(metrics.get("test_row_count"), digits=0)}</span></div>'
-        f'<div class="metric"><span class="metric__label">Features</span><span class="metric__value">{_metric_value(metrics.get("feature_count"), digits=0)}</span></div>'
+        f"{features_metric}"
         f'<div class="metric"><span class="metric__label">Precision@10</span><span class="metric__value metric__value--warn">{_metric_value(ranking.get("precision_at_10"))}</span></div>'
         "</div>"
         '<div class="grid--two">'
@@ -1229,6 +1246,15 @@ def render_page(
         f'<a href="/?tab={_escape(tab_key)}" class="tab-link {"is-active" if tab_key == active_tab else ""}" data-tab-link="{_escape(tab_key)}"><strong>{_escape(title)}</strong><span>{_escape(subtitle)}</span></a>'
         for tab_key, title, subtitle in tabs
     )
+    active_panel_html = ""
+    if active_tab == "score":
+        active_panel_html = _render_score_section(values, plugin_options, score_result, score_error)
+    elif active_tab == "data":
+        active_panel_html = _render_data_tab(values, plugin_options, data_result, data_error)
+    else:
+        active_panel_html = _render_ml_tab(
+            values, ml_result, ml_error, latest_metrics, model_dir_options
+        )
     return f"""<!doctype html>
 <html lang="en">
   <head>
@@ -1259,14 +1285,8 @@ def render_page(
     </header>
     <main class="page-shell">
       <nav class="tabs">{tab_links}</nav>
-      <section class="tab-panel {"is-active" if active_tab == "score" else ""}" data-tab-panel="score">
-        {_render_score_section(values, plugin_options, score_result, score_error)}
-      </section>
-      <section class="tab-panel {"is-active" if active_tab == "data" else ""}" data-tab-panel="data">
-        {_render_data_tab(values, plugin_options, data_result, data_error)}
-      </section>
-      <section class="tab-panel {"is-active" if active_tab == "ml" else ""}" data-tab-panel="ml">
-        {_render_ml_tab(values, ml_result, ml_error, latest_metrics, model_dir_options)}
+      <section class="tab-panel is-active" data-tab-panel="{_escape(active_tab)}">
+        {active_panel_html}
       </section>
     </main>
     {_validation_script(plugin_options, active_tab)}
@@ -1303,7 +1323,9 @@ def _prepare_request_state(
     values: dict[str, Any],
 ) -> tuple[list[str], dict[str, Any] | None, list[str]]:
     active_tab = values.get("active_tab") or "score"
-    plugin_options = _load_plugin_choices(values["registry_path"])
+    plugin_options = (
+        _load_plugin_choices(values["registry_path"]) if active_tab in {"score", "data"} else []
+    )
     latest_metrics = None
     model_dir_options: list[str] = []
     if active_tab == "ml":
@@ -1326,13 +1348,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
 
     query = urllib.parse.parse_qs(environ.get("QUERY_STRING", ""), keep_blank_values=True)
     values = _merge_defaults({"active_tab": query.get("tab", [DEFAULTS["active_tab"]])[-1]})
-    plugin_options = _load_plugin_choices(values["registry_path"])
-    model_dir_options = _discover_model_output_dirs() if values.get("active_tab") == "ml" else []
-    latest_metrics = (
-        _load_json_file(Path(values["model_out_dir"]) / "metrics.json")
-        if values.get("active_tab") == "ml"
-        else None
-    )
+    plugin_options, latest_metrics, model_dir_options = _prepare_request_state(values)
     score_result = None
     score_error = None
     data_result = None
@@ -1343,15 +1359,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
     if method == "POST" and path in {"/score", "/run", "/train"}:
         form = parse_form(environ)
         values = _merge_defaults(form)
-        plugin_options = _load_plugin_choices(values["registry_path"])
-        model_dir_options = (
-            _discover_model_output_dirs() if values.get("active_tab") == "ml" else []
-        )
-        latest_metrics = (
-            _load_json_file(Path(values["model_out_dir"]) / "metrics.json")
-            if values.get("active_tab") == "ml"
-            else None
-        )
+        plugin_options, latest_metrics, model_dir_options = _prepare_request_state(values)
         try:
             if path == "/score":
                 plugin = (form.get("plugin") or "").strip()
