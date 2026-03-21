@@ -691,6 +691,29 @@ def _select(name: str, label: str, current: str, options: list[tuple[str, str]])
     return f'<label>{_escape(label)}<select name="{_escape(name)}">{"".join(rendered)}</select></label>'
 
 
+def _discover_model_output_dirs(base_dir: str | Path = "data/processed/models") -> list[str]:
+    base = Path(base_dir)
+    if not base.exists() or not base.is_dir():
+        return []
+    found: list[str] = []
+    for metrics_path in sorted(base.glob("*/metrics.json")):
+        found.append(str(metrics_path.parent))
+    return found
+
+
+def _model_dir_picker(name: str, label: str, value: Any, options: list[str]) -> str:
+    datalist_id = f"{name}-list"
+    options_html = "".join(f'<option value="{_escape(option)}"></option>' for option in options)
+    note = '<span class="field-note">Choose an existing model run directory or enter another path under data/processed/models.</span>'
+    return (
+        f"<label>{_escape(label)}"
+        f'<input type="text" name="{_escape(name)}" value="{_escape(value)}" '
+        f'placeholder="data/processed/models/baseline_6m" list="{_escape(datalist_id)}" autocomplete="off" spellcheck="false">'
+        f'<datalist id="{_escape(datalist_id)}">{options_html}</datalist>'
+        f"{note}</label>"
+    )
+
+
 def _load_json_file(path: str | Path) -> dict[str, Any] | None:
     target = Path(path)
     if not target.exists() or not target.is_file():
@@ -977,7 +1000,7 @@ def _metric_value(value: Any, *, digits: int = 3) -> str:
 
 def _render_ml_metrics(metrics: dict[str, Any] | None) -> str:
     if not metrics:
-        return '<p class="muted">Run baseline training to surface metrics here. If a previous metrics.json exists in the default model directory, it will also show up automatically.</p>'
+        return '<p class="muted">Run baseline training or load metrics from an existing model output directory.</p>'
     ranking = metrics.get("ranking_metrics") or {}
     positive = metrics.get("top_positive_features") or []
     negative = metrics.get("top_negative_features") or []
@@ -1033,7 +1056,7 @@ def _render_confusion_matrix(confusion: Any) -> str:
         '<div class="matrix-axis">Rows = actual class, columns = predicted class.</div>'
         '<table class="matrix-grid" aria-label="Confusion matrix">'
         "<thead>"
-        '<tr><th class="corner">Actual \ Predicted</th><th>Negative</th><th>Positive</th></tr>'
+        '<tr><th class="corner">Actual \\ Predicted</th><th>Negative</th><th>Positive</th></tr>'
         "</thead>"
         "<tbody>"
         f'<tr><th class="matrix-side">Negative</th><td class="matrix-cell--tn"><span class="matrix-count">{tn}</span><span class="matrix-label">True negative</span></td><td class="matrix-cell--fp"><span class="matrix-count">{fp}</span><span class="matrix-label">False positive</span></td></tr>'
@@ -1049,6 +1072,7 @@ def _render_ml_tab(
     ml_result: dict[str, Any] | None,
     ml_error: str | None,
     latest_metrics: dict[str, Any] | None,
+    model_dir_options: list[str],
 ) -> str:
     metrics = None
     if ml_result and ml_result.get("metrics"):
@@ -1077,8 +1101,8 @@ def _render_ml_tab(
         _input_text(
             "test_start_month", "Test start month", values["test_start_month"], input_type="month"
         ),
-        _input_text(
-            "model_out_dir", "Model output directory", values["model_out_dir"], readonly=True
+        _model_dir_picker(
+            "model_out_dir", "Model output directory", values["model_out_dir"], model_dir_options
         ),
         _input_text(
             "include_prefixes",
@@ -1089,7 +1113,7 @@ def _render_ml_tab(
         _input_text(
             "exclude_cols", "Extra excluded columns", values["exclude_cols"], "comma,separated"
         ),
-        '<button type="submit">Train baseline</button></form>',
+        '<div class="button-row"><button type="submit" name="ml_action" value="train">Train baseline</button><button type="submit" name="ml_action" value="load" class="secondary">Load metrics</button></div></form>',
     ]
     if ml_error:
         parts.append(f'<div class="notice">{_escape(ml_error)}</div>')
@@ -1123,9 +1147,11 @@ def render_page(
     ml_result: dict[str, Any] | None = None,
     ml_error: str | None = None,
     latest_metrics: dict[str, Any] | None = None,
+    model_dir_options: list[str] | None = None,
 ) -> str:
     values = {**DEFAULTS, **values}
     plugin_options = plugin_options or []
+    model_dir_options = model_dir_options or []
     active_tab = values.get("active_tab") or "score"
     tabs = [
         ("score", "Scoring", "Plugin score and rationale"),
@@ -1173,7 +1199,7 @@ def render_page(
         {_render_data_tab(values, plugin_options, data_result, data_error)}
       </section>
       <section class="tab-panel {"is-active" if active_tab == "ml" else ""}" data-tab-panel="ml">
-        {_render_ml_tab(values, ml_result, ml_error, latest_metrics)}
+        {_render_ml_tab(values, ml_result, ml_error, latest_metrics, model_dir_options)}
       </section>
     </main>
     {_validation_script(plugin_options, active_tab)}
@@ -1222,6 +1248,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
     values = _merge_defaults({"active_tab": query.get("tab", [DEFAULTS["active_tab"]])[-1]})
     plugin_options = _load_plugin_choices(values["registry_path"])
     latest_metrics = _load_json_file(Path(values["model_out_dir"]) / "metrics.json")
+    model_dir_options = _discover_model_output_dirs()
     score_result = None
     score_error = None
     data_result = None
@@ -1234,6 +1261,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         values = _merge_defaults(form)
         plugin_options = _load_plugin_choices(values["registry_path"])
         latest_metrics = _load_json_file(Path(values["model_out_dir"]) / "metrics.json")
+        model_dir_options = _discover_model_output_dirs()
         try:
             if path == "/score":
                 plugin = (form.get("plugin") or "").strip()
@@ -1250,8 +1278,24 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 data_result = _run_data_action(command, form)
                 values["active_tab"] = "data"
             else:
-                ml_result = _run_train_action(form)
-                latest_metrics = ml_result.get("metrics") or latest_metrics
+                ml_action = (form.get("ml_action") or "train").strip().lower()
+                if ml_action == "load":
+                    metrics_path = Path(values["model_out_dir"]) / "metrics.json"
+                    latest_metrics = _load_json_file(metrics_path)
+                    if latest_metrics is None:
+                        raise ValueError(
+                            f"No metrics.json was found under {values['model_out_dir']}."
+                        )
+                    ml_result = {
+                        "command": f"load metrics from {values['model_out_dir']}",
+                        "exit_code": 0,
+                        "output": f"Loaded metrics from {metrics_path}",
+                        "metrics": latest_metrics,
+                        "metrics_path": str(metrics_path),
+                    }
+                else:
+                    ml_result = _run_train_action(form)
+                    latest_metrics = ml_result.get("metrics") or latest_metrics
                 values["active_tab"] = "ml"
         except ValueError as exc:
             if path == "/score":
@@ -1288,6 +1332,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         ml_result=ml_result,
         ml_error=ml_error,
         latest_metrics=latest_metrics,
+        model_dir_options=model_dir_options,
     )
     start_response("200 OK", [("Content-Type", "text/html; charset=utf-8")])
     return [html_body.encode("utf-8")]
