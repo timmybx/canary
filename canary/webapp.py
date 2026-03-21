@@ -773,7 +773,7 @@ def _render_score_section(
     parts = [
         '<div class="grid--score">',
         '<section class="card">',
-        '<div class="card__header"><div><p class="eyebrow">Fast demo path</p><h2>Score a plugin</h2><p class="kicker">Good for a quick advisor walkthrough of the CANARY score and evidence.</p></div><span class="pill">Recommended first</span></div>',
+        '<div class="card__header"><div><p class="eyebrow">Plugin scoring</p><h2>Score a plugin</h2><p class="kicker">Review the CANARY score, rationale, and supporting evidence.</p></div><span class="pill">Core workflow</span></div>',
         '<form method="post" action="/score" class="form-grid" data-plugin-strict="true">',
         '<input type="hidden" name="active_tab" value="score">',
         _plugin_picker("plugin", "Plugin ID", values["plugin"], plugin_options),
@@ -832,7 +832,7 @@ def _render_data_tab(
 ) -> str:
     result_html = _render_command_result(data_result, "Action")
     parts = [
-        '<div class="tab-summary card"><div class="card__header"><div><p class="eyebrow">Data collection and prep</p><h2>Run a collection step</h2><p class="kicker">This tab is intentionally focused on the knobs that matter for a local demo. Stable output paths stay fixed.</p></div><span class="pill pill--muted">CLI-backed actions</span></div></div>',
+        '<div class="tab-summary card"><div class="card__header"><div><p class="eyebrow">Data pipeline</p><h2>Run a collection step</h2><p class="kicker">Run collection and preparation steps with a streamlined set of inputs while keeping standard output paths fixed.</p></div><span class="pill pill--muted">Pipeline actions</span></div></div>',
         '<div class="action-grid">',
     ]
 
@@ -1018,7 +1018,7 @@ def _render_ml_tab(
     parts = [
         '<div class="grid--two">',
         '<section class="card">',
-        '<div class="card__header"><div><p class="eyebrow">ML / evaluation</p><h2>Run the baseline model</h2><p class="kicker">This keeps the form compact and pushes the results into readable metric cards for a meeting demo.</p></div><span class="pill">Training metrics</span></div>',
+        '<div class="card__header"><div><p class="eyebrow">ML / evaluation</p><h2>Run the baseline model</h2><p class="kicker">Configure baseline training with a compact form and review the results in readable metric cards.</p></div><span class="pill">Training metrics</span></div>',
         '<form method="post" action="/train" class="form-grid">',
         '<input type="hidden" name="active_tab" value="ml">',
         _input_text("model_in_path", "Labeled dataset", values["model_in_path"], readonly=True),
@@ -1065,7 +1065,7 @@ def _render_ml_tab(
         )
         status_text = f'<p class="small muted">Metrics source: <code>{_escape(source)}</code></p>'
     parts.append(
-        f'<section class="card"><div class="card__header"><div><p class="eyebrow">Model performance</p><h2>Readable metrics</h2></div><span class="pill pill--muted">Advisor-friendly view</span></div>{status_text}{_render_ml_metrics(metrics)}</section>'
+        f'<section class="card"><div class="card__header"><div><p class="eyebrow">Model performance</p><h2>Readable metrics</h2></div><span class="pill pill--muted">Metrics view</span></div>{status_text}{_render_ml_metrics(metrics)}</section>'
     )
     parts.append("</div>")
     return "".join(parts)
@@ -1087,7 +1087,7 @@ def render_page(
     plugin_options = plugin_options or []
     active_tab = values.get("active_tab") or "score"
     tabs = [
-        ("score", "Scoring", "Quick plugin score and rationale"),
+        ("score", "Scoring", "Plugin score and rationale"),
         ("data", "Data collection", "Run collection and monthly prep"),
         ("ml", "Machine learning", "Train baseline and review metrics"),
     ]
@@ -1113,7 +1113,7 @@ def render_page(
             <img class="hero__logo" src="/static/canary-logo.png" alt="CANARY logo">
           </div>
           <div>
-            <p class="eyebrow">Local demo frontend</p>
+            <p class="eyebrow">Web interface</p>
             <h1>CANARY Web Console</h1>
           </div>
         </div>
