@@ -218,6 +218,17 @@ code { background:rgba(255,255,255,.05); padding:.15rem .35rem; border-radius:6p
 .tab-summary { margin-bottom: 1rem; }
 .small { font-size: .9rem; }
 .hidden { display:none; }
+.matrix-wrap { margin-top: .2rem; }
+.matrix-axis { color: var(--muted); font-size: .85rem; margin-bottom: .55rem; }
+.matrix-grid { width: 100%; border-collapse: separate; border-spacing: .5rem; table-layout: fixed; }
+.matrix-grid th { color: var(--muted); font-weight: 600; font-size: .9rem; text-align: center; }
+.matrix-grid th.corner { text-align: left; }
+.matrix-grid td { background: #0b1322; border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: .9rem .7rem; text-align: center; vertical-align: middle; }
+.matrix-grid td.matrix-cell--tn, .matrix-grid td.matrix-cell--tp { background: rgba(141,240,188,.08); border-color: rgba(141,240,188,.24); }
+.matrix-grid td.matrix-cell--fp, .matrix-grid td.matrix-cell--fn { background: rgba(255,216,122,.08); border-color: rgba(255,216,122,.24); }
+.matrix-count { display: block; font-size: 1.5rem; font-weight: 800; color: var(--text); }
+.matrix-label { display: block; margin-top: .25rem; color: var(--muted); font-size: .85rem; }
+.matrix-side { min-width: 5.5rem; text-align: left; }
 """
 
 
@@ -998,7 +1009,37 @@ def _render_ml_metrics(metrics: dict[str, Any] | None) -> str:
         f'<div class="panel"><h4>Top positive features</h4><ul class="bullet-list">{positive_items}</ul></div>'
         f'<div class="panel"><h4>Top negative features</h4><ul class="bullet-list">{negative_items}</ul></div>'
         "</div>"
-        f'<div class="panel"><h4>Confusion matrix</h4><pre>{_escape(json.dumps(metrics.get("confusion_matrix"), indent=2))}</pre></div>'
+        f'<div class="panel"><h4>Confusion matrix</h4>{_render_confusion_matrix(metrics.get("confusion_matrix"))}</div>'
+        "</div>"
+    )
+
+
+def _render_confusion_matrix(confusion: Any) -> str:
+    if not isinstance(confusion, list) or len(confusion) != 2:
+        return f"<pre>{_escape(json.dumps(confusion, indent=2))}</pre>"
+    rows: list[list[int]] = []
+    for row in confusion:
+        if not isinstance(row, list) or len(row) != 2:
+            return f"<pre>{_escape(json.dumps(confusion, indent=2))}</pre>"
+        try:
+            rows.append([int(row[0]), int(row[1])])
+        except (TypeError, ValueError):
+            return f"<pre>{_escape(json.dumps(confusion, indent=2))}</pre>"
+
+    tn, fp = rows[0]
+    fn, tp = rows[1]
+    return (
+        '<div class="matrix-wrap">'
+        '<div class="matrix-axis">Rows = actual class, columns = predicted class.</div>'
+        '<table class="matrix-grid" aria-label="Confusion matrix">'
+        "<thead>"
+        '<tr><th class="corner">Actual \ Predicted</th><th>Negative</th><th>Positive</th></tr>'
+        "</thead>"
+        "<tbody>"
+        f'<tr><th class="matrix-side">Negative</th><td class="matrix-cell--tn"><span class="matrix-count">{tn}</span><span class="matrix-label">True negative</span></td><td class="matrix-cell--fp"><span class="matrix-count">{fp}</span><span class="matrix-label">False positive</span></td></tr>'
+        f'<tr><th class="matrix-side">Positive</th><td class="matrix-cell--fn"><span class="matrix-count">{fn}</span><span class="matrix-label">False negative</span></td><td class="matrix-cell--tp"><span class="matrix-count">{tp}</span><span class="matrix-label">True positive</span></td></tr>'
+        "</tbody>"
+        "</table>"
         "</div>"
     )
 
@@ -1119,7 +1160,7 @@ def render_page(
         </div>
         <p class="hero__copy">
           A lightweight zero-dependency web UI for scoring Jenkins plugins, running collection jobs,
-          and showing baseline ML results in a cleaner way than raw CLI output.
+          and showing baseline ML results.
         </p>
       </div>
     </header>
