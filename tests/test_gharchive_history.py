@@ -4,7 +4,7 @@ from pathlib import Path
 
 from canary.collectors.gharchive_history import (
     _build_normalized_event_row,
-    _build_query_with_sampling,
+    _build_raw_event_query_with_sampling,
     _iter_windows,
     collect_gharchive_history_real,
     resolve_plugin_repo_targets,
@@ -78,7 +78,7 @@ def test_iter_windows_chunks_range():
 
 
 def test_build_query_includes_repo_filter():
-    sql = _build_query_with_sampling(
+    sql = _build_raw_event_query_with_sampling(
         start_yyyymmdd="20260101",
         end_yyyymmdd="20260102",
         available_tables={"20260101", "20260102"},
