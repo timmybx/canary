@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from io import BytesIO
 
+import pytest  # pyright: ignore[reportMissingImports]
+
+import canary.webapp as webapp
 from canary.webapp import _load_plugin_choices, app, render_page
 
 
@@ -131,3 +134,28 @@ def test_render_page_includes_plugin_autocomplete_and_readonly_fields():
     assert 'data-plugin-input="true"' in html
     assert "readonly" in html
     assert "Unknown plugin IDs are blocked." in html
+
+
+def test_load_metrics_action_loads_metrics_from_models_root(tmp_path, monkeypatch):
+    models_root = (tmp_path / "models").resolve()
+    run_dir = models_root / "baseline_6m"
+    run_dir.mkdir(parents=True)
+    (run_dir / "metrics.json").write_text('{"accuracy": 0.91}', encoding="utf-8")
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT", models_root)
+
+    result = webapp._run_load_metrics_action({"model_out_dir": str(run_dir)})
+
+    assert result["metrics"] == {"accuracy": 0.91}
+    assert result["metrics_path"] == str(run_dir / "metrics.json")
+
+
+def test_load_metrics_action_rejects_paths_outside_models_root(tmp_path, monkeypatch):
+    models_root = (tmp_path / "models").resolve()
+    models_root.mkdir(parents=True)
+    outside_dir = (tmp_path / "outside").resolve()
+    outside_dir.mkdir()
+    (outside_dir / "metrics.json").write_text('{"accuracy": 0.42}', encoding="utf-8")
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT", models_root)
+
+    with pytest.raises(ValueError, match="must stay under"):
+        webapp._run_load_metrics_action({"model_out_dir": str(outside_dir)})

@@ -13,13 +13,8 @@ import urllib.parse
 from contextlib import redirect_stdout
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 from wsgiref.simple_server import make_server
-
-try:
-    from waitress import serve as waitress_serve
-except ImportError:  # pragma: no cover
-    waitress_serve = None
 
 from canary.cli import (
     _cmd_build_monthly_feature_bundle,
@@ -44,6 +39,7 @@ DEFAULT_LABELED_PATH = "data/processed/features/plugins.monthly.labeled.jsonl"
 DEFAULT_LABELED_CSV = "data/processed/features/plugins.monthly.labeled.csv"
 DEFAULT_LABELED_SUMMARY = "data/processed/features/plugins.monthly.labeled.summary.json"
 DEFAULT_MODEL_DIR = "data/processed/models/baseline_6m"
+MODEL_OUTPUTS_ROOT = Path("data/processed/models").resolve()
 
 DEFAULTS: dict[str, Any] = {
     "active_tab": "score",
@@ -88,6 +84,29 @@ DEFAULTS: dict[str, Any] = {
 
 STATIC_DIR = Path(__file__).with_name("static")
 logger = logging.getLogger(__name__)
+
+
+class _WaitressServe(Protocol):
+    def __call__(
+        self,
+        app: Any,
+        *,
+        host: str,
+        port: int,
+        threads: int,
+        connection_limit: int,
+    ) -> None: ...
+
+
+def _load_waitress_serve() -> _WaitressServe | None:
+    try:
+        from waitress import serve  # pyright: ignore[reportMissingImports]
+    except ImportError:  # pragma: no cover
+        return None
+    return cast(_WaitressServe, serve)
+
+
+waitress_serve = _load_waitress_serve()
 
 CSS = """
 :root {
@@ -378,10 +397,11 @@ def _namespace_for_data_action(command_name: str, form: dict[str, str]) -> argpa
 
 
 def _namespace_for_train(form: dict[str, str]) -> argparse.Namespace:
+    model_out_dir = _resolve_model_output_dir(form.get("model_out_dir") or DEFAULT_MODEL_DIR)
     return argparse.Namespace(
         in_path=(form.get("model_in_path") or DEFAULT_LABELED_PATH).strip(),
         target_col=(form.get("target_col") or "label_advisory_within_6m").strip(),
-        out_dir=(form.get("model_out_dir") or DEFAULT_MODEL_DIR).strip(),
+        out_dir=str(model_out_dir),
         test_start_month=(form.get("test_start_month") or "2025-10").strip(),
         exclude_cols=(form.get("exclude_cols") or "").strip(),
         include_prefixes=(form.get("include_prefixes") or "").strip(),
@@ -574,7 +594,7 @@ def _run_data_action(command_name: str, form: dict[str, str]) -> dict[str, Any]:
 def _run_train_action(form: dict[str, str]) -> dict[str, Any]:
     args = _namespace_for_train(form)
     result = _capture_command(_cmd_train_baseline, args)
-    metrics_path = Path(args.out_dir) / "metrics.json"
+    metrics_path = _resolve_model_output_dir(args.out_dir) / "metrics.json"
     metrics = _load_json_file(metrics_path)
     return {
         "command": " ".join(
@@ -590,9 +610,7 @@ def _run_train_action(form: dict[str, str]) -> dict[str, Any]:
 
 
 def _run_load_metrics_action(form: dict[str, str]) -> dict[str, Any]:
-    out_dir = (form.get("model_out_dir") or DEFAULT_MODEL_DIR).strip()
-    if not out_dir:
-        raise ValueError("Please choose a model output directory.")
+    out_dir = _resolve_model_output_dir(form.get("model_out_dir") or DEFAULT_MODEL_DIR)
     metrics_path = Path(out_dir) / "metrics.json"
     metrics = _load_json_file(metrics_path)
     if not metrics:
@@ -741,7 +759,9 @@ def _load_json_file_cached(path_str: str, mtime_ns: int) -> dict[str, Any] | Non
 
 
 def _load_json_file(path: str | Path) -> dict[str, Any] | None:
-    target = Path(path)
+    target = _resolve_path_within(MODEL_OUTPUTS_ROOT, path)
+    if target is None:
+        return None
     if not target.exists() or not target.is_file():
         return None
     try:
@@ -749,6 +769,27 @@ def _load_json_file(path: str | Path) -> dict[str, Any] | None:
     except OSError:
         return None
     return _load_json_file_cached(str(target.resolve()), stat.st_mtime_ns)
+
+
+def _resolve_path_within(base_dir: str | Path, path: str | Path) -> Path | None:
+    try:
+        base = Path(base_dir).resolve()
+        candidate = Path(path).resolve()
+    except OSError:
+        return None
+    if candidate == base or base in candidate.parents:
+        return candidate
+    return None
+
+
+def _resolve_model_output_dir(path: str | Path) -> Path:
+    raw_value = str(path).strip()
+    if not raw_value:
+        raise ValueError("Please choose a model output directory.")
+    resolved = _resolve_path_within(MODEL_OUTPUTS_ROOT, raw_value)
+    if resolved is None:
+        raise ValueError(f"Model output directories must stay under {MODEL_OUTPUTS_ROOT}.")
+    return resolved
 
 
 @lru_cache(maxsize=32)
@@ -1335,7 +1376,12 @@ def _prepare_request_state(
     model_dir_options: list[str] = []
     if active_tab == "ml":
         model_dir_options = _discover_model_output_dirs()
-        latest_metrics = _load_json_file(Path(values["model_out_dir"]) / "metrics.json")
+        resolved_model_dir = _resolve_path_within(
+            MODEL_OUTPUTS_ROOT, values.get("model_out_dir") or DEFAULT_MODEL_DIR
+        )
+        if resolved_model_dir is not None:
+            values["model_out_dir"] = str(resolved_model_dir)
+            latest_metrics = _load_json_file(resolved_model_dir / "metrics.json")
     return plugin_options, latest_metrics, model_dir_options
 
 
