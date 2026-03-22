@@ -4,6 +4,7 @@ import csv
 import json
 import math
 from collections.abc import Iterable
+from datetime import datetime
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -418,6 +419,126 @@ def _load_github_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
     return out
 
 
+def _parse_iso_datetime_prefix(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
+
+
+def _parse_iso_date_prefix(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()[:10]
+
+
+def _days_between_iso_dates(start: str | None, end: str | None) -> int | None:
+    if not start or not end:
+        return None
+    try:
+        start_dt = datetime.fromisoformat(start[:10])
+        end_dt = datetime.fromisoformat(end[:10])
+    except ValueError:
+        return None
+    return (end_dt.date() - start_dt.date()).days
+
+
+def _extract_swh_visits(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [x for x in payload if isinstance(x, dict)]
+    if isinstance(payload, dict):
+        for key in ("results", "visits"):
+            val = payload.get(key)
+            if isinstance(val, list):
+                return [x for x in val if isinstance(x, dict)]
+    return []
+
+
+def _snapshot_branch_count(payload: Any) -> int:
+    if not isinstance(payload, dict):
+        return 0
+    branches = payload.get("branches")
+    if isinstance(branches, dict):
+        return len(branches)
+    if isinstance(branches, list):
+        return len(branches)
+    return 0
+
+
+def _load_software_heritage_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
+    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    swh_dir = data_raw_dir / "software_heritage"
+
+    index_path = swh_dir / f"{plugin_id}.swh_index.json"
+    origin_path = swh_dir / f"{plugin_id}.swh_origin.json"
+    visits_path = swh_dir / f"{plugin_id}.swh_visits.json"
+    latest_visit_path = swh_dir / f"{plugin_id}.swh_latest_visit.json"
+    snapshot_path = swh_dir / f"{plugin_id}.swh_snapshot.json"
+
+    row: dict[str, Any] = {
+        "swh_present": False,
+        "swh_origin_found": False,
+        "swh_has_snapshot": False,
+        "swh_visit_count": 0,
+        "swh_first_visit_date": None,
+        "swh_latest_visit_date": None,
+        "swh_latest_visit_status": None,
+        "swh_latest_visit_type": None,
+        "swh_archive_age_days": None,
+        "swh_visits_last_365d": 0,
+        "swh_snapshot_branch_count": 0,
+    }
+
+    if not index_path.exists():
+        return row
+
+    row["swh_present"] = True
+    index_payload = _read_json(index_path) if index_path.exists() else {}
+    visits_payload = _read_json(visits_path) if visits_path.exists() else None
+    latest_visit_payload = _read_json(latest_visit_path) if latest_visit_path.exists() else None
+    snapshot_payload = _read_json(snapshot_path) if snapshot_path.exists() else None
+
+    row["swh_origin_found"] = bool(index_payload.get("origin_found")) or origin_path.exists()
+    row["swh_has_snapshot"] = bool(index_payload.get("snapshot_found")) or snapshot_path.exists()
+
+    visits = _extract_swh_visits(visits_payload)
+    visit_dates: list[str] = []
+    for visit in visits:
+        for key in ("date", "visit_date"):
+            raw = visit.get(key)
+            parsed = _parse_iso_date_prefix(raw)
+            if parsed:
+                visit_dates.append(parsed)
+                break
+
+    visit_dates = sorted(visit_dates)
+    row["swh_visit_count"] = len(visits)
+    row["swh_first_visit_date"] = visit_dates[0] if visit_dates else None
+    row["swh_latest_visit_date"] = visit_dates[-1] if visit_dates else None
+    row["swh_archive_age_days"] = _days_between_iso_dates(
+        row["swh_first_visit_date"], row["swh_latest_visit_date"]
+    )
+
+    if visit_dates:
+        latest = datetime.fromisoformat(visit_dates[-1])
+        trailing_start = latest.date().toordinal() - 365
+        row["swh_visits_last_365d"] = sum(
+            1 for d in visit_dates if datetime.fromisoformat(d).date().toordinal() >= trailing_start
+        )
+
+    if isinstance(latest_visit_payload, dict):
+        visit = latest_visit_payload.get("visit")
+        if isinstance(visit, dict):
+            row["swh_latest_visit_status"] = visit.get("status")
+            row["swh_latest_visit_type"] = visit.get("type")
+        else:
+            row["swh_latest_visit_status"] = latest_visit_payload.get("status")
+            row["swh_latest_visit_type"] = latest_visit_payload.get("type")
+
+    row["swh_snapshot_branch_count"] = _snapshot_branch_count(snapshot_payload)
+
+    return row
+
+
 def _load_gharchive_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
     plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
     path = data_raw_dir / "gharchive" / "plugins" / f"{plugin_id}.gharchive.jsonl"
@@ -494,6 +615,7 @@ def build_feature_bundle(
         row.update(_load_snapshot_features(plugin_id, data_raw_dir))
         row.update(_load_advisory_features(plugin_id, data_raw_dir))
         row.update(_load_healthscore_features(plugin_id, data_raw_dir))
+        row.update(_load_software_heritage_features(plugin_id, data_raw_dir))
         row.update(_load_github_features(plugin_id, data_raw_dir))
         row.update(_load_gharchive_features(plugin_id, data_raw_dir))
         rows.append(row)

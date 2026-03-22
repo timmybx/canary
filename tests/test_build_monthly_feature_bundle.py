@@ -6,6 +6,82 @@ from pathlib import Path
 from canary.build.monthly_features import build_monthly_feature_bundle
 
 
+def test_build_monthly_feature_bundle_swh_to_date_is_leakage_safe(tmp_path: Path) -> None:
+    data_raw = tmp_path / "data" / "raw"
+    registry_dir = data_raw / "registry"
+    plugins_dir = data_raw / "plugins"
+    github_dir = data_raw / "github"
+    health_dir = data_raw / "healthscore" / "plugins"
+    swh_dir = data_raw / "software_heritage"
+
+    for p in [registry_dir, plugins_dir, github_dir, health_dir, swh_dir]:
+        p.mkdir(parents=True, exist_ok=True)
+
+    (registry_dir / "plugins.jsonl").write_text(
+        json.dumps({"plugin_id": "demo-plugin", "title": "Demo"}) + "\n",
+        encoding="utf-8",
+    )
+
+    (plugins_dir / "demo-plugin.snapshot.json").write_text(
+        json.dumps({"plugin_api": {"maintainers": [], "dependencies": []}}),
+        encoding="utf-8",
+    )
+
+    (health_dir / "demo-plugin.healthscore.json").write_text(
+        json.dumps(
+            {
+                "plugin_id": "demo-plugin",
+                "collected_at": "2026-03-15T00:00:00+00:00",
+                "record": {"plugin_id": "demo-plugin", "value": 80},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (github_dir / "demo-plugin.github_index.json").write_text(
+        json.dumps({"plugin_id": "demo-plugin", "repo_full_name": "jenkinsci/demo-plugin"}),
+        encoding="utf-8",
+    )
+
+    (swh_dir / "demo-plugin.swh_index.json").write_text(
+        json.dumps({"plugin_id": "demo-plugin", "origin_found": True, "snapshot_found": True}),
+        encoding="utf-8",
+    )
+
+    (swh_dir / "demo-plugin.swh_visits.json").write_text(
+        json.dumps(
+            {
+                "results": [
+                    {"date": "2025-03-10T12:00:00+00:00"},
+                    {"date": "2025-06-15T12:00:00+00:00"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rows = build_monthly_feature_bundle(
+        data_raw_dir=data_raw,
+        registry_path=registry_dir / "plugins.jsonl",
+        start_month="2025-03",
+        end_month="2025-06",
+        out_path=tmp_path / "out.jsonl",
+        out_csv_path=None,
+        summary_path=None,
+    )
+
+    april = next(r for r in rows if r["month"] == "2025-04")
+    june = next(r for r in rows if r["month"] == "2025-06")
+
+    assert april["swh_visit_count_to_date"] == 1
+    assert april["swh_visits_this_month"] == 0
+    assert april["swh_latest_visit_date_to_date"] == "2025-03-10"
+
+    assert june["swh_visit_count_to_date"] == 2
+    assert june["swh_visits_this_month"] == 1
+    assert june["swh_latest_visit_date_to_date"] == "2025-06-15"
+
+
 def test_build_monthly_feature_bundle_dense_grid(tmp_path: Path) -> None:
     data_raw = tmp_path / "data" / "raw"
     registry_dir = data_raw / "registry"

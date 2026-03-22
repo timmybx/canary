@@ -6,6 +6,97 @@ from pathlib import Path
 from canary.build.features_bundle import build_feature_bundle
 
 
+def test_build_feature_bundle_loads_software_heritage_features(tmp_path: Path) -> None:
+    data_raw = tmp_path / "data" / "raw"
+    registry_dir = data_raw / "registry"
+    plugins_dir = data_raw / "plugins"
+    github_dir = data_raw / "github"
+    swh_dir = data_raw / "software_heritage"
+    health_dir = data_raw / "healthscore" / "plugins"
+
+    for p in [registry_dir, plugins_dir, github_dir, swh_dir, health_dir]:
+        p.mkdir(parents=True, exist_ok=True)
+
+    (registry_dir / "plugins.jsonl").write_text(
+        json.dumps({"plugin_id": "demo-plugin", "title": "Demo"}) + "\n",
+        encoding="utf-8",
+    )
+
+    (plugins_dir / "demo-plugin.snapshot.json").write_text(
+        json.dumps(
+            {
+                "plugin_id": "demo-plugin",
+                "repo_url": "https://github.com/jenkinsci/demo-plugin",
+                "plugin_api": {"maintainers": [], "dependencies": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (health_dir / "demo-plugin.healthscore.json").write_text(
+        json.dumps(
+            {
+                "plugin_id": "demo-plugin",
+                "collected_at": "2026-03-22T00:00:00+00:00",
+                "record": {"plugin_id": "demo-plugin", "value": 75},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (swh_dir / "demo-plugin.swh_index.json").write_text(
+        json.dumps(
+            {
+                "plugin_id": "demo-plugin",
+                "origin_found": True,
+                "snapshot_found": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (swh_dir / "demo-plugin.swh_visits.json").write_text(
+        json.dumps(
+            {
+                "results": [
+                    {"date": "2025-03-10T12:00:00+00:00"},
+                    {"date": "2025-06-15T12:00:00+00:00"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (swh_dir / "demo-plugin.swh_latest_visit.json").write_text(
+        json.dumps({"visit": {"status": "full", "type": "git"}}),
+        encoding="utf-8",
+    )
+
+    (swh_dir / "demo-plugin.swh_snapshot.json").write_text(
+        json.dumps({"branches": {"refs/heads/main": {}, "refs/heads/dev": {}}}),
+        encoding="utf-8",
+    )
+
+    rows = build_feature_bundle(
+        data_raw_dir=data_raw,
+        registry_path=registry_dir / "plugins.jsonl",
+        out_path=tmp_path / "out.jsonl",
+        out_csv_path=None,
+        summary_path=None,
+    )
+
+    row = rows[0]
+    assert row["swh_present"] is True
+    assert row["swh_origin_found"] is True
+    assert row["swh_has_snapshot"] is True
+    assert row["swh_visit_count"] == 2
+    assert row["swh_first_visit_date"] == "2025-03-10"
+    assert row["swh_latest_visit_date"] == "2025-06-15"
+    assert row["swh_latest_visit_status"] == "full"
+    assert row["swh_latest_visit_type"] == "git"
+    assert row["swh_snapshot_branch_count"] == 2
+
+
 def test_build_feature_bundle_writes_joined_outputs(tmp_path: Path) -> None:
     data_raw = tmp_path / "data" / "raw"
     registry_dir = data_raw / "registry"

@@ -21,6 +21,7 @@ from canary.collectors.plugins_registry import (
     collect_plugins_registry_real,
     collect_plugins_registry_sample,
 )
+from canary.collectors.software_heritage import collect_software_heritage_real
 from canary.plugin_aliases import canonicalize_plugin_id
 from canary.scoring.baseline import score_plugin_baseline
 from canary.train.baseline import train_baseline
@@ -297,6 +298,18 @@ def _cmd_collect_github(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_collect_software_heritage(args: argparse.Namespace) -> int:
+    result = collect_software_heritage_real(
+        plugin_id=args.plugin,
+        data_dir=args.data_dir,
+        out_dir=args.out_dir,
+        timeout_s=float(args.timeout_s),
+        overwrite=bool(args.overwrite),
+    )
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
+
+
 def _cmd_collect_gharchive(args: argparse.Namespace) -> int:
     result = collect_gharchive_history_real(
         data_dir=args.data_dir,
@@ -369,17 +382,20 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
     advisories_dir = data_raw / "advisories"
     github_dir = data_raw / "github"
     health_dir = data_raw / "healthscore"
+    swh_dir = data_raw / "software_heritage"
 
     plugins_dir.mkdir(parents=True, exist_ok=True)
     advisories_dir.mkdir(parents=True, exist_ok=True)
     github_dir.mkdir(parents=True, exist_ok=True)
     health_dir.mkdir(parents=True, exist_ok=True)
+    swh_dir.mkdir(parents=True, exist_ok=True)
 
     only = args.only
     do_snapshot = (only is None) or (only == "snapshot")
     do_advisories = (only is None) or (only == "advisories")
     do_github = (only is None) or (only == "github")
     do_healthscore = (only is None) or (only == "healthscore")
+    do_software_heritage = (only is None) or (only == "software-heritage")
 
     max_plugins = int(args.max_plugins) if args.max_plugins is not None else None
     sleep_s = float(args.sleep)
@@ -389,11 +405,13 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
     adv_written = 0
     gh_written = 0
     hs_written = 0
+    swh_written = 0
 
     snap_skipped = 0
     adv_skipped = 0
     gh_skipped = 0
     hs_skipped = 0
+    swh_skipped = 0
 
     errors = 0
 
@@ -478,6 +496,22 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
                     )
                     gh_written += 1
 
+            swh_index_path = swh_dir / f"{plugin_id}.swh_index.json"
+            if do_software_heritage:
+                if _nonempty(swh_index_path):
+                    swh_skipped += 1
+                else:
+                    if not args.real:
+                        raise SystemExit("ERROR: enrich software-heritage requires --real")
+                    collect_software_heritage_real(
+                        plugin_id=plugin_id,
+                        data_dir=str(data_raw),
+                        out_dir=str(swh_dir),
+                        timeout_s=float(args.software_heritage_timeout_s),
+                        overwrite=False,
+                    )
+                    swh_written += 1
+
         except Exception as e:
             errors += 1
             print(f"[ERROR] {plugin_id}: {e}")
@@ -499,6 +533,9 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
     if do_healthscore:
         print(f"  Healthscore written: {hs_written}")
         print(f"  Healthscore skipped: {hs_skipped}")
+    if do_software_heritage:
+        print(f"  SWH written:         {swh_written}")
+        print(f"  SWH skipped:         {swh_skipped}")
     print(f"  Errors:              {errors}")
 
     return 0 if errors == 0 else 2
@@ -772,6 +809,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     healthscore.set_defaults(func=_cmd_collect_healthscore)
 
+    software_heritage = collect_sub.add_parser(
+        "software-heritage",
+        help="Collect Software Heritage archival metadata for a plugin",
+    )
+    software_heritage.add_argument(
+        "--plugin",
+        required=True,
+        help="Plugin short name (e.g. workflow-cps)",
+    )
+    software_heritage.add_argument(
+        "--data-dir",
+        default="data/raw",
+        help="Raw dataset root (reads plugins/<id>.snapshot.json)",
+    )
+    software_heritage.add_argument(
+        "--out-dir",
+        default="data/raw/software_heritage",
+        help="Output directory for Software Heritage JSON files",
+    )
+    software_heritage.add_argument(
+        "--timeout-s",
+        default=20.0,
+        help="Network timeout per request",
+    )
+    software_heritage.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing Software Heritage JSON files",
+    )
+    software_heritage.set_defaults(func=_cmd_collect_software_heritage)
+
     enrich = collect_sub.add_parser(
         "enrich",
         help="Batch-enrich plugins from the registry (snapshot + advisories + github) with resume",
@@ -788,7 +856,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     enrich.add_argument(
         "--only",
-        choices=["snapshot", "advisories", "github", "healthscore"],
+        choices=["snapshot", "advisories", "github", "healthscore", "software-heritage"],
         default=None,
         help="Run only one stage (default: run all stages)",
     )
@@ -803,6 +871,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--healthscore-timeout-s",
         default=30.0,
         help="Healthscore timeout per request",
+    )
+    enrich.add_argument(
+        "--software-heritage-timeout-s",
+        default=20.0,
+        help="Software Heritage timeout per request",
     )
     enrich.set_defaults(func=_cmd_collect_enrich)
 

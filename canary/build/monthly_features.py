@@ -12,6 +12,7 @@ from canary.build.features_bundle import (
     _load_github_features,
     _load_healthscore_features,
     _load_snapshot_features,
+    _read_json,
     _read_jsonl,
     _safe_float,
     _to_csv_scalar,
@@ -110,6 +111,102 @@ ADVISORY_ZERO_DEFAULTS: dict[str, Any] = {
     "advisory_max_cvss_to_date": None,
     "had_advisory_this_month": False,
 }
+SWH_ZERO_DEFAULTS: dict[str, Any] = {
+    "swh_present_any": False,
+    "swh_origin_found": False,
+    "swh_has_snapshot_to_date": False,
+    "swh_visit_count_to_date": 0,
+    "swh_visits_this_month": 0,
+    "swh_visits_last_365d": 0,
+    "swh_latest_visit_date_to_date": None,
+    "swh_archive_age_days_to_date": None,
+}
+
+
+def _extract_swh_visits(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [x for x in payload if isinstance(x, dict)]
+    if isinstance(payload, dict):
+        for key in ("results", "visits"):
+            val = payload.get(key)
+            if isinstance(val, list):
+                return [x for x in val if isinstance(x, dict)]
+    return []
+
+
+def _load_swh_records(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
+    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    swh_dir = data_raw_dir / "software_heritage"
+    return {
+        "index": _read_json(swh_dir / f"{plugin_id}.swh_index.json")
+        if (swh_dir / f"{plugin_id}.swh_index.json").exists()
+        else None,
+        "visits": _read_json(swh_dir / f"{plugin_id}.swh_visits.json")
+        if (swh_dir / f"{plugin_id}.swh_visits.json").exists()
+        else None,
+    }
+
+
+def _load_software_heritage_monthly_features(
+    data_raw_dir: Path,
+    plugin_ids: list[str],
+    months: list[dict[str, Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+
+    month_meta = [
+        {
+            "month": m["month"],
+            "window_start": date.fromisoformat(str(m["window_start"])),
+            "window_end": date.fromisoformat(str(m["window_end"])),
+        }
+        for m in months
+    ]
+
+    for plugin_id in plugin_ids:
+        raw = _load_swh_records(plugin_id, data_raw_dir)
+        index_payload = raw["index"] if isinstance(raw["index"], dict) else {}
+        visits_payload = raw["visits"]
+        visits = _extract_swh_visits(visits_payload)
+
+        normalized_dates: list[date] = []
+        for visit in visits:
+            dt = _parse_iso_date(visit.get("date") or visit.get("visit_date"))
+            if dt is not None:
+                normalized_dates.append(dt)
+        normalized_dates.sort()
+
+        for month in month_meta:
+            window_start = month["window_start"]
+            window_end = month["window_end"]
+
+            to_date = [d for d in normalized_dates if d <= window_end]
+            this_month = [d for d in normalized_dates if window_start <= d <= window_end]
+            trailing = [
+                d for d in normalized_dates if (window_end - d).days <= 365 and d <= window_end
+            ]
+
+            if not index_payload and not normalized_dates:
+                continue
+
+            first_date = to_date[0] if to_date else None
+            latest_date = to_date[-1] if to_date else None
+
+            out[(plugin_id, month["month"])] = {
+                "swh_present_any": bool(index_payload) or bool(normalized_dates),
+                "swh_origin_found": bool(index_payload.get("origin_found")),
+                "swh_has_snapshot_to_date": bool(to_date)
+                and bool(index_payload.get("snapshot_found")),
+                "swh_visit_count_to_date": len(to_date),
+                "swh_visits_this_month": len(this_month),
+                "swh_visits_last_365d": len(trailing),
+                "swh_latest_visit_date_to_date": latest_date.isoformat() if latest_date else None,
+                "swh_archive_age_days_to_date": (
+                    (latest_date - first_date).days if first_date and latest_date else None
+                ),
+            }
+
+    return out
 
 
 def _parse_yyyymmdd(value: Any) -> date | None:
@@ -422,6 +519,7 @@ def build_monthly_feature_bundle(
     months = iter_months(start_month, end_month)
     static_by_plugin = _load_static_feature_rows(plugin_ids, data_raw_dir)
     gharchive_monthly = _load_gharchive_monthly_features(data_raw_dir)
+    swh_rows = _load_software_heritage_monthly_features(data_raw_dir, plugin_ids, months)
     advisory_monthly = _load_advisory_monthly_features(data_raw_dir, plugin_ids, months)
     registry_by_plugin = {
         canonicalize_plugin_id(str(rec.get("plugin_id") or "").strip(), data_dir=data_raw_dir): rec
@@ -451,6 +549,8 @@ def build_monthly_feature_bundle(
             row.update(advisory_monthly.get((plugin_id, month["month"]), {}))
             row.update(dict(GHARCHIVE_ZERO_DEFAULTS))
             row.update(gharchive_monthly.get((plugin_id, month["month"]), {}))
+            row.update(SWH_ZERO_DEFAULTS)
+            row.update(swh_rows.get((plugin_id, month["month"]), {}))
             rows.append(row)
     rows_by_plugin: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
