@@ -1396,6 +1396,16 @@ def _prepare_request_state(
     return plugin_options, latest_metrics, model_dir_options
 
 
+def _public_validation_error(path: str) -> str:
+    if path == "/score":
+        return "The scoring request could not be completed. Check the form values and try again."
+    if path == "/run":
+        return "The data collection request could not be completed. Check the form values and try again."
+    return (
+        "The machine learning request could not be completed. Check the form values and try again."
+    )
+
+
 def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
     method = environ.get("REQUEST_METHOD", "GET").upper()
     path = environ.get("PATH_INFO", "/")
@@ -1447,14 +1457,15 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 latest_metrics = ml_result.get("metrics") or latest_metrics
                 values["active_tab"] = "ml"
         except ValueError as exc:
+            logger.warning("Rejected webapp request for %s: %s", path, exc)
             if path == "/score":
-                score_error = str(exc)
+                score_error = _public_validation_error(path)
                 values["active_tab"] = "score"
             elif path == "/run":
-                data_error = str(exc)
+                data_error = _public_validation_error(path)
                 values["active_tab"] = "data"
             else:
-                ml_error = str(exc)
+                ml_error = _public_validation_error(path)
                 values["active_tab"] = "ml"
         except Exception:  # pragma: no cover
             logger.exception("Unhandled webapp error while processing %s", path)

@@ -161,3 +161,15 @@ def test_load_metrics_action_rejects_paths_outside_models_root(tmp_path, monkeyp
 
     with pytest.raises(ValueError, match="must stay under"):
         webapp._run_load_metrics_action({"model_out_dir": "../outside"})
+
+
+def test_train_route_does_not_expose_validation_exception_text():
+    body = b"model_out_dir=..%2Foutside&ml_action=load"
+
+    status, headers, response = _run_app("POST", "/train", body)
+    text = response.decode("utf-8")
+
+    assert status == "200 OK"
+    assert ("Content-Type", "text/html; charset=utf-8") in headers
+    assert "The machine learning request could not be completed." in text
+    assert "must stay under" not in text
