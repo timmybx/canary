@@ -8,6 +8,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import shlex
 import urllib.parse
 from contextlib import redirect_stdout
@@ -40,6 +41,8 @@ DEFAULT_LABELED_CSV = "data/processed/features/plugins.monthly.labeled.csv"
 DEFAULT_LABELED_SUMMARY = "data/processed/features/plugins.monthly.labeled.summary.json"
 DEFAULT_MODEL_DIR = "data/processed/models/baseline_6m"
 MODEL_OUTPUTS_ROOT = Path("data/processed/models").resolve()
+MODEL_OUTPUTS_ROOT_PARTS = Path("data/processed/models").parts
+MODEL_OUTPUT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 DEFAULTS: dict[str, Any] = {
     "active_tab": "score",
@@ -397,11 +400,11 @@ def _namespace_for_data_action(command_name: str, form: dict[str, str]) -> argpa
 
 
 def _namespace_for_train(form: dict[str, str]) -> argparse.Namespace:
-    model_out_dir = _resolve_model_output_dir(form.get("model_out_dir") or DEFAULT_MODEL_DIR)
+    model_out_dir = _normalize_model_output_dir(form.get("model_out_dir") or DEFAULT_MODEL_DIR)
     return argparse.Namespace(
         in_path=(form.get("model_in_path") or DEFAULT_LABELED_PATH).strip(),
         target_col=(form.get("target_col") or "label_advisory_within_6m").strip(),
-        out_dir=str(model_out_dir),
+        out_dir=model_out_dir,
         test_start_month=(form.get("test_start_month") or "2025-10").strip(),
         exclude_cols=(form.get("exclude_cols") or "").strip(),
         include_prefixes=(form.get("include_prefixes") or "").strip(),
@@ -594,8 +597,8 @@ def _run_data_action(command_name: str, form: dict[str, str]) -> dict[str, Any]:
 def _run_train_action(form: dict[str, str]) -> dict[str, Any]:
     args = _namespace_for_train(form)
     result = _capture_command(_cmd_train_baseline, args)
-    metrics_path = _resolve_model_output_dir(args.out_dir) / "metrics.json"
-    metrics = _load_json_file(metrics_path)
+    metrics_path = _model_metrics_path(args.out_dir)
+    metrics = _load_model_metrics(args.out_dir)
     return {
         "command": " ".join(
             shlex.quote(part)
@@ -610,9 +613,9 @@ def _run_train_action(form: dict[str, str]) -> dict[str, Any]:
 
 
 def _run_load_metrics_action(form: dict[str, str]) -> dict[str, Any]:
-    out_dir = _resolve_model_output_dir(form.get("model_out_dir") or DEFAULT_MODEL_DIR)
-    metrics_path = Path(out_dir) / "metrics.json"
-    metrics = _load_json_file(metrics_path)
+    out_dir = _normalize_model_output_dir(form.get("model_out_dir") or DEFAULT_MODEL_DIR)
+    metrics_path = _model_metrics_path(out_dir)
+    metrics = _load_model_metrics(out_dir)
     if not metrics:
         raise ValueError(f"No metrics.json was found under {metrics_path}.")
     return {
@@ -750,57 +753,64 @@ def _select(name: str, label: str, current: str, options: list[tuple[str, str]])
 
 
 @lru_cache(maxsize=128)
-def _load_json_file_cached(path_str: str, mtime_ns: int) -> dict[str, Any] | None:
-    target = Path(path_str)
+def _load_model_metrics_cached(
+    model_dir_parts: tuple[str, ...], mtime_ns: int
+) -> dict[str, Any] | None:
+    target = MODEL_OUTPUTS_ROOT.joinpath(*model_dir_parts, "metrics.json")
     try:
         return json.loads(target.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 
 
-def _load_json_file(path: str | Path) -> dict[str, Any] | None:
-    target = _resolve_path_within(MODEL_OUTPUTS_ROOT, path)
-    if target is None:
+def _load_model_metrics(model_out_dir: str | Path) -> dict[str, Any] | None:
+    try:
+        model_dir_parts = _model_output_dir_parts(model_out_dir)
+    except ValueError:
         return None
+    target = MODEL_OUTPUTS_ROOT.joinpath(*model_dir_parts, "metrics.json")
     if not target.exists() or not target.is_file():
         return None
     try:
         stat = target.stat()
     except OSError:
         return None
-    return _load_json_file_cached(str(target.resolve()), stat.st_mtime_ns)
+    return _load_model_metrics_cached(model_dir_parts, stat.st_mtime_ns)
 
 
-def _resolve_path_within(base_dir: str | Path, path: str | Path) -> Path | None:
-    try:
-        base = Path(base_dir).resolve()
-        candidate = Path(path).resolve()
-    except OSError:
-        return None
-    if candidate == base or base in candidate.parents:
-        return candidate
-    return None
-
-
-def _resolve_model_output_dir(path: str | Path) -> Path:
+def _model_output_dir_parts(path: str | Path) -> tuple[str, ...]:
     raw_value = str(path).strip()
     if not raw_value:
         raise ValueError("Please choose a model output directory.")
-    resolved = _resolve_path_within(MODEL_OUTPUTS_ROOT, raw_value)
-    if resolved is None:
+    normalized = raw_value.replace("\\", "/")
+    if normalized.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", normalized):
         raise ValueError(f"Model output directories must stay under {MODEL_OUTPUTS_ROOT}.")
-    return resolved
+    parts = tuple(part for part in normalized.split("/") if part)
+    if len(parts) <= len(MODEL_OUTPUTS_ROOT_PARTS):
+        raise ValueError(f"Model output directories must stay under {MODEL_OUTPUTS_ROOT}.")
+    if parts[: len(MODEL_OUTPUTS_ROOT_PARTS)] != MODEL_OUTPUTS_ROOT_PARTS:
+        raise ValueError(f"Model output directories must stay under {MODEL_OUTPUTS_ROOT}.")
+    suffix = parts[len(MODEL_OUTPUTS_ROOT_PARTS) :]
+    if any(part in {".", ".."} or not MODEL_OUTPUT_SEGMENT_RE.fullmatch(part) for part in suffix):
+        raise ValueError(f"Model output directories must stay under {MODEL_OUTPUTS_ROOT}.")
+    return suffix
+
+
+def _normalize_model_output_dir(path: str | Path) -> str:
+    return str(Path(*MODEL_OUTPUTS_ROOT_PARTS, *_model_output_dir_parts(path)))
+
+
+def _model_metrics_path(path: str | Path) -> Path:
+    return MODEL_OUTPUTS_ROOT.joinpath(*_model_output_dir_parts(path), "metrics.json")
 
 
 @lru_cache(maxsize=32)
 def _discover_model_output_dirs_cached(
     base_dir_str: str, signature: tuple[tuple[str, int], ...]
 ) -> list[str]:
-    base = Path(base_dir_str)
     found: list[str] = []
     for child_name, _mtime_ns in signature:
-        metrics_path = base / child_name / "metrics.json"
-        found.append(str(metrics_path.parent))
+        found.append(str(Path(*MODEL_OUTPUTS_ROOT_PARTS, child_name)))
     return found
 
 
@@ -1376,12 +1386,13 @@ def _prepare_request_state(
     model_dir_options: list[str] = []
     if active_tab == "ml":
         model_dir_options = _discover_model_output_dirs()
-        resolved_model_dir = _resolve_path_within(
-            MODEL_OUTPUTS_ROOT, values.get("model_out_dir") or DEFAULT_MODEL_DIR
-        )
-        if resolved_model_dir is not None:
-            values["model_out_dir"] = str(resolved_model_dir)
-            latest_metrics = _load_json_file(resolved_model_dir / "metrics.json")
+        try:
+            values["model_out_dir"] = _normalize_model_output_dir(
+                values.get("model_out_dir") or DEFAULT_MODEL_DIR
+            )
+        except ValueError:
+            values["model_out_dir"] = DEFAULT_MODEL_DIR
+        latest_metrics = _load_model_metrics(values["model_out_dir"])
     return plugin_options, latest_metrics, model_dir_options
 
 

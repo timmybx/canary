@@ -142,8 +142,9 @@ def test_load_metrics_action_loads_metrics_from_models_root(tmp_path, monkeypatc
     run_dir.mkdir(parents=True)
     (run_dir / "metrics.json").write_text('{"accuracy": 0.91}', encoding="utf-8")
     monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT", models_root)
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT_PARTS", ("data", "processed", "models"))
 
-    result = webapp._run_load_metrics_action({"model_out_dir": str(run_dir)})
+    result = webapp._run_load_metrics_action({"model_out_dir": "data/processed/models/baseline_6m"})
 
     assert result["metrics"] == {"accuracy": 0.91}
     assert result["metrics_path"] == str(run_dir / "metrics.json")
@@ -156,6 +157,7 @@ def test_load_metrics_action_rejects_paths_outside_models_root(tmp_path, monkeyp
     outside_dir.mkdir()
     (outside_dir / "metrics.json").write_text('{"accuracy": 0.42}', encoding="utf-8")
     monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT", models_root)
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT_PARTS", ("data", "processed", "models"))
 
     with pytest.raises(ValueError, match="must stay under"):
-        webapp._run_load_metrics_action({"model_out_dir": str(outside_dir)})
+        webapp._run_load_metrics_action({"model_out_dir": "../outside"})
