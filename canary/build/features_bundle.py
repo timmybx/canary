@@ -525,16 +525,16 @@ def _load_software_heritage_features(plugin_id: str, data_raw_dir: Path) -> dict
             1 for d in visit_dates if datetime.fromisoformat(d).date().toordinal() >= trailing_start
         )
 
-    if isinstance(latest_visit_payload, dict):
-        visit = latest_visit_payload.get("visit")
-        if isinstance(visit, dict):
-            row["swh_latest_visit_status"] = visit.get("status")
-            row["swh_latest_visit_type"] = visit.get("type")
-        else:
-            row["swh_latest_visit_status"] = latest_visit_payload.get("status")
-            row["swh_latest_visit_type"] = latest_visit_payload.get("type")
-
     row["swh_snapshot_branch_count"] = _snapshot_branch_count(snapshot_payload)
+
+    if isinstance(latest_visit_payload, dict):
+        visit_obj = latest_visit_payload.get("visit")
+        if not isinstance(visit_obj, dict):
+            visit_obj = latest_visit_payload
+
+        row["swh_latest_visit_status"] = visit_obj.get("status")
+        row["swh_latest_visit_type"] = visit_obj.get("type")
+        row["swh_latest_visit_date"] = _parse_iso_date_prefix(visit_obj.get("date"))
 
     return row
 
