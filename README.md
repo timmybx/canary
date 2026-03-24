@@ -19,6 +19,90 @@ Today, CANARY has a working Docker-based CLI, a local web console, first-class c
 > **Dependency source of truth:** `pyproject.toml` is the source of dependency declarations.  
 > `requirements*.txt` files are generated lockfiles used for reproducible installs.
 
+
+## 🧭 CANARY Component Flow
+
+```mermaid
+flowchart LR
+    subgraph S[Sources]
+        A1[Plugin Registry]
+        A2[GitHub API]
+        A3[Jenkins Advisories]
+        A4[GHArchive]
+        A5[Health Score]
+        A6[Software Heritage]
+    end
+
+    subgraph C[Collection]
+        B1[Snapshot Collector]
+        B2[GitHub Collector]
+        B3[Advisory Collector]
+        B4[GHArchive Collector]
+        B5[Healthscore Collector]
+        B6[SWH Collector]
+    end
+
+    subgraph R[Raw Data]
+        C1[registry]
+        C2[plugins]
+        C3[github]
+        C4[advisories]
+        C5[gharchive]
+        C6[healthscore]
+        C7[software_heritage]
+    end
+
+    subgraph F1[Static Features]
+        D1[build features]
+        E1[plugins.features.jsonl]
+    end
+
+    subgraph F2[Monthly Features]
+        D2[build monthly-features]
+        E2[plugins.monthly.features.jsonl]
+    end
+
+    subgraph U[Usage]
+        FCLI[CLI / current scoring]
+        FGUI[GUI / reporting]
+        FML[Model training]
+    end
+
+    A1 --> B1
+    A1 --> C1
+    A2 --> B2
+    A3 --> B3
+    A4 --> B4
+    A5 --> B5
+    A6 --> B6
+
+    B1 --> C2
+    B2 --> C3
+    B3 --> C4
+    B4 --> C5
+    B5 --> C6
+    B6 --> C7
+
+    C1 --> D1
+    C2 --> D1
+    C3 --> D1
+    C4 --> D1
+    C6 --> D1
+    C7 --> D1
+
+    C1 --> D2
+    C4 --> D2
+    C5 --> D2
+    C7 --> D2
+
+    D1 --> E1
+    D2 --> E2
+
+    E1 --> FCLI
+    E1 --> FGUI
+    E2 --> FML
+```
+
 ---
 
 ## 🔥 What CANARY Does Right Now
