@@ -33,7 +33,6 @@ flowchart LR
 
     subgraph S[Sources]
         direction TB
-        %% Using ( ) for rounded "cloud-like" nodes + FontAwesome cloud icon
         A1(fa:fa-cloud Plugin Registry):::source
         A2(fa:fa-cloud GitHub API):::source
         A3(fa:fa-cloud Jenkins Advisories):::source
@@ -54,7 +53,6 @@ flowchart LR
 
     subgraph R[Raw Data Storage]
         direction TB
-        %% Keeping the database cylindrical shapes
         C1[(registry)]:::raw
         C2[(plugins)]:::raw
         C3[(github)]:::raw
@@ -64,19 +62,23 @@ flowchart LR
         C7[(software_heritage)]:::raw
     end
 
-    subgraph F[Feature Engineering]
+    subgraph FTOP[Static Current Point Feature Engineering]
         direction TB
-        D1[build features]:::feature
-        E1[plugins.features.jsonl]:::feature
-        D2[build monthly-features]:::feature
-        E2[plugins.monthly.features.jsonl]:::feature
+        D1[[build features]]:::feature
+        E1[/plugins.features.jsonl/]:::feature
+    end
+
+    subgraph FBOT[Monthly Time Bounded Feature Engineering]
+        direction TB
+        D2[[build monthly-features]]:::feature
+        E2[/plugins.monthly.features.jsonl/]:::feature
     end
 
     subgraph U[Usage]
         direction TB
-        FCLI[CLI / current scoring]:::usage
-        FGUI[GUI / reporting]:::usage
-        FML[Model training]:::usage
+        FCLI[fa:fa-terminal CLI / Scoring]:::usage
+        FGUI[fa:fa-desktop GUI / Reporting]:::usage
+        FML[fa:fa-robot Model Training]:::usage
     end
 
     %% Connections
