@@ -33,12 +33,12 @@ flowchart LR
 
     subgraph S[Sources]
         direction TB
-        A1(fa:fa-cloud Plugin Registry):::source
-        A2(fa:fa-cloud GitHub API):::source
-        A3(fa:fa-cloud Jenkins Advisories):::source
-        A4(fa:fa-cloud GHArchive):::source
-        A5(fa:fa-cloud Health Score):::source
-        A6(fa:fa-cloud Software Heritage):::source
+        A1[Plugin Registry]:::source
+        A2[GitHub API]:::source
+        A3[Jenkins Advisories]:::source
+        A4[GHArchive]:::source
+        A5[Health Score]:::source
+        A6[Software Heritage]:::source
     end
 
     subgraph C[Collection]
@@ -76,9 +76,9 @@ flowchart LR
 
     subgraph U[Usage]
         direction TB
-        FCLI[fa:fa-terminal CLI / Scoring]:::usage
-        FGUI[fa:fa-desktop GUI / Reporting]:::usage
-        FML[fa:fa-robot Model Training]:::usage
+        FCLI[CLI / Scoring]:::usage
+        FGUI[GUI / Reporting]:::usage
+        FML[Model Training]:::usage
     end
 
     %% Connections
