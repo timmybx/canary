@@ -24,79 +24,72 @@ Today, CANARY has a working Docker-based CLI, a local web console, first-class c
 
 ```mermaid
 flowchart LR
+    %% Styling
+    classDef source fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:black;
+    classDef collect fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,color:black;
+    classDef raw fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:black;
+    classDef feature fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:black;
+    classDef usage fill:#ffe0b2,stroke:#ef6c00,stroke-width:2px,color:black;
+
     subgraph S[Sources]
-        A1[Plugin Registry]
-        A2[GitHub API]
-        A3[Jenkins Advisories]
-        A4[GHArchive]
-        A5[Health Score]
-        A6[Software Heritage]
+        direction TB
+        %% Using ( ) for rounded "cloud-like" nodes + FontAwesome cloud icon
+        A1(fa:fa-cloud Plugin Registry):::source
+        A2(fa:fa-cloud GitHub API):::source
+        A3(fa:fa-cloud Jenkins Advisories):::source
+        A4(fa:fa-cloud GHArchive):::source
+        A5(fa:fa-cloud Health Score):::source
+        A6(fa:fa-cloud Software Heritage):::source
     end
 
     subgraph C[Collection]
-        B1[Snapshot Collector]
-        B2[GitHub Collector]
-        B3[Advisory Collector]
-        B4[GHArchive Collector]
-        B5[Healthscore Collector]
-        B6[SWH Collector]
+        direction TB
+        B1[Snapshot Collector]:::collect
+        B2[GitHub Collector]:::collect
+        B3[Advisory Collector]:::collect
+        B4[GHArchive Collector]:::collect
+        B5[Healthscore Collector]:::collect
+        B6[SWH Collector]:::collect
     end
 
-    subgraph R[Raw Data]
-        C1[registry]
-        C2[plugins]
-        C3[github]
-        C4[advisories]
-        C5[gharchive]
-        C6[healthscore]
-        C7[software_heritage]
+    subgraph R[Raw Data Storage]
+        direction TB
+        %% Keeping the database cylindrical shapes
+        C1[(registry)]:::raw
+        C2[(plugins)]:::raw
+        C3[(github)]:::raw
+        C4[(advisories)]:::raw
+        C5[(gharchive)]:::raw
+        C6[(healthscore)]:::raw
+        C7[(software_heritage)]:::raw
     end
 
-    subgraph F1[Static Features]
-        D1[build features]
-        E1[plugins.features.jsonl]
-    end
-
-    subgraph F2[Monthly Features]
-        D2[build monthly-features]
-        E2[plugins.monthly.features.jsonl]
+    subgraph F[Feature Engineering]
+        direction TB
+        D1[build features]:::feature
+        E1[plugins.features.jsonl]:::feature
+        D2[build monthly-features]:::feature
+        E2[plugins.monthly.features.jsonl]:::feature
     end
 
     subgraph U[Usage]
-        FCLI[CLI / current scoring]
-        FGUI[GUI / reporting]
-        FML[Model training]
+        direction TB
+        FCLI[CLI / current scoring]:::usage
+        FGUI[GUI / reporting]:::usage
+        FML[Model training]:::usage
     end
 
-    A1 --> B1
+    %% Connections
+    A1 --> B1 --> C2
     A1 --> C1
-    A2 --> B2
-    A3 --> B3
-    A4 --> B4
-    A5 --> B5
-    A6 --> B6
+    A2 --> B2 --> C3
+    A3 --> B3 --> C4
+    A4 --> B4 --> C5
+    A5 --> B5 --> C6
+    A6 --> B6 --> C7
 
-    B1 --> C2
-    B2 --> C3
-    B3 --> C4
-    B4 --> C5
-    B5 --> C6
-    B6 --> C7
-
-    C1 --> D1
-    C2 --> D1
-    C3 --> D1
-    C4 --> D1
-    C6 --> D1
-    C7 --> D1
-
-    C1 --> D2
-    C4 --> D2
-    C5 --> D2
-    C7 --> D2
-
-    D1 --> E1
-    D2 --> E2
+    C1 & C2 & C3 & C4 & C6 & C7 --> D1 --> E1
+    C1 & C4 & C5 & C7 --> D2 --> E2
 
     E1 --> FCLI
     E1 --> FGUI
