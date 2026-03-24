@@ -534,7 +534,9 @@ def _load_software_heritage_features(plugin_id: str, data_raw_dir: Path) -> dict
 
         row["swh_latest_visit_status"] = visit_obj.get("status")
         row["swh_latest_visit_type"] = visit_obj.get("type")
-        row["swh_latest_visit_date"] = _parse_iso_date_prefix(visit_obj.get("date"))
+        latest_visit_date = _parse_iso_date_prefix(visit_obj.get("date"))
+        if latest_visit_date:
+            row["swh_latest_visit_date"] = latest_visit_date
 
     return row
 
