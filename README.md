@@ -14,11 +14,52 @@
 
 CANARY is a research prototype for collecting software ecosystem signals for Jenkins plugins and turning them into transparent, explainable risk indicators.
 
-Today, CANARY has a working Docker-based CLI, a local web console, first-class collectors for registry/snapshot/advisory/healthscore/GitHub-historical data, and a baseline scorer. The project is now past the “proof of concept” stage and into integrated data collection for downstream analytics and ML.
+Today, CANARY has a working Docker-based CLI, a local web console, first-class collectors for registry/snapshot/advisory/healthscore/GitHub/GHArchive/Software Heritage data, and a baseline scorer. The project now produces two feature outputs: a broader static current-point feature bundle for scoring/reporting and a separate monthly time-bounded feature bundle for modeling.
 
 > **Dependency source of truth:** `pyproject.toml` is the source of dependency declarations.  
 > `requirements*.txt` files are generated lockfiles used for reproducible installs.
 
+---
+
+## 🔥 What CANARY Does Right Now
+
+- ✅ Collects the Jenkins plugin registry (“universe snapshot”) as JSONL
+- ✅ Collects per-plugin snapshot data
+  - curated/offline mode for deterministic testing
+  - real mode via the Jenkins plugins API
+  - bulk mode over the registry
+- ✅ Collects Jenkins advisories as JSONL
+  - sample mode (offline / deterministic)
+  - real mode via plugin snapshot → `securityWarnings` → advisory URLs
+  - batch mode via `collect enrich`
+- ✅ Collects the Jenkins Plugin Health Score dataset in bulk
+- ✅ Batch-enriches plugins from the registry with snapshot + advisories + GitHub + healthscore + Software Heritage
+- ✅ Collects historical GitHub activity windows from GH Archive via BigQuery
+- ✅ Collects Software Heritage archival origin/visit/snapshot metadata
+- ✅ Builds a static current-point feature bundle for scoring and reporting
+- ✅ Builds a separate monthly time-bounded feature bundle for modeling
+- ✅ Builds normalized advisory events for downstream analytics / ML
+- ✅ Scores a plugin using explainable signals from multiple data sources
+- ✅ Runs tests, linting, fuzzing, and security checks in a consistent Docker environment
+
+---
+
+## 📌 Current Status
+
+Recent milestones:
+
+- Integrated GH Archive collection into the main `canary collect gharchive` workflow
+- Integrated Software Heritage collection into `collect enrich` and the feature pipeline
+- Split generated features into two clean paths:
+  - `plugins.features.*` for current-point scoring and reporting
+  - `plugins.monthly.features.*` for time-bounded modeling
+- Restricted the monthly dataset to time-bounded feature families only
+- Validated historical collection at full-registry scale
+- Successfully collected Software Heritage data for the large majority of registry plugins
+
+That means CANARY now has a cleaner separation between present-day scoring/reporting and historical modeling, with the monthly dataset intentionally limited to time-bounded inputs.
+
+---
 
 ## 🧭 CANARY Component Flow
 
@@ -100,43 +141,6 @@ flowchart LR
 
 ---
 
-## 🔥 What CANARY Does Right Now
-
-- ✅ Collects the Jenkins plugin registry (“universe snapshot”) as JSONL
-- ✅ Collects per-plugin snapshot data
-  - curated/offline mode for deterministic testing
-  - real mode via the Jenkins plugins API
-  - bulk mode over the registry
-- ✅ Collects Jenkins advisories as JSONL
-  - sample mode (offline / deterministic)
-  - real mode via plugin snapshot → `securityWarnings` → advisory URLs
-  - batch mode via `collect enrich`
-- ✅ Collects the Jenkins Plugin Health Score dataset in bulk
-- ✅ Batch-enriches plugins from the registry with snapshot + advisories + GitHub + healthscore
-- ✅ Collects historical GitHub activity windows from GH Archive via BigQuery
-- ✅ Builds normalized advisory events for downstream analytics / ML
-- ✅ Scores a plugin using explainable signals from multiple data sources
-- ✅ Runs tests, linting, fuzzing, and security checks in a consistent Docker environment
-
----
-
-## 📌 Current Status
-
-Recent milestones:
-
-- Integrated GH Archive collection into the main `canary collect gharchive` workflow
-- Removed the earlier standalone proof-of-concept path so the repo has one primary historical collection path
-- Validated historical collection at **full-registry scale**
-- Successfully collected **full-year (2025-01-01 through 2025-12-31)** historical data at **1% sample** with:
-  - `plugins_written`: **469**
-  - `rows_written`: **927**
-  - `bytes_scanned_total`: **46,188,385,363**
-  - `skipped_windows`: **0**
-
-That means CANARY now has a working historical collection subsystem that scales predictably with time range while staying operationally manageable.
-
----
-
 ## 📦 Project Structure
 
 ```text
@@ -144,14 +148,18 @@ That means CANARY now has a working historical collection subsystem that scales 
 │   ├── cli.py                      # CLI entrypoint (`canary ...`)
 │   ├── webapp.py                   # Local web console (`python -m canary.webapp`)
 │   ├── collectors/                 # Data collectors
-│   │   ├── github_repo.py
+│   │   ├── github_plugin.py
 │   │   ├── gharchive_history.py
+│   │   ├── healthscore.py
 │   │   ├── jenkins_advisories.py
 │   │   ├── plugin_snapshot.py
-│   │   └── plugins_registry.py
+│   │   ├── plugins_registry.py
+│   │   └── software_heritage.py
 │   ├── build/                      # Dataset builders / normalizers
-│   │   └── advisories_events.py
-│   ├── datasets/                   # Remaining standalone dataset / feature scripts
+│   │   ├── advisories_events.py
+│   │   ├── features_bundle.py
+│   │   └── monthly_features.py
+│   ├── datasets/                   # Auxiliary / legacy dataset scripts
 │   │   └── github_repo_features.py
 │   └── scoring/
 │       └── baseline.py             # Baseline scorer (explainable)
@@ -165,9 +173,11 @@ That means CANARY now has a working historical collection subsystem that scales 
 │   │   ├── advisories/
 │   │   ├── github/
 │   │   ├── healthscore/
-│   │   └── gharchive/
+│   │   ├── gharchive/
+│   │   └── software_heritage/
 │   └── processed/                  # Derived datasets / features (generated)
-│       └── events/
+│       ├── events/
+│       └── features/
 ├── .github/
 │   ├── workflows/
 │   └── rulesets/
@@ -189,9 +199,21 @@ Raw:
 - `data/raw/gharchive/windows/<start>_<end>.gharchive.jsonl` — historical GH Archive features by window
 - `data/raw/gharchive/plugins/<plugin>.gharchive.jsonl` — historical GH Archive timeline per plugin
 - `data/raw/gharchive/gharchive_index.json` — GH Archive collection run summary
+- `data/raw/software_heritage/<plugin>.*` — Software Heritage origin / visits / latest visit / snapshot metadata
 
 Processed:
 - `data/processed/events/advisories.jsonl` — normalized/deduped advisory events stream
+- `data/processed/features/plugins.features.jsonl` — static current-point feature bundle
+- `data/processed/features/plugins.features.csv` — CSV export of the static feature bundle
+- `data/processed/features/plugins.features.summary.json` — static feature summary
+- `data/processed/features/plugins.monthly.features.jsonl` — monthly time-bounded feature bundle
+- `data/processed/features/plugins.monthly.features.csv` — CSV export of the monthly feature bundle
+- `data/processed/features/plugins.monthly.features.summary.json` — monthly feature summary
+
+### Feature outputs
+
+- `build features` creates the broader **static current-point** dataset used for current scoring, reporting, and GUI workflows. This path can use present-day enriched metadata.
+- `build monthly-features` creates the **monthly time-bounded** dataset used for model training and evaluation. This path is intentionally restricted to time-bounded feature families.
 
 ---
 
@@ -291,6 +313,7 @@ docker compose run --rm canary canary collect enrich --real --only snapshot   --
 docker compose run --rm canary canary collect enrich --real --only advisories --max-plugins 200
 docker compose run --rm canary canary collect enrich --real --only github     --max-plugins 200
 docker compose run --rm canary canary collect enrich --real --only healthscore
+docker compose run --rm canary canary collect enrich --real --only software-heritage --max-plugins 200
 ```
 
 ### 6) Collect a single plugin snapshot
@@ -339,7 +362,29 @@ docker compose run --rm canary canary build advisories-events
 Writes:
 - `data/processed/events/advisories.jsonl`
 
-### 10) Score a plugin
+### 10) Build static features
+
+```bash
+docker compose run --rm canary canary build features
+```
+
+Writes:
+- `data/processed/features/plugins.features.jsonl`
+- `data/processed/features/plugins.features.csv`
+- `data/processed/features/plugins.features.summary.json`
+
+### 11) Build monthly time-bounded features
+
+```bash
+docker compose run --rm canary canary build monthly-features --start 2024-01 --end 2025-12
+```
+
+Writes:
+- `data/processed/features/plugins.monthly.features.jsonl`
+- `data/processed/features/plugins.monthly.features.csv`
+- `data/processed/features/plugins.monthly.features.summary.json`
+
+### 12) Score a plugin
 
 ```bash
 docker compose run --rm canary canary score cucumber-reports --real --json
@@ -446,9 +491,9 @@ docker compose run --rm canary canary collect gharchive \
 
 ---
 
-## GitHub Repo Feature Script
+## GitHub Repo Feature Script (auxiliary / legacy path)
 
-Use this to collect repo metadata and process/security posture features for Jenkins plugin repos.
+Use this for standalone repo metadata experiments outside the main CANARY collection + feature-build pipeline.
 
 Optional: set a GitHub token first:
 
@@ -524,7 +569,6 @@ CANARY aims to be reproducible and supply-chain aware:
 
 - dependencies are hash-locked (`requirements*.txt`) and installed with `--require-hashes` in containers / CI
 - vulnerability auditing runs in Docker to reduce OS-specific drift
-- targeted temporary `pip-audit` waivers live in `.pip-audit-ignore.txt` and should be removed once upstream ships a fix
 - GitHub Actions are pinned to commit SHAs where practical
 - OpenSSF Scorecard is enabled to track supply-chain posture over time
 

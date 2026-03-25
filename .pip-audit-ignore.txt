@@ -4,3 +4,4 @@
 # Use this only for known issues with no available fix yet.
 # Remove entries as soon as an upstream patched release exists.
 GHSA-5239-wwwm-4pmq
+CVE-2026-4539  # pygments: no patched release available yet

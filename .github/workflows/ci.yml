@@ -49,7 +49,7 @@ jobs:
           bandit -r canary -q -s B608
 
       - name: pip-audit (installed env)
-        run: pip-audit
+        run: python -m canary.devtools.pip_audit_wrapper
 
       - name: Pytest
         run: |
