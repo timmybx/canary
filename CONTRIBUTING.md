@@ -33,8 +33,11 @@ docker compose run --rm canary ruff format .
 Security checks:
 ```bash
 docker compose run --rm canary bandit -r canary -q
-docker compose run --rm canary pip-audit
+docker compose run --rm canary python -m canary.devtools.pip_audit_wrapper
 ```
+
+If `pip-audit` is blocked by a known advisory with no upstream fix yet, add the advisory ID
+to `.pip-audit-ignore.txt` with a short comment and remove it once a patched release exists.
 
 ## Pre-commit (recommended)
 Install the git hooks locally:

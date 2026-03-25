@@ -9,9 +9,6 @@ from typing import Any
 
 from canary.build.features_bundle import (
     _iter_registry_records,
-    _load_github_features,
-    _load_healthscore_features,
-    _load_snapshot_features,
     _read_json,
     _read_jsonl,
     _safe_float,
@@ -59,19 +56,6 @@ def iter_months(start_yyyy_mm: str, end_yyyy_mm: str) -> list[dict[str, Any]]:
             current = date(current.year, current.month + 1, 1)
         idx += 1
     return months
-
-
-def _load_static_feature_rows(
-    plugin_ids: list[str], data_raw_dir: Path
-) -> dict[str, dict[str, Any]]:
-    static_rows: dict[str, dict[str, Any]] = {}
-    for plugin_id in plugin_ids:
-        row: dict[str, Any] = {"plugin_id": plugin_id}
-        row.update(_load_snapshot_features(plugin_id, data_raw_dir))
-        row.update(_load_github_features(plugin_id, data_raw_dir))
-        row.update(_load_healthscore_features(plugin_id, data_raw_dir))
-        static_rows[plugin_id] = row
-    return static_rows
 
 
 GHARCHIVE_MONTHLY_KEY_MAP = {
@@ -517,7 +501,6 @@ def build_monthly_feature_bundle(
         }
     )
     months = iter_months(start_month, end_month)
-    static_by_plugin = _load_static_feature_rows(plugin_ids, data_raw_dir)
     gharchive_monthly = _load_gharchive_monthly_features(data_raw_dir)
     swh_rows = _load_software_heritage_monthly_features(data_raw_dir, plugin_ids, months)
     advisory_monthly = _load_advisory_monthly_features(data_raw_dir, plugin_ids, months)
@@ -529,7 +512,6 @@ def build_monthly_feature_bundle(
     rows: list[dict[str, Any]] = []
     for plugin_id in plugin_ids:
         registry_rec = registry_by_plugin[plugin_id]
-        static = static_by_plugin.get(plugin_id, {"plugin_id": plugin_id})
         for month in months:
             row: dict[str, Any] = {
                 "plugin_id": plugin_id,
@@ -544,7 +526,6 @@ def build_monthly_feature_bundle(
                 "registry_plugin_api_url": registry_rec.get("plugin_api_url"),
                 "registry_title": registry_rec.get("title") or registry_rec.get("plugin_title"),
             }
-            row.update(static)
             row.update(dict(ADVISORY_ZERO_DEFAULTS))
             row.update(advisory_monthly.get((plugin_id, month["month"]), {}))
             row.update(dict(GHARCHIVE_ZERO_DEFAULTS))
@@ -587,7 +568,6 @@ def build_monthly_feature_bundle(
             "rows_with_advisory_this_month": sum(
                 1 for r in rows if r.get("had_advisory_this_month")
             ),
-            "rows_with_healthscore": sum(1 for r in rows if r.get("healthscore_present")),
             "out_path": str(out_path),
             "out_csv_path": str(out_csv) if out_csv is not None else None,
         }

@@ -11,7 +11,7 @@ format:
 	docker compose run --rm canary ruff format .
 
 audit:
-	docker compose run --rm canary pip-audit
+	docker compose run --rm canary python -m canary.devtools.pip_audit_wrapper
 
 ruff: lint format
 

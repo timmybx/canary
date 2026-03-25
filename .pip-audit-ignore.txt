@@ -1,0 +1,6 @@
+# One advisory ID per line, for example:
+# GHSA-xxxx-xxxx-xxxx
+#
+# Use this only for known issues with no available fix yet.
+# Remove entries as soon as an upstream patched release exists.
+GHSA-5239-wwwm-4pmq

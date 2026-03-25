@@ -524,6 +524,7 @@ CANARY aims to be reproducible and supply-chain aware:
 
 - dependencies are hash-locked (`requirements*.txt`) and installed with `--require-hashes` in containers / CI
 - vulnerability auditing runs in Docker to reduce OS-specific drift
+- targeted temporary `pip-audit` waivers live in `.pip-audit-ignore.txt` and should be removed once upstream ships a fix
 - GitHub Actions are pinned to commit SHAs where practical
 - OpenSSF Scorecard is enabled to track supply-chain posture over time
 

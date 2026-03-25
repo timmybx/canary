@@ -246,11 +246,13 @@ def test_build_monthly_feature_bundle_dense_grid(tmp_path: Path) -> None:
     assert alpha_jan["gharchive_present"] is True
     assert alpha_jan["gharchive_events_total"] == 5
     assert alpha_jan["gharchive_push_events"] == 2
-    assert alpha_jan["healthscore_value"] == 77.0
+    assert "healthscore_value" not in alpha_jan
+    assert "github_present" not in alpha_jan
+    assert "snapshot_present" not in alpha_jan
 
     assert beta_feb["gharchive_present"] is False
     assert beta_feb["gharchive_events_total"] == 0
-    assert beta_feb["healthscore_present"] is True
+    assert "healthscore_present" not in beta_feb
 
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["plugins_total"] == 2
