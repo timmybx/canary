@@ -394,6 +394,15 @@ def _trailing_sum(rows: list[dict[str, Any]], idx: int, key: str, window: int) -
     return sum(_num(rows[j], key) for j in range(start, idx + 1))
 
 
+def _trailing_values(rows: list[dict[str, Any]], idx: int, key: str, window: int) -> list[float]:
+    start = max(0, idx - window + 1)
+    return [_num(rows[j], key) for j in range(start, idx + 1)]
+
+
+def _trailing_active_months(rows: list[dict[str, Any]], idx: int, key: str, window: int) -> int:
+    return sum(1 for value in _trailing_values(rows, idx, key, window) if value > 0)
+
+
 def _previous_window_sum(rows: list[dict[str, Any]], idx: int, key: str, window: int) -> float:
     end = idx - window
     if end < 0:
@@ -423,7 +432,9 @@ def _add_rolling_gharchive_features(rows: list[dict[str, Any]]) -> list[dict[str
         "gharchive_events_total",
         "gharchive_push_events",
         "gharchive_pull_request_events",
+        "gharchive_pull_request_closed_events",
         "gharchive_pull_request_merged_events",
+        "gharchive_pull_request_review_events",
         "gharchive_issues_events",
         "gharchive_issues_closed_events",
         "gharchive_release_events",
@@ -454,11 +465,25 @@ def _add_rolling_gharchive_features(rows: list[dict[str, Any]]) -> list[dict[str
 
         push_3m = _num(row, "gharchive_push_events_trailing_3m")
         pr_3m = _num(row, "gharchive_pull_request_events_trailing_3m")
+        pr_closed_3m = _num(row, "gharchive_pull_request_closed_events_trailing_3m")
+        pr_review_3m = _num(row, "gharchive_pull_request_review_events_trailing_3m")
         merged_3m = _num(row, "gharchive_pull_request_merged_events_trailing_3m")
         issues_3m = _num(row, "gharchive_issues_events_trailing_3m")
         issues_closed_3m = _num(row, "gharchive_issues_closed_events_trailing_3m")
         actors_3m = _num(row, "gharchive_unique_actors_trailing_3m")
         active_days_3m = _num(row, "gharchive_days_active_trailing_3m")
+
+        push_6m = _num(row, "gharchive_push_events_trailing_6m")
+        pr_6m = _num(row, "gharchive_pull_request_events_trailing_6m")
+        pr_closed_6m = _num(row, "gharchive_pull_request_closed_events_trailing_6m")
+        pr_review_6m = _num(row, "gharchive_pull_request_review_events_trailing_6m")
+        merged_6m = _num(row, "gharchive_pull_request_merged_events_trailing_6m")
+        issues_6m = _num(row, "gharchive_issues_events_trailing_6m")
+        issues_closed_6m = _num(row, "gharchive_issues_closed_events_trailing_6m")
+        releases_6m = _num(row, "gharchive_release_events_trailing_6m")
+        actors_6m = _num(row, "gharchive_unique_actors_trailing_6m")
+        active_days_6m = _num(row, "gharchive_days_active_trailing_6m")
+        events_6m = _num(row, "gharchive_events_total_trailing_6m")
 
         row["gharchive_push_events_trailing_3m_delta_prev_3m"] = push_3m - _previous_window_sum(
             rows, i, "gharchive_push_events", 3
@@ -466,11 +491,40 @@ def _add_rolling_gharchive_features(rows: list[dict[str, Any]]) -> list[dict[str
         row["gharchive_pull_request_events_trailing_3m_delta_prev_3m"] = (
             pr_3m - _previous_window_sum(rows, i, "gharchive_pull_request_events", 3)
         )
+        row["gharchive_release_events_trailing_3m_delta_prev_3m"] = _num(
+            row, "gharchive_release_events_trailing_3m"
+        ) - _previous_window_sum(rows, i, "gharchive_release_events", 3)
 
         row["gharchive_prs_per_push_3m"] = _safe_div(pr_3m, push_3m)
+        row["gharchive_prs_per_push_6m"] = _safe_div(pr_6m, push_6m)
         row["gharchive_merge_rate_3m"] = _safe_div(merged_3m, pr_3m)
+        row["gharchive_merge_rate_6m"] = _safe_div(merged_6m, pr_6m)
+        row["gharchive_pr_close_rate_3m"] = _safe_div(pr_closed_3m, pr_3m)
+        row["gharchive_pr_close_rate_6m"] = _safe_div(pr_closed_6m, pr_6m)
+        row["gharchive_pr_review_intensity_3m"] = _safe_div(pr_review_3m, pr_3m)
+        row["gharchive_pr_review_intensity_6m"] = _safe_div(pr_review_6m, pr_6m)
         row["gharchive_issue_close_rate_3m"] = _safe_div(issues_closed_3m, issues_3m)
+        row["gharchive_issue_close_rate_6m"] = _safe_div(issues_closed_6m, issues_6m)
         row["gharchive_actors_per_active_day_3m"] = _safe_div(actors_3m, active_days_3m)
+        row["gharchive_actors_per_active_day_6m"] = _safe_div(actors_6m, active_days_6m)
+
+        active_months_any_3m = _trailing_active_months(rows, i, "gharchive_events_total", 3)
+        active_months_any_6m = _trailing_active_months(rows, i, "gharchive_events_total", 6)
+        observed_months_3m = min(i + 1, 3)
+        observed_months_6m = min(i + 1, 6)
+        row["gharchive_active_month_ratio_3m"] = _safe_div(active_months_any_3m, observed_months_3m)
+        row["gharchive_active_month_ratio_6m"] = _safe_div(active_months_any_6m, observed_months_6m)
+        row["gharchive_releases_per_active_month_6m"] = _safe_div(releases_6m, active_months_any_6m)
+        row["gharchive_events_per_active_month_6m"] = _safe_div(events_6m, active_months_any_6m)
+
+        values_6m = _trailing_values(rows, i, "gharchive_events_total", 6)
+        if values_6m:
+            avg_6m = sum(values_6m) / len(values_6m)
+            row["gharchive_activity_burstiness_6m"] = (
+                max(values_6m) / avg_6m if avg_6m > 0 else None
+            )
+        else:
+            row["gharchive_activity_burstiness_6m"] = None
 
     return rows
 

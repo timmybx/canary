@@ -198,9 +198,42 @@ def test_build_monthly_feature_bundle_dense_grid(tmp_path: Path) -> None:
                 {
                     "plugin_id": "alpha-plugin",
                     "event_yyyymm": "2025-01",
+                    "event_date": "2025-01-11",
+                    "event_type": "PullRequestReviewEvent",
+                    "actor_login": "bob",
+                    "sample_percent": 1.0,
+                    "source_window_start_yyyymmdd": "20250101",
+                    "source_window_end_yyyymmdd": "20250131",
+                },
+                {
+                    "plugin_id": "alpha-plugin",
+                    "event_yyyymm": "2025-01",
+                    "event_date": "2025-01-12",
+                    "event_type": "PullRequestEvent",
+                    "action": "closed",
+                    "pr_merged": True,
+                    "actor_login": "alice",
+                    "sample_percent": 1.0,
+                    "source_window_start_yyyymmdd": "20250101",
+                    "source_window_end_yyyymmdd": "20250131",
+                },
+                {
+                    "plugin_id": "alpha-plugin",
+                    "event_yyyymm": "2025-01",
                     "event_date": "2025-01-20",
                     "event_type": "IssuesEvent",
                     "action": "opened",
+                    "actor_login": "carol",
+                    "sample_percent": 1.0,
+                    "source_window_start_yyyymmdd": "20250101",
+                    "source_window_end_yyyymmdd": "20250131",
+                },
+                {
+                    "plugin_id": "alpha-plugin",
+                    "event_yyyymm": "2025-01",
+                    "event_date": "2025-01-22",
+                    "event_type": "IssuesEvent",
+                    "action": "closed",
                     "actor_login": "carol",
                     "sample_percent": 1.0,
                     "source_window_start_yyyymmdd": "20250101",
@@ -244,8 +277,21 @@ def test_build_monthly_feature_bundle_dense_grid(tmp_path: Path) -> None:
     beta_feb = next(r for r in rows if r["plugin_id"] == "beta-plugin" and r["month"] == "2025-02")
 
     assert alpha_jan["gharchive_present"] is True
-    assert alpha_jan["gharchive_events_total"] == 5
+    assert alpha_jan["gharchive_events_total"] == 8
     assert alpha_jan["gharchive_push_events"] == 2
+    assert alpha_jan["gharchive_pull_request_events"] == 2
+    assert alpha_jan["gharchive_pull_request_closed_events"] == 1
+    assert alpha_jan["gharchive_pull_request_merged_events"] == 1
+    assert alpha_jan["gharchive_pull_request_review_events"] == 1
+    assert alpha_jan["gharchive_issues_closed_events"] == 1
+    assert alpha_jan["gharchive_pr_close_rate_3m"] == 0.5
+    assert alpha_jan["gharchive_merge_rate_3m"] == 0.5
+    assert alpha_jan["gharchive_pr_review_intensity_3m"] == 0.5
+    assert alpha_jan["gharchive_issue_close_rate_3m"] == 0.5
+    assert alpha_jan["gharchive_prs_per_push_3m"] == 1.0
+    assert alpha_jan["gharchive_active_month_ratio_3m"] == 1.0
+    assert alpha_jan["gharchive_releases_per_active_month_6m"] == 1.0
+    assert alpha_jan["gharchive_activity_burstiness_6m"] == 1.0
     assert "healthscore_value" not in alpha_jan
     assert "github_present" not in alpha_jan
     assert "snapshot_present" not in alpha_jan
