@@ -33,18 +33,32 @@ def _fmt_int(value: Any) -> str:
 
 
 def _extract_row(model_dir: Path, payload: dict[str, Any]) -> dict[str, str]:
+    ranking = payload.get("ranking_metrics")
+    if not isinstance(ranking, dict):
+        ranking = {}
+
     return {
         "run": model_dir.name,
-        "features": _fmt_int(payload.get("n_features") or payload.get("features")),
-        "train_rows": _fmt_int(payload.get("train_rows")),
-        "test_rows": _fmt_int(payload.get("test_rows")),
-        "train_pos": _fmt_int(payload.get("train_positives") or payload.get("train_pos")),
-        "test_pos": _fmt_int(payload.get("test_positives") or payload.get("test_pos")),
+        "features": _fmt_int(
+            payload.get("feature_count") or payload.get("n_features") or payload.get("features")
+        ),
+        "train_rows": _fmt_int(payload.get("train_row_count") or payload.get("train_rows")),
+        "test_rows": _fmt_int(payload.get("test_row_count") or payload.get("test_rows")),
+        "train_pos": _fmt_int(
+            payload.get("train_positive_count")
+            or payload.get("train_positives")
+            or payload.get("train_pos")
+        ),
+        "test_pos": _fmt_int(
+            payload.get("test_positive_count")
+            or payload.get("test_positives")
+            or payload.get("test_pos")
+        ),
         "roc_auc": _fmt_float(payload.get("roc_auc")),
         "avg_prec": _fmt_float(payload.get("average_precision") or payload.get("avg_precision")),
-        "p_at_10": _fmt_float(payload.get("precision_at_10")),
-        "p_at_25": _fmt_float(payload.get("precision_at_25")),
-        "p_at_100": _fmt_float(payload.get("precision_at_100")),
+        "p_at_10": _fmt_float(ranking.get("precision_at_10") or payload.get("precision_at_10")),
+        "p_at_25": _fmt_float(ranking.get("precision_at_25") or payload.get("precision_at_25")),
+        "p_at_100": _fmt_float(ranking.get("precision_at_100") or payload.get("precision_at_100")),
     }
 
 
