@@ -425,6 +425,42 @@ def _safe_div(numer: float, denom: float) -> float | None:
     return numer / denom
 
 
+def _safe_div_min(
+    numer: float,
+    denom: float,
+    *,
+    min_denom: float = 1.0,
+) -> float | None:
+    if denom < min_denom:
+        return None
+    return numer / denom
+
+
+def _safe_div_smooth(
+    numer: float,
+    denom: float,
+    *,
+    min_denom: float = 1.0,
+    numer_smooth: float = 1.0,
+    denom_smooth: float = 2.0,
+) -> float | None:
+    if denom < min_denom:
+        return None
+    return (numer + numer_smooth) / (denom + denom_smooth)
+
+
+def _clip(
+    value: float | None, *, low: float | None = None, high: float | None = None
+) -> float | None:
+    if value is None:
+        return None
+    if low is not None and value < low:
+        value = low
+    if high is not None and value > high:
+        value = high
+    return value
+
+
 def _add_rolling_gharchive_features(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = sorted(rows, key=lambda r: str(r.get("month") or ""))
 
@@ -495,34 +531,106 @@ def _add_rolling_gharchive_features(rows: list[dict[str, Any]]) -> list[dict[str
             row, "gharchive_release_events_trailing_3m"
         ) - _previous_window_sum(rows, i, "gharchive_release_events", 3)
 
-        row["gharchive_prs_per_push_3m"] = _safe_div(pr_3m, push_3m)
-        row["gharchive_prs_per_push_6m"] = _safe_div(pr_6m, push_6m)
-        row["gharchive_merge_rate_3m"] = _safe_div(merged_3m, pr_3m)
-        row["gharchive_merge_rate_6m"] = _safe_div(merged_6m, pr_6m)
-        row["gharchive_pr_close_rate_3m"] = _safe_div(pr_closed_3m, pr_3m)
-        row["gharchive_pr_close_rate_6m"] = _safe_div(pr_closed_6m, pr_6m)
-        row["gharchive_pr_review_intensity_3m"] = _safe_div(pr_review_3m, pr_3m)
-        row["gharchive_pr_review_intensity_6m"] = _safe_div(pr_review_6m, pr_6m)
-        row["gharchive_issue_close_rate_3m"] = _safe_div(issues_closed_3m, issues_3m)
-        row["gharchive_issue_close_rate_6m"] = _safe_div(issues_closed_6m, issues_6m)
-        row["gharchive_actors_per_active_day_3m"] = _safe_div(actors_3m, active_days_3m)
-        row["gharchive_actors_per_active_day_6m"] = _safe_div(actors_6m, active_days_6m)
+        row["gharchive_prs_per_push_3m"] = _clip(
+            _safe_div_smooth(pr_3m, push_3m, min_denom=5.0),
+            high=10.0,
+        )
+        row["gharchive_prs_per_push_6m"] = _clip(
+            _safe_div_smooth(pr_6m, push_6m, min_denom=8.0),
+            high=10.0,
+        )
+
+        row["gharchive_merge_rate_3m"] = _clip(
+            _safe_div_smooth(merged_3m, pr_3m, min_denom=5.0),
+            low=0.0,
+            high=1.0,
+        )
+        row["gharchive_merge_rate_6m"] = _clip(
+            _safe_div_smooth(merged_6m, pr_6m, min_denom=8.0),
+            low=0.0,
+            high=1.0,
+        )
+
+        row["gharchive_pr_close_rate_3m"] = _clip(
+            _safe_div_smooth(pr_closed_3m, pr_3m, min_denom=5.0),
+            low=0.0,
+            high=1.5,
+        )
+        row["gharchive_pr_close_rate_6m"] = _clip(
+            _safe_div_smooth(pr_closed_6m, pr_6m, min_denom=8.0),
+            low=0.0,
+            high=1.5,
+        )
+
+        row["gharchive_pr_review_intensity_3m"] = _clip(
+            _safe_div_smooth(pr_review_3m, pr_3m, min_denom=5.0),
+            low=0.0,
+            high=10.0,
+        )
+        row["gharchive_pr_review_intensity_6m"] = _clip(
+            _safe_div_smooth(pr_review_6m, pr_6m, min_denom=8.0),
+            low=0.0,
+            high=10.0,
+        )
+
+        row["gharchive_issue_close_rate_3m"] = _clip(
+            _safe_div_smooth(issues_closed_3m, issues_3m, min_denom=5.0),
+            low=0.0,
+            high=1.5,
+        )
+        row["gharchive_issue_close_rate_6m"] = _clip(
+            _safe_div_smooth(issues_closed_6m, issues_6m, min_denom=8.0),
+            low=0.0,
+            high=1.5,
+        )
+
+        row["gharchive_actors_per_active_day_3m"] = _clip(
+            _safe_div_min(actors_3m, active_days_3m, min_denom=5.0),
+            low=0.0,
+            high=10.0,
+        )
+        row["gharchive_actors_per_active_day_6m"] = _clip(
+            _safe_div_min(actors_6m, active_days_6m, min_denom=8.0),
+            low=0.0,
+            high=10.0,
+        )
 
         active_months_any_3m = _trailing_active_months(rows, i, "gharchive_events_total", 3)
         active_months_any_6m = _trailing_active_months(rows, i, "gharchive_events_total", 6)
         observed_months_3m = min(i + 1, 3)
         observed_months_6m = min(i + 1, 6)
-        row["gharchive_active_month_ratio_3m"] = _safe_div(active_months_any_3m, observed_months_3m)
-        row["gharchive_active_month_ratio_6m"] = _safe_div(active_months_any_6m, observed_months_6m)
-        row["gharchive_releases_per_active_month_6m"] = _safe_div(releases_6m, active_months_any_6m)
-        row["gharchive_events_per_active_month_6m"] = _safe_div(events_6m, active_months_any_6m)
 
+        row["gharchive_active_month_ratio_3m"] = _clip(
+            _safe_div(active_months_any_3m, observed_months_3m),
+            low=0.0,
+            high=1.0,
+        )
+        row["gharchive_active_month_ratio_6m"] = _clip(
+            _safe_div(active_months_any_6m, observed_months_6m),
+            low=0.0,
+            high=1.0,
+        )
+        row["gharchive_releases_per_active_month_6m"] = _clip(
+            _safe_div_min(releases_6m, active_months_any_6m, min_denom=2.0),
+            low=0.0,
+            high=12.0,
+        )
+        row["gharchive_events_per_active_month_6m"] = _clip(
+            _safe_div_min(events_6m, active_months_any_6m, min_denom=2.0),
+            low=0.0,
+            high=500.0,
+        )
         values_6m = _trailing_values(rows, i, "gharchive_events_total", 6)
         if values_6m:
             avg_6m = sum(values_6m) / len(values_6m)
-            row["gharchive_activity_burstiness_6m"] = (
-                max(values_6m) / avg_6m if avg_6m > 0 else None
-            )
+            if avg_6m >= 5.0:
+                row["gharchive_activity_burstiness_6m"] = _clip(
+                    max(values_6m) / avg_6m,
+                    low=0.0,
+                    high=10.0,
+                )
+            else:
+                row["gharchive_activity_burstiness_6m"] = None
         else:
             row["gharchive_activity_burstiness_6m"] = None
 
