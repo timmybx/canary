@@ -284,13 +284,13 @@ def test_build_monthly_feature_bundle_dense_grid(tmp_path: Path) -> None:
     assert alpha_jan["gharchive_pull_request_merged_events"] == 1
     assert alpha_jan["gharchive_pull_request_review_events"] == 1
     assert alpha_jan["gharchive_issues_closed_events"] == 1
-    assert alpha_jan["gharchive_pr_close_rate_3m"] == 0.5
-    assert alpha_jan["gharchive_merge_rate_3m"] == 0.5
-    assert alpha_jan["gharchive_pr_review_intensity_3m"] == 0.5
-    assert alpha_jan["gharchive_issue_close_rate_3m"] == 0.5
-    assert alpha_jan["gharchive_prs_per_push_3m"] == 1.0
+    assert alpha_jan["gharchive_pr_close_rate_3m"] is None
+    assert alpha_jan["gharchive_merge_rate_3m"] is None
+    assert alpha_jan["gharchive_pr_review_intensity_3m"] is None
+    assert alpha_jan["gharchive_issue_close_rate_3m"] is None
+    assert alpha_jan["gharchive_prs_per_push_3m"] is None
     assert alpha_jan["gharchive_active_month_ratio_3m"] == 1.0
-    assert alpha_jan["gharchive_releases_per_active_month_6m"] == 1.0
+    assert alpha_jan["gharchive_releases_per_active_month_6m"] is None
     assert alpha_jan["gharchive_activity_burstiness_6m"] == 1.0
     assert "healthscore_value" not in alpha_jan
     assert "github_present" not in alpha_jan
