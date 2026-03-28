@@ -401,6 +401,9 @@ def _load_github_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
     open_issues_path = github_dir / f"{plugin_id}.open_issues.json"
     open_pulls_path = github_dir / f"{plugin_id}.open_pulls.json"
     workflows_path = github_dir / f"{plugin_id}.workflows_dir.json"
+    codeowners_path = github_dir / f"{plugin_id}.codeowners.json"
+    security_policy_path = github_dir / f"{plugin_id}.security_policy.json"
+    dependabot_path = github_dir / f"{plugin_id}.dependabot.json"
     commit_candidates = sorted(github_dir.glob(f"{plugin_id}.commits_*d.json"))
 
     out: dict[str, Any] = {"github_present": False}
@@ -465,6 +468,18 @@ def _load_github_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
             else 0,
             "github_open_pulls_count_api": len(open_pulls) if isinstance(open_pulls, list) else 0,
             "github_workflows_count": len(workflows) if isinstance(workflows, list) else 0,
+            "github_has_codeowners": codeowners_path.exists(),
+            "github_has_security_policy": security_policy_path.exists(),
+            "github_has_dependabot_config": dependabot_path.exists(),
+            "github_has_codeql_workflow": (
+                any(
+                    isinstance(workflow, dict)
+                    and "codeql" in str(workflow.get("name") or "").lower()
+                    for workflow in workflows
+                )
+                if isinstance(workflows, list)
+                else False
+            ),
             "github_commit_windows_present": len(commit_candidates),
             "github_commits_latest_window_days": None,
             "github_commits_latest_window_count": None,
