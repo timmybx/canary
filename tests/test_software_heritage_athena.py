@@ -162,31 +162,31 @@ def test_extract_feature_flags_all_false_on_empty():
 
 
 def test_extract_feature_flags_detects_readme():
-    rows = [{"entry_name": "README.md", "type": "file"}]
+    rows: list[dict[str, str | None]] = [{"entry_name": "README.md", "type": "file"}]
     flags = _extract_feature_flags(rows)
     assert flags["has_readme"] is True
 
 
 def test_extract_feature_flags_detects_readme_case_insensitive():
-    rows = [{"entry_name": "Readme", "type": "file"}]
+    rows: list[dict[str, str | None]] = [{"entry_name": "Readme", "type": "file"}]
     flags = _extract_feature_flags(rows)
     assert flags["has_readme"] is True
 
 
 def test_extract_feature_flags_detects_dot_github():
-    rows = [{"entry_name": ".github", "type": "dir"}]
+    rows: list[dict[str, str | None]] = [{"entry_name": ".github", "type": "dir"}]
     flags = _extract_feature_flags(rows)
     assert flags["has_dot_github"] is True
 
 
 def test_extract_feature_flags_detects_jenkinsfile():
-    rows = [{"entry_name": "Jenkinsfile", "type": "file"}]
+    rows: list[dict[str, str | None]] = [{"entry_name": "Jenkinsfile", "type": "file"}]
     flags = _extract_feature_flags(rows)
     assert flags["has_jenkinsfile"] is True
 
 
 def test_extract_feature_flags_detects_travis_yml():
-    rows = [{"entry_name": ".travis.yml", "type": "file"}]
+    rows: list[dict[str, str | None]] = [{"entry_name": ".travis.yml", "type": "file"}]
     flags = _extract_feature_flags(rows)
     assert flags["has_travis_yml"] is True
 
@@ -198,7 +198,7 @@ def test_extract_feature_flags_ignores_none_entry_names():
 
 
 def test_extract_feature_flags_multiple_files():
-    rows = [
+    rows: list[dict[str, str | None]] = [
         {"entry_name": "README.md"},
         {"entry_name": ".github"},
         {"entry_name": "Jenkinsfile"},

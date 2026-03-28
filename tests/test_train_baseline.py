@@ -207,7 +207,7 @@ def test_select_feature_columns_include_prefixes():
 
 
 def test_rows_to_matrix_basic():
-    import math
+    import pandas as pd
 
     rows = [
         {"feat_a": 1.0, "feat_b": 2.0},
@@ -217,7 +217,7 @@ def test_rows_to_matrix_basic():
     assert df.shape == (2, 2)
     assert df["feat_a"][0] == 1.0
     # None coerces to NaN inside a DataFrame
-    assert math.isnan(df["feat_b"][1])
+    assert bool(pd.isna(df["feat_b"].iloc[1]))
 
 
 def test_rows_to_matrix_missing_column():
@@ -227,7 +227,7 @@ def test_rows_to_matrix_missing_column():
     df = _rows_to_matrix(rows, ["feat_a", "feat_missing"])
     assert "feat_a" in df.columns
     assert "feat_missing" in df.columns
-    assert pd.isna(df["feat_missing"][0])
+    assert bool(pd.isna(df["feat_missing"].iloc[0]))
 
 
 # ---------------------------------------------------------------------------

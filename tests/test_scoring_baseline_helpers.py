@@ -193,6 +193,7 @@ def test_healthscore_to_risk_points_0():
 
 def test_healthscore_to_risk_points_50():
     pts = _healthscore_to_risk_points(50)
+    assert pts is not None
     assert 0 <= pts <= 20
 
 
