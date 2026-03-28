@@ -6,12 +6,15 @@ from pathlib import Path
 from typing import Any
 
 from canary.collectors.github_repo import (
+    fetch_github_codeowners,
     fetch_github_commits_since,
     fetch_github_contributors,
+    fetch_github_dependabot_config,
     fetch_github_open_issues,
     fetch_github_open_pulls,
     fetch_github_releases,
     fetch_github_repo,
+    fetch_github_security_policy,
     fetch_github_tags,
     fetch_github_workflows_dir,
     parse_github_owner_repo,
@@ -188,6 +191,9 @@ def collect_github_plugin_real(
       - <plugin>.open_pulls.json
       - <plugin>.commits_<days>d.json
       - <plugin>.workflows_dir.json
+      - <plugin>.codeowners.json
+      - <plugin>.security_policy.json
+      - <plugin>.dependabot.json
     """
     snapshot = _load_plugin_snapshot(plugin_id, data_dir=data_dir)
     repo_url = _infer_repo_url(snapshot)
@@ -284,6 +290,21 @@ def collect_github_plugin_real(
         "workflows_dir",
         out("workflows_dir"),
         lambda: fetch_github_workflows_dir(owner, repo, timeout_s=timeout_s),
+    )
+    fetch_and_store(
+        "codeowners",
+        out("codeowners"),
+        lambda: fetch_github_codeowners(owner, repo, timeout_s=timeout_s),
+    )
+    fetch_and_store(
+        "security_policy",
+        out("security_policy"),
+        lambda: fetch_github_security_policy(owner, repo, timeout_s=timeout_s),
+    )
+    fetch_and_store(
+        "dependabot",
+        out("dependabot"),
+        lambda: fetch_github_dependabot_config(owner, repo, timeout_s=timeout_s),
     )
 
     _write_json(index_path, results)

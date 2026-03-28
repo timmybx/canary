@@ -102,12 +102,15 @@ def collect_plugin_snapshot(
         from datetime import timedelta
 
         from canary.collectors.github_repo import (
+            fetch_github_codeowners,
             fetch_github_commits_since,
             fetch_github_contributors,
+            fetch_github_dependabot_config,
             fetch_github_open_issues,
             fetch_github_open_pulls,
             fetch_github_releases,
             fetch_github_repo,
+            fetch_github_security_policy,
             fetch_github_tags,
             fetch_github_workflows_dir,
             parse_github_owner_repo,
@@ -202,9 +205,26 @@ def collect_plugin_snapshot(
             snapshot["github_open_prs"] = len(open_prs)
             snapshot["github_open_issues_only"] = len(open_issues_only)
 
-            # CI workflows presence
+            # CI / repository posture presence
             workflows = fetch_github_workflows_dir(owner, repo)
+            workflow_names = (
+                [str(w.get("name", "")) for w in workflows if isinstance(w, dict)]
+                if workflows
+                else []
+            )
             snapshot["github_has_ci_workflows"] = bool(workflows)
             snapshot["github_ci_workflow_count"] = len(workflows) if workflows else 0
+            snapshot["github_has_codeql_workflow"] = any(
+                "codeql" in name.lower() for name in workflow_names
+            )
+
+            codeowners = fetch_github_codeowners(owner, repo)
+            snapshot["github_has_codeowners"] = codeowners is not None
+
+            security_policy = fetch_github_security_policy(owner, repo)
+            snapshot["github_has_security_policy"] = security_policy is not None
+
+            dependabot = fetch_github_dependabot_config(owner, repo)
+            snapshot["github_has_dependabot_config"] = dependabot is not None
 
     return snapshot

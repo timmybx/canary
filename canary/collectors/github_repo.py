@@ -249,6 +249,32 @@ def fetch_github_open_issues(
     return [x for x in items if isinstance(x, dict)]
 
 
+def fetch_github_contents_path(
+    owner: str,
+    repo: str,
+    path: str,
+    *,
+    timeout_s: float = 15.0,
+) -> list[dict[str, Any]] | dict[str, Any] | None:
+    """Return GitHub contents API payload for a repo path, or None on 404."""
+    norm_path = path.strip().strip("/")
+    if not norm_path:
+        raise ValueError("GitHub contents path must be non-empty")
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{norm_path}"
+    try:
+        payload, _headers = _fetch_json_any(url, timeout_s=timeout_s)
+    except RuntimeError as e:
+        if "(404)" in str(e):
+            return None
+        raise
+
+    if isinstance(payload, list):
+        return [x for x in payload if isinstance(x, dict)]
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
 def fetch_github_workflows_dir(
     owner: str,
     repo: str,
@@ -256,15 +282,57 @@ def fetch_github_workflows_dir(
     timeout_s: float = 15.0,
 ) -> list[dict[str, Any]] | None:
     """Return contents of .github/workflows, or None if not present (404)."""
-    url = f"https://api.github.com/repos/{owner}/{repo}/contents/.github/workflows"
-    try:
-        payload, _headers = _fetch_json_any(url, timeout_s=timeout_s)
-    except RuntimeError as e:
-        # Map 404 to "no workflows" without failing the whole snapshot.
-        if "(404)" in str(e):
-            return None
-        raise
+    payload = fetch_github_contents_path(owner, repo, ".github/workflows", timeout_s=timeout_s)
+    return payload if isinstance(payload, list) else None
 
-    if isinstance(payload, list):
-        return [x for x in payload if isinstance(x, dict)]
+
+def fetch_github_codeowners(
+    owner: str,
+    repo: str,
+    *,
+    timeout_s: float = 15.0,
+) -> dict[str, Any] | None:
+    """Return CODEOWNERS file metadata if present in common locations."""
+    for path in ("CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"):
+        payload = fetch_github_contents_path(owner, repo, path, timeout_s=timeout_s)
+        if isinstance(payload, dict):
+            payload.setdefault("_resolved_path", path)
+            return payload
+    return None
+
+
+def fetch_github_security_policy(
+    owner: str,
+    repo: str,
+    *,
+    timeout_s: float = 15.0,
+) -> dict[str, Any] | None:
+    """Return SECURITY policy file metadata if present in common locations."""
+    for path in (
+        "SECURITY.md",
+        ".github/SECURITY.md",
+        "docs/SECURITY.md",
+        "security.md",
+        ".github/security.md",
+        "docs/security.md",
+    ):
+        payload = fetch_github_contents_path(owner, repo, path, timeout_s=timeout_s)
+        if isinstance(payload, dict):
+            payload.setdefault("_resolved_path", path)
+            return payload
+    return None
+
+
+def fetch_github_dependabot_config(
+    owner: str,
+    repo: str,
+    *,
+    timeout_s: float = 15.0,
+) -> dict[str, Any] | None:
+    """Return dependabot configuration metadata if present."""
+    for path in (".github/dependabot.yml", ".github/dependabot.yaml"):
+        payload = fetch_github_contents_path(owner, repo, path, timeout_s=timeout_s)
+        if isinstance(payload, dict):
+            payload.setdefault("_resolved_path", path)
+            return payload
     return None

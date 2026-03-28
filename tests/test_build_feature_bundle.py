@@ -215,7 +215,16 @@ def test_build_feature_bundle_writes_joined_outputs(tmp_path: Path) -> None:
         json.dumps([{"id": 3}]), encoding="utf-8"
     )
     (github_dir / "demo-plugin.workflows_dir.json").write_text(
-        json.dumps([{"name": "ci.yml"}]), encoding="utf-8"
+        json.dumps([{"name": "ci.yml"}, {"name": "codeql-analysis.yml"}]), encoding="utf-8"
+    )
+    (github_dir / "demo-plugin.codeowners.json").write_text(
+        json.dumps({"name": "CODEOWNERS", "path": ".github/CODEOWNERS"}), encoding="utf-8"
+    )
+    (github_dir / "demo-plugin.security_policy.json").write_text(
+        json.dumps({"name": "SECURITY.md", "path": ".github/SECURITY.md"}), encoding="utf-8"
+    )
+    (github_dir / "demo-plugin.dependabot.json").write_text(
+        json.dumps({"name": "dependabot.yml", "path": ".github/dependabot.yml"}), encoding="utf-8"
     )
     (github_dir / "demo-plugin.commits_365d.json").write_text(
         json.dumps([{"sha": "a"}, {"sha": "b"}]), encoding="utf-8"
@@ -279,6 +288,11 @@ def test_build_feature_bundle_writes_joined_outputs(tmp_path: Path) -> None:
     assert row["healthscore_value"] == 88.0
     assert row["github_present"] is True
     assert row["github_stargazers_count"] == 42
+    assert row["github_workflows_count"] == 2
+    assert row["github_has_codeowners"] is True
+    assert row["github_has_security_policy"] is True
+    assert row["github_has_dependabot_config"] is True
+    assert row["github_has_codeql_workflow"] is True
     assert row["gharchive_present"] is True
     assert row["gharchive_events_total_sum"] == 10.0
     assert row["gharchive_latest_window_end"] == "20250130"
