@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 
 from canary.devtools.pip_audit_wrapper import build_argv, load_ignored_vulns, main
 
-
 # ---------------------------------------------------------------------------
 # load_ignored_vulns
 # ---------------------------------------------------------------------------

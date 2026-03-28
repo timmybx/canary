@@ -119,7 +119,7 @@ def test_build_advisories_events_creates_parent_dirs(tmp_path: Path):
     advisories_dir.mkdir()
     out_path = tmp_path / "deep" / "nested" / "dir" / "out.jsonl"
 
-    records = build_advisories_events(data_raw_dir=tmp_path, out_path=out_path)
+    build_advisories_events(data_raw_dir=tmp_path, out_path=out_path)
 
     assert out_path.exists()
 

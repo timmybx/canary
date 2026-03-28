@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import time
-from unittest.mock import patch
-
 import pytest
 
 from canary.collectors.plugins_registry import (
@@ -14,7 +10,6 @@ from canary.collectors.plugins_registry import (
     collect_plugins_registry_real,
     collect_plugins_registry_sample,
 )
-
 
 # ---------------------------------------------------------------------------
 # _extract_plugin_id

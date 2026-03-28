@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -25,7 +25,6 @@ from canary.collectors.software_heritage_athena import (
     collect_software_heritage_athena_repo_to_file,
     write_jsonl,
 )
-
 
 # ---------------------------------------------------------------------------
 # Pure helper tests
@@ -340,7 +339,12 @@ def _make_athena_client_mock(
             col_info = [{"Name": c} for c in columns]
 
             def make_row(d: dict):
-                return {"Data": [{"VarCharValue": str(v) if v is not None else None} for v in d.values()]}
+                return {
+                    "Data": [
+                        {"VarCharValue": str(v) if v is not None else None}
+                        for v in d.values()
+                    ]
+                }
 
             yield {
                 "ResultSet": {

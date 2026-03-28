@@ -17,7 +17,6 @@ from canary.train.baseline import (
     train_baseline,
 )
 
-
 # ---------------------------------------------------------------------------
 # _is_numeric_like
 # ---------------------------------------------------------------------------
@@ -129,8 +128,10 @@ def test_month_to_sortable_ordering():
 
 def test_select_feature_columns_basic():
     rows = [
-        {"plugin_id": "a", "month": "2025-01", "label_advisory_within_6m": 0, "feat_x": 1.0, "feat_y": 2.0},
-        {"plugin_id": "b", "month": "2025-02", "label_advisory_within_6m": 1, "feat_x": 3.0, "feat_y": 4.0},
+        {"plugin_id": "a", "month": "2025-01", "label_advisory_within_6m": 0,
+         "feat_x": 1.0, "feat_y": 2.0},
+        {"plugin_id": "b", "month": "2025-02", "label_advisory_within_6m": 1,
+         "feat_x": 3.0, "feat_y": 4.0},
     ]
     cols = _select_feature_columns(rows, target_col="label_advisory_within_6m")
     assert "feat_x" in cols

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-from io import BytesIO
 from unittest.mock import MagicMock, patch
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 
 import pytest
 
@@ -13,10 +12,9 @@ from canary.collectors.github_repo import (
     _allowlisted_url,
     _parse_link_header,
     _url_with_params,
-    parse_github_owner_repo,
     fetch_github_workflows_dir,
+    parse_github_owner_repo,
 )
-
 
 # ---------------------------------------------------------------------------
 # _url_with_params

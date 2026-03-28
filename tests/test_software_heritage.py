@@ -10,8 +10,8 @@ import pytest
 from canary.collectors.software_heritage import (
     SWH_API_BASE,
     _infer_repo_url,
-    _normalize_origin_url,
     _nonempty,
+    _normalize_origin_url,
     _origin_get_url,
     _origin_latest_visit_url,
     _origin_visits_url,
@@ -21,7 +21,6 @@ from canary.collectors.software_heritage import (
     _validate_http_url,
     collect_software_heritage_real,
 )
-
 
 # ---------------------------------------------------------------------------
 # _nonempty
@@ -236,13 +235,6 @@ def test_collect_real_writes_files_and_returns_result(tmp_path: Path, monkeypatc
     visits_payload = [{"visit": 1, "date": "2024-01-01"}]
     latest_visit_payload = {"snapshot": "snap-abc123"}
     snapshot_payload = {"id": "snap-abc123", "branches": {}}
-
-    responses = {
-        "origin": origin_payload,
-        "visits": visits_payload,
-        "latest": latest_visit_payload,
-        "snapshot": snapshot_payload,
-    }
 
     call_order = []
 

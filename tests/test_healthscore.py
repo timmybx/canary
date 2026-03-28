@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 from canary.collectors.healthscore import (
     _extract_plugin_id,
     _iter_score_records,
     collect_health_scores,
 )
-
 
 # ---------------------------------------------------------------------------
 # _iter_score_records

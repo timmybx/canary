@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 from canary.collectors.plugin_snapshot import (
     _extract_historical_plugin_ids,
     collect_plugin_snapshot,
 )
-
 
 # ---------------------------------------------------------------------------
 # _extract_historical_plugin_ids
