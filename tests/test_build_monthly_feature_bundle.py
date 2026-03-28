@@ -377,9 +377,21 @@ def test_build_monthly_feature_bundle_advisory_to_date_is_leakage_safe(tmp_path:
     assert april["advisory_cve_count_to_date"] == 1
     assert april["advisory_max_cvss_to_date"] == 5.0
     assert april["had_advisory_this_month"] is False
+    assert april["advisory_days_since_first_to_date"] == 51
+    assert april["advisory_days_since_latest_to_date"] == 51
+    assert april["advisory_span_days_to_date"] == 0
+    assert april["advisories_last_365d"] == 1
+    assert april["advisory_cvss_ge_7_count_to_date"] == 0
+    assert april["advisory_mean_cvss_to_date"] == 5.0
 
     assert june["advisory_count_to_date"] == 2
     assert june["advisory_count_this_month"] == 1
     assert june["advisory_cve_count_to_date"] == 2
     assert june["advisory_max_cvss_to_date"] == 8.0
     assert june["had_advisory_this_month"] is True
+    assert june["advisory_days_since_first_to_date"] == 112
+    assert june["advisory_days_since_latest_to_date"] == 15
+    assert june["advisory_span_days_to_date"] == 97
+    assert june["advisories_last_365d"] == 2
+    assert june["advisory_cvss_ge_7_count_to_date"] == 1
+    assert june["advisory_mean_cvss_to_date"] == 6.5

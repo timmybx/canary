@@ -362,12 +362,19 @@ def _load_advisory_monthly_features(
             this_month = [r for r in normalized if window_start <= r["published"] <= window_end]
             if not to_date and not this_month:
                 continue
+
             cve_ids: set[str] = set()
             cvss_vals: list[float] = []
             for rec in to_date:
                 cve_ids.update(rec["cve_ids"])
                 if rec["cvss"] is not None:
                     cvss_vals.append(rec["cvss"])
+
+            first_date = to_date[0]["published"] if to_date else None
+            latest_date = to_date[-1]["published"] if to_date else None
+            recent_365 = [r for r in to_date if (window_end - r["published"]).days <= 365]
+            cvss_ge_7_count = sum(1 for r in to_date if r["cvss"] is not None and r["cvss"] >= 7.0)
+
             out[(plugin_id, month["month"])] = {
                 "advisories_present_any": bool(normalized),
                 "advisory_count_to_date": len(to_date),
@@ -375,6 +382,20 @@ def _load_advisory_monthly_features(
                 "advisory_cve_count_to_date": len(cve_ids),
                 "advisory_max_cvss_to_date": max(cvss_vals) if cvss_vals else None,
                 "had_advisory_this_month": bool(this_month),
+                "advisory_days_since_first_to_date": (
+                    (window_end - first_date).days if first_date else None
+                ),
+                "advisory_days_since_latest_to_date": (
+                    (window_end - latest_date).days if latest_date else None
+                ),
+                "advisory_span_days_to_date": (
+                    (latest_date - first_date).days if first_date and latest_date else None
+                ),
+                "advisories_last_365d": len(recent_365),
+                "advisory_cvss_ge_7_count_to_date": cvss_ge_7_count,
+                "advisory_mean_cvss_to_date": (
+                    sum(cvss_vals) / len(cvss_vals) if cvss_vals else None
+                ),
             }
     return out
 

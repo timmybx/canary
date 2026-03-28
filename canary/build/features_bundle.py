@@ -4,7 +4,7 @@ import csv
 import json
 import math
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -238,7 +238,17 @@ def _load_snapshot_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any
     }
 
 
-def _load_advisory_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
+def _parse_iso_date(value: Any) -> date | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def _load_advisory_records(plugin_id: str, data_raw_dir: Path) -> list[dict[str, Any]]:
     plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
     advisories_dir = data_raw_dir / "advisories"
     candidates = [
@@ -246,53 +256,117 @@ def _load_advisory_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any
         advisories_dir / f"{plugin_id}.advisories.sample.jsonl",
         advisories_dir / f"{plugin_id}.advisories.jsonl",
     ]
-    records: list[dict[str, Any]] = []
-    source_path: str | None = None
     for path in candidates:
         if path.exists():
-            records = _read_jsonl(path)
-            source_path = str(path)
-            break
+            return _read_jsonl(path)
+    return []
 
+
+def _advisory_cvss(rec: dict[str, Any]) -> float | None:
+    return _max_float(_cvss_candidates(rec))
+
+
+def _advisory_cve_ids(rec: dict[str, Any]) -> set[str]:
+    cve_ids: set[str] = set()
+
+    direct = rec.get("cve_ids")
+    if isinstance(direct, list):
+        for cve in direct:
+            text = str(cve).strip()
+            if text:
+                cve_ids.add(text)
+
+    vulns = rec.get("vulnerabilities")
+    if isinstance(vulns, list):
+        for vuln in vulns:
+            if not isinstance(vuln, dict):
+                continue
+            cve = vuln.get("cve_id") or vuln.get("cve")
+            if isinstance(cve, str) and cve.strip():
+                cve_ids.add(cve.strip())
+
+    return cve_ids
+
+
+def _load_advisory_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
+    records = _load_advisory_records(plugin_id, data_raw_dir)
     if not records:
         return {
             "advisories_present": False,
             "advisory_count": 0,
             "advisory_cve_count": 0,
             "advisory_latest_published_date": None,
+            "advisory_first_published_date": None,
             "advisory_max_cvss": None,
             "advisory_active_warning_count": 0,
-            "advisory_data_path": source_path,
+            "advisory_days_since_first": None,
+            "advisory_days_since_latest": None,
+            "advisory_span_days": None,
+            "advisory_count_last_365d": 0,
+            "advisory_cvss_ge_7_count": 0,
+            "advisory_mean_cvss": None,
         }
 
-    dates = sorted(str(r.get("published_date") or "") for r in records if r.get("published_date"))
-    cve_ids: set[str] = set()
-    active_warn = 0
-    cvss_vals: list[float] = []
+    normalized: list[dict[str, Any]] = []
+    active_warning_count = 0
+
     for rec in records:
-        cves = rec.get("cve_ids")
-        if isinstance(cves, list):
-            cve_ids.update(str(x) for x in cves if str(x).strip())
-        vulns = rec.get("vulnerabilities")
-        if isinstance(vulns, list):
-            for vuln in vulns:
-                if not isinstance(vuln, dict):
+        published = _parse_iso_date(rec.get("published_date") or rec.get("date"))
+        cvss = _advisory_cvss(rec)
+        cve_ids = _advisory_cve_ids(rec)
+
+        normalized.append(
+            {
+                "published": published,
+                "cvss": cvss,
+                "cve_ids": cve_ids,
+            }
+        )
+
+        warnings = rec.get("warnings") or []
+        if isinstance(warnings, list):
+            for warning in warnings:
+                if not isinstance(warning, dict):
                     continue
-                cve = vuln.get("cve_id") or vuln.get("cve")
-                if isinstance(cve, str) and cve.strip():
-                    cve_ids.add(cve.strip())
-                if vuln.get("active") is True:
-                    active_warn += 1
-        cvss_vals.extend(_cvss_candidates(rec))
+                if bool(warning.get("active")):
+                    active_warning_count += 1
+
+    published_dates = sorted(r["published"] for r in normalized if r["published"] is not None)
+    cvss_vals = [r["cvss"] for r in normalized if r["cvss"] is not None]
+
+    cve_ids: set[str] = set()
+    for rec in normalized:
+        cve_ids.update(rec["cve_ids"])
+
+    first_date = published_dates[0] if published_dates else None
+    latest_date = published_dates[-1] if published_dates else None
+    today = date.today()
+
+    advisory_count_last_365d = sum(
+        1
+        for rec in normalized
+        if rec["published"] is not None and (today - rec["published"]).days <= 365
+    )
+    advisory_cvss_ge_7_count = sum(
+        1 for rec in normalized if rec["cvss"] is not None and rec["cvss"] >= 7.0
+    )
 
     return {
         "advisories_present": True,
         "advisory_count": len(records),
         "advisory_cve_count": len(cve_ids),
-        "advisory_latest_published_date": dates[-1] if dates else None,
+        "advisory_latest_published_date": (latest_date.isoformat() if latest_date else None),
+        "advisory_first_published_date": (first_date.isoformat() if first_date else None),
         "advisory_max_cvss": max(cvss_vals) if cvss_vals else None,
-        "advisory_active_warning_count": active_warn,
-        "advisory_data_path": source_path,
+        "advisory_active_warning_count": active_warning_count,
+        "advisory_days_since_first": ((today - first_date).days if first_date else None),
+        "advisory_days_since_latest": ((today - latest_date).days if latest_date else None),
+        "advisory_span_days": (
+            (latest_date - first_date).days if first_date and latest_date else None
+        ),
+        "advisory_count_last_365d": advisory_count_last_365d,
+        "advisory_cvss_ge_7_count": advisory_cvss_ge_7_count,
+        "advisory_mean_cvss": (sum(cvss_vals) / len(cvss_vals) if cvss_vals else None),
     }
 
 
