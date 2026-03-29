@@ -3,6 +3,13 @@
 Thanks for taking an interest in CANARY! This project is a research prototype, so the main goals are
 **reproducibility**, **data integrity**, and **clear, explainable outputs**.
 
+## Getting the code
+
+```bash
+git clone https://github.com/timmybx/canary.git
+cd canary
+```
+
 ## Development workflow (Docker recommended)
 
 ### Prereqs
@@ -62,6 +69,11 @@ python -m piptools compile --output-file requirements.txt pyproject.toml
 Generate pinned dev deps:
 ```bash
 python -m piptools compile --extra dev --output-file requirements-dev.txt pyproject.toml
+```
+
+Generate pinned CI deps:
+```bash
+python -m piptools compile --output-file requirements-ci.txt requirements-ci.in
 ```
 
 ## Pull request guidelines

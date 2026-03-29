@@ -491,7 +491,7 @@ docker compose run --rm canary canary collect gharchive \
 
 ---
 
-## GitHub Repo Feature Script (auxiliary / legacy path)
+## 🗂️ GitHub Repo Feature Script (auxiliary / legacy path)
 
 Use this for standalone repo metadata experiments outside the main CANARY collection + feature-build pipeline.
 
@@ -629,7 +629,7 @@ Good next steps include:
 - [x] Healthscore bulk collector
 - [x] Historical GH Archive collector integrated into the main workflow
 - [x] Baseline scoring with explainable features
-- [ ] Add GitHub signals as first-class collectors in `collect enrich`
+- [x] Add GitHub signals as first-class collectors in `collect enrich`
 - [ ] Build per-plugin feature bundles (`data/processed/features/<plugin>.features.json`)
 - [ ] Build a unified training / analysis dataset from collected sources
 - [ ] Add time-sliced dataset builders for ML (`as_of_date`, prediction horizon)
@@ -656,6 +656,13 @@ If the file exists in the repo but the command cannot find it, double-check the 
 ```bash
 docker compose build --no-cache canary
 ```
+
+---
+
+## 📖 How to Cite
+
+If you use CANARY in academic work, please cite it using the metadata in [`CITATION.cff`](CITATION.cff).
+GitHub displays a **Cite this repository** button on the repository home page that generates APA and BibTeX entries automatically.
 
 ---
 

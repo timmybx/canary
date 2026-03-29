@@ -14,14 +14,24 @@ authors:
     orcid: 'https://orcid.org/0009-0001-6376-410X'
 repository-code: 'https://github.com/timmybx/canary'
 abstract: >-
-  CANARY is a research prototype that collects Jenkins
-  security advisories and produces an explainable baseline
-  risk score for plugins. 
+  CANARY is a research prototype for collecting software
+  ecosystem signals for Jenkins plugins and turning them
+  into transparent, explainable risk indicators. It
+  integrates collectors for the plugin registry, per-plugin
+  snapshots, security advisories, healthscores, GitHub API
+  metadata, GH Archive historical activity, and Software
+  Heritage archival data. From those sources it builds
+  static current-point feature bundles for scoring and
+  reporting, and monthly time-bounded feature bundles for
+  machine-learning workflows, together with a baseline
+  explainable risk scorer and a local web console.
 keywords:
   - software supply chain
   - dependency risk
   - Jenkins
   - vulnerability advisories
+  - machine learning
+  - feature engineering
 license: Apache-2.0
 version: 0.1.4
-date-released: '2026-03-08'
+date-released: '2026-03-20'

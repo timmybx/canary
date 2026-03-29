@@ -60,6 +60,7 @@ canary build advisories-events
 canary build features \
   --data-raw-dir data/raw \
   --registry data/raw/registry/plugins.jsonl
+canary build monthly-features --start 2024-01 --end 2025-12
 ```
 
 ## Notes on GH Archive collection
