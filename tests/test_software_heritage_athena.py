@@ -11,12 +11,15 @@ import pytest  # pyright: ignore[reportMissingImports]
 from canary.collectors.software_heritage_athena import (
     AthenaQueryResult,
     SwhVisitFeatures,
+    _directory_entries_query,
+    _extract_feature_flags,
     _format_bytes,
     _log,
     _normalize_repo_slug,
+    _repo_visits_query,
+    _snapshot_directories_query,
     _sql_escape,
     _utc_now_iso,
-    _visits_with_features_query,
     collect_software_heritage_athena_repo,
     collect_software_heritage_athena_repo_to_file,
     write_jsonl,
@@ -84,36 +87,58 @@ def test_log_verbose_false_produces_no_output(capsys):
     assert captured.out == ""
 
 
-def test_visits_with_features_query_contains_repo_url():
-    q = _visits_with_features_query(
-        "https://github.com/org/repo",
-        max_visits=5,
-        max_directories=10,
-    )
+def test_repo_visits_query_contains_repo_url():
+    q = _repo_visits_query("https://github.com/org/repo", max_visits=5)
     assert "https://github.com/org/repo" in q
     assert "LIMIT 5" in q
-    assert "WHERE rn <= 10" in q
 
 
-def test_visits_with_features_query_escapes_single_quote():
-    q = _visits_with_features_query(
-        "https://github.com/org/it's-repo",
-        max_visits=1,
-        max_directories=5,
-    )
+def test_repo_visits_query_escapes_single_quote():
+    q = _repo_visits_query("https://github.com/org/it's-repo", max_visits=1)
     assert "it''s-repo" in q
 
 
-def test_visits_with_features_query_includes_feature_aggregates():
-    q = _visits_with_features_query(
-        "https://github.com/org/repo",
-        max_visits=2,
-        max_directories=3,
-    )
-    assert "AS has_readme" in q
-    assert "AS has_dot_github" in q
-    assert "AS has_jenkinsfile" in q
-    assert "AS has_travis_yml" in q
+def test_snapshot_directories_query_contains_snapshot_id():
+    q = _snapshot_directories_query("abc123", max_directories=10)
+    assert "abc123" in q
+    assert "LIMIT 10" in q
+
+
+def test_snapshot_directories_query_escapes_quote():
+    q = _snapshot_directories_query("snap'id", max_directories=5)
+    assert "snap''id" in q
+
+
+def test_directory_entries_query_contains_ids():
+    q = _directory_entries_query(["dir1", "dir2"])
+    assert "'dir1'" in q
+    assert "'dir2'" in q
+
+
+def test_directory_entries_query_escapes_quote_in_id():
+    q = _directory_entries_query(["dir'1"])
+    assert "dir''1" in q
+
+
+def test_extract_feature_flags_all_false_on_empty():
+    flags = _extract_feature_flags([])
+    assert flags == {
+        "has_readme": False,
+        "has_dot_github": False,
+        "has_jenkinsfile": False,
+        "has_travis_yml": False,
+    }
+
+
+def test_extract_feature_flags_multiple_files():
+    rows: list[dict[str, str | None]] = [
+        {"entry_name": "README.md"},
+        {"entry_name": ".github"},
+        {"entry_name": "Jenkinsfile"},
+        {"entry_name": ".travis.yml"},
+    ]
+    flags = _extract_feature_flags(rows)
+    assert all(flags.values())
 
 
 # ---------------------------------------------------------------------------
