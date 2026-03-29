@@ -6,21 +6,17 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
+import pytest  # pyright: ignore[reportMissingImports]
 
 from canary.collectors.software_heritage_athena import (
     AthenaQueryResult,
     SwhVisitFeatures,
-    _chunked,
-    _directory_entries_query,
-    _extract_feature_flags,
     _format_bytes,
     _log,
     _normalize_repo_slug,
-    _repo_visits_query,
-    _snapshot_directories_query,
     _sql_escape,
     _utc_now_iso,
+    _visits_with_features_query,
     collect_software_heritage_athena_repo,
     collect_software_heritage_athena_repo_to_file,
     write_jsonl,
@@ -88,124 +84,36 @@ def test_log_verbose_false_produces_no_output(capsys):
     assert captured.out == ""
 
 
-def test_chunked_basic():
-    result = _chunked(["a", "b", "c", "d", "e"], 2)
-    assert result == [["a", "b"], ["c", "d"], ["e"]]
-
-
-def test_chunked_exact_fit():
-    result = _chunked(["x", "y", "z"], 3)
-    assert result == [["x", "y", "z"]]
-
-
-def test_chunked_single_item():
-    result = _chunked(["only"], 5)
-    assert result == [["only"]]
-
-
-def test_chunked_empty():
-    result = _chunked([], 3)
-    assert result == []
-
-
-def test_chunked_size_one():
-    result = _chunked(["a", "b", "c"], 1)
-    assert result == [["a"], ["b"], ["c"]]
-
-
-def test_repo_visits_query_contains_repo_url():
-    q = _repo_visits_query("https://github.com/org/repo", max_visits=5)
+def test_visits_with_features_query_contains_repo_url():
+    q = _visits_with_features_query(
+        "https://github.com/org/repo",
+        max_visits=5,
+        max_directories=10,
+    )
     assert "https://github.com/org/repo" in q
     assert "LIMIT 5" in q
+    assert "WHERE rn <= 10" in q
 
 
-def test_repo_visits_query_escapes_single_quote():
-    q = _repo_visits_query("https://github.com/org/it's-repo", max_visits=1)
+def test_visits_with_features_query_escapes_single_quote():
+    q = _visits_with_features_query(
+        "https://github.com/org/it's-repo",
+        max_visits=1,
+        max_directories=5,
+    )
     assert "it''s-repo" in q
 
 
-def test_snapshot_directories_query_contains_snapshot_id():
-    q = _snapshot_directories_query("abc123", max_directories=10)
-    assert "abc123" in q
-    assert "LIMIT 10" in q
-
-
-def test_snapshot_directories_query_escapes_quote():
-    q = _snapshot_directories_query("snap'id", max_directories=5)
-    assert "snap''id" in q
-
-
-def test_directory_entries_query_contains_ids():
-    q = _directory_entries_query(["dir1", "dir2"])
-    assert "'dir1'" in q
-    assert "'dir2'" in q
-
-
-def test_directory_entries_query_escapes_quote_in_id():
-    q = _directory_entries_query(["dir'1"])
-    assert "dir''1" in q
-
-
-# ---------------------------------------------------------------------------
-# _extract_feature_flags
-# ---------------------------------------------------------------------------
-
-
-def test_extract_feature_flags_all_false_on_empty():
-    flags = _extract_feature_flags([])
-    assert flags == {
-        "has_readme": False,
-        "has_dot_github": False,
-        "has_jenkinsfile": False,
-        "has_travis_yml": False,
-    }
-
-
-def test_extract_feature_flags_detects_readme():
-    rows: list[dict[str, str | None]] = [{"entry_name": "README.md", "type": "file"}]
-    flags = _extract_feature_flags(rows)
-    assert flags["has_readme"] is True
-
-
-def test_extract_feature_flags_detects_readme_case_insensitive():
-    rows: list[dict[str, str | None]] = [{"entry_name": "Readme", "type": "file"}]
-    flags = _extract_feature_flags(rows)
-    assert flags["has_readme"] is True
-
-
-def test_extract_feature_flags_detects_dot_github():
-    rows: list[dict[str, str | None]] = [{"entry_name": ".github", "type": "dir"}]
-    flags = _extract_feature_flags(rows)
-    assert flags["has_dot_github"] is True
-
-
-def test_extract_feature_flags_detects_jenkinsfile():
-    rows: list[dict[str, str | None]] = [{"entry_name": "Jenkinsfile", "type": "file"}]
-    flags = _extract_feature_flags(rows)
-    assert flags["has_jenkinsfile"] is True
-
-
-def test_extract_feature_flags_detects_travis_yml():
-    rows: list[dict[str, str | None]] = [{"entry_name": ".travis.yml", "type": "file"}]
-    flags = _extract_feature_flags(rows)
-    assert flags["has_travis_yml"] is True
-
-
-def test_extract_feature_flags_ignores_none_entry_names():
-    rows = [{"entry_name": None, "type": "file"}, {"entry_name": "README.md", "type": "file"}]
-    flags = _extract_feature_flags(rows)
-    assert flags["has_readme"] is True
-
-
-def test_extract_feature_flags_multiple_files():
-    rows: list[dict[str, str | None]] = [
-        {"entry_name": "README.md"},
-        {"entry_name": ".github"},
-        {"entry_name": "Jenkinsfile"},
-        {"entry_name": ".travis.yml"},
-    ]
-    flags = _extract_feature_flags(rows)
-    assert all(flags.values())
+def test_visits_with_features_query_includes_feature_aggregates():
+    q = _visits_with_features_query(
+        "https://github.com/org/repo",
+        max_visits=2,
+        max_directories=3,
+    )
+    assert "AS has_readme" in q
+    assert "AS has_dot_github" in q
+    assert "AS has_jenkinsfile" in q
+    assert "AS has_travis_yml" in q
 
 
 # ---------------------------------------------------------------------------
@@ -286,20 +194,13 @@ def test_athena_query_result_fields():
 
 
 def _make_athena_client_mock(
-    visit_rows: list[dict],
-    directory_rows: list[dict],
-    entry_rows: list[dict],
+    rows_data: list[dict],
 ):
     """Build a mock boto3 Athena client that returns canned results."""
     client = MagicMock()
 
-    call_count = {"n": 0}
-    execution_ids = ["eid-visits", "eid-dirs", "eid-entries"]
-
     def start_query_execution(**kwargs):
-        idx = min(call_count["n"], len(execution_ids) - 1)
-        call_count["n"] += 1
-        return {"QueryExecutionId": execution_ids[idx]}
+        return {"QueryExecutionId": "eid-visits-with-features"}
 
     client.start_query_execution.side_effect = start_query_execution
 
@@ -318,14 +219,6 @@ def _make_athena_client_mock(
         paginator = MagicMock()
 
         def paginate(QueryExecutionId):
-            eid = QueryExecutionId
-            if eid == "eid-visits":
-                rows_data = visit_rows
-            elif eid == "eid-dirs":
-                rows_data = directory_rows
-            else:
-                rows_data = entry_rows
-
             if not rows_data:
                 yield {
                     "ResultSet": {
@@ -360,10 +253,10 @@ def _make_athena_client_mock(
 
 
 def test_collect_athena_no_visits_returns_empty(monkeypatch, tmp_path):
-    client = _make_athena_client_mock(visit_rows=[], directory_rows=[], entry_rows=[])
+    client = _make_athena_client_mock(rows_data=[])
 
     monkeypatch.setattr(
-        "canary.collectors.software_heritage_athena._athena_client",
+        "canary.collectors.software_heritage_athena._get_athena_client",
         lambda: client,
     )
     monkeypatch.setenv("ATHENA_S3_STAGING_DIR", "s3://bucket/staging/")
@@ -371,7 +264,8 @@ def test_collect_athena_no_visits_returns_empty(monkeypatch, tmp_path):
     records = collect_software_heritage_athena_repo(
         repo_url="https://github.com/org/repo",
         output_location="s3://bucket/staging/",
-        poll_seconds=0,
+        poll_initial_seconds=0,
+        poll_max_seconds=0.1,
         verbose=False,
     )
     assert records == []
@@ -383,36 +277,36 @@ def test_collect_athena_raises_without_output_location(monkeypatch):
         collect_software_heritage_athena_repo(
             repo_url="https://github.com/org/repo",
             output_location=None,
-            poll_seconds=0,
+            poll_initial_seconds=0,
+            poll_max_seconds=0.1,
         )
 
 
 def test_collect_athena_with_visits_and_entries(monkeypatch, tmp_path):
-    visit_rows = [
+    result_rows = [
         {
             "repo_url": "https://github.com/org/repo",
             "visit": "1",
             "visit_date": "2024-01-15",
             "snapshot_id": "snap-abc",
+            "has_readme": "1",
+            "has_dot_github": "1",
+            "has_jenkinsfile": "0",
+            "has_travis_yml": "0",
         }
     ]
-    directory_rows = [{"directory": "dir-001"}]
-    entry_rows = [
-        {"directory_id": "dir-001", "entry_name": "README.md", "type": "file"},
-        {"directory_id": "dir-001", "entry_name": ".github", "type": "dir"},
-    ]
-
-    client = _make_athena_client_mock(visit_rows, directory_rows, entry_rows)
+    client = _make_athena_client_mock(result_rows)
 
     monkeypatch.setattr(
-        "canary.collectors.software_heritage_athena._athena_client",
+        "canary.collectors.software_heritage_athena._get_athena_client",
         lambda: client,
     )
 
     records = collect_software_heritage_athena_repo(
         repo_url="https://github.com/org/repo",
         output_location="s3://bucket/staging/",
-        poll_seconds=0,
+        poll_initial_seconds=0,
+        poll_max_seconds=0.1,
         verbose=False,
     )
 
@@ -426,36 +320,41 @@ def test_collect_athena_with_visits_and_entries(monkeypatch, tmp_path):
     assert r["has_jenkinsfile"] is False
 
 
-def test_collect_athena_reuses_snapshot_cache(monkeypatch):
-    """Two visits with the same snapshot_id should only trigger one directory query."""
-    visit_rows = [
+def test_collect_athena_with_multiple_rows(monkeypatch):
+    result_rows = [
         {
             "repo_url": "https://github.com/org/repo",
             "visit": "1",
             "visit_date": "2024-01-01",
             "snapshot_id": "snap-shared",
+            "has_readme": "0",
+            "has_dot_github": "0",
+            "has_jenkinsfile": "1",
+            "has_travis_yml": "0",
         },
         {
             "repo_url": "https://github.com/org/repo",
             "visit": "2",
             "visit_date": "2024-02-01",
             "snapshot_id": "snap-shared",
+            "has_readme": "0",
+            "has_dot_github": "0",
+            "has_jenkinsfile": "1",
+            "has_travis_yml": "0",
         },
     ]
-    directory_rows = [{"directory": "dir-xyz"}]
-    entry_rows = [{"directory_id": "dir-xyz", "entry_name": "Jenkinsfile", "type": "file"}]
-
-    client = _make_athena_client_mock(visit_rows, directory_rows, entry_rows)
+    client = _make_athena_client_mock(result_rows)
 
     monkeypatch.setattr(
-        "canary.collectors.software_heritage_athena._athena_client",
+        "canary.collectors.software_heritage_athena._get_athena_client",
         lambda: client,
     )
 
     records = collect_software_heritage_athena_repo(
         repo_url="https://github.com/org/repo",
         output_location="s3://bucket/staging/",
-        poll_seconds=0,
+        poll_initial_seconds=0,
+        poll_max_seconds=0.1,
         verbose=False,
     )
 
@@ -465,21 +364,22 @@ def test_collect_athena_reuses_snapshot_cache(monkeypatch):
 
 
 def test_collect_athena_to_file_writes_jsonl(monkeypatch, tmp_path):
-    visit_rows = [
+    result_rows = [
         {
             "repo_url": "https://github.com/org/myrepo",
             "visit": "1",
             "visit_date": "2024-01-01",
             "snapshot_id": "snap-1",
+            "has_readme": "0",
+            "has_dot_github": "0",
+            "has_jenkinsfile": "0",
+            "has_travis_yml": "0",
         }
     ]
-    directory_rows: list = []
-    entry_rows: list = []
-
-    client = _make_athena_client_mock(visit_rows, directory_rows, entry_rows)
+    client = _make_athena_client_mock(result_rows)
 
     monkeypatch.setattr(
-        "canary.collectors.software_heritage_athena._athena_client",
+        "canary.collectors.software_heritage_athena._get_athena_client",
         lambda: client,
     )
 
@@ -487,7 +387,8 @@ def test_collect_athena_to_file_writes_jsonl(monkeypatch, tmp_path):
         repo_url="https://github.com/org/myrepo",
         out_dir=tmp_path,
         output_location="s3://bucket/staging/",
-        poll_seconds=0,
+        poll_initial_seconds=0,
+        poll_max_seconds=0.1,
         verbose=False,
     )
 
