@@ -33,4 +33,9 @@ COPY pyproject.toml README.md /app/
 
 RUN python -m pip install --no-cache-dir -e . --no-deps
 
+# Run as a non-root user for better container security.
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup --home /app appuser \
+ && chown -R appuser:appgroup /app
+USER appuser
+
 CMD ["canary", "--help"]

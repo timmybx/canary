@@ -11,6 +11,12 @@ on:
     - cron: "0 9 * * 1"
   workflow_dispatch:
 
+# Cancel any in-progress run for the same branch/PR so stale runs don't waste
+# CI minutes.  The scheduled run is always allowed to complete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
