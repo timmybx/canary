@@ -219,13 +219,20 @@ def test_athena_query_result_fields():
 
 
 def _make_athena_client_mock(
-    rows_data: list[dict],
+    visit_rows: list[dict],
+    directory_rows: list[dict],
+    entry_rows: list[dict],
 ):
     """Build a mock boto3 Athena client that returns canned results."""
     client = MagicMock()
 
+    call_count = {"n": 0}
+    execution_ids = ["eid-visits", "eid-dirs", "eid-entries"]
+
     def start_query_execution(**kwargs):
-        return {"QueryExecutionId": "eid-visits-with-features"}
+        idx = min(call_count["n"], len(execution_ids) - 1)
+        call_count["n"] += 1
+        return {"QueryExecutionId": execution_ids[idx]}
 
     client.start_query_execution.side_effect = start_query_execution
 
@@ -244,6 +251,13 @@ def _make_athena_client_mock(
         paginator = MagicMock()
 
         def paginate(QueryExecutionId):
+            if QueryExecutionId == "eid-visits":
+                rows_data = visit_rows
+            elif QueryExecutionId == "eid-dirs":
+                rows_data = directory_rows
+            else:
+                rows_data = entry_rows
+
             if not rows_data:
                 yield {
                     "ResultSet": {
@@ -278,7 +292,7 @@ def _make_athena_client_mock(
 
 
 def test_collect_athena_no_visits_returns_empty(monkeypatch, tmp_path):
-    client = _make_athena_client_mock(rows_data=[])
+    client = _make_athena_client_mock(visit_rows=[], directory_rows=[], entry_rows=[])
 
     monkeypatch.setattr(
         "canary.collectors.software_heritage_athena._get_athena_client",
@@ -308,19 +322,20 @@ def test_collect_athena_raises_without_output_location(monkeypatch):
 
 
 def test_collect_athena_with_visits_and_entries(monkeypatch, tmp_path):
-    result_rows = [
+    visit_rows = [
         {
             "repo_url": "https://github.com/org/repo",
             "visit": "1",
             "visit_date": "2024-01-15",
             "snapshot_id": "snap-abc",
-            "has_readme": "1",
-            "has_dot_github": "1",
-            "has_jenkinsfile": "0",
-            "has_travis_yml": "0",
         }
     ]
-    client = _make_athena_client_mock(result_rows)
+    directory_rows = [{"directory": "dir-001"}]
+    entry_rows = [
+        {"directory_id": "dir-001", "entry_name": "README.md", "type": "file"},
+        {"directory_id": "dir-001", "entry_name": ".github", "type": "dir"},
+    ]
+    client = _make_athena_client_mock(visit_rows, directory_rows, entry_rows)
 
     monkeypatch.setattr(
         "canary.collectors.software_heritage_athena._get_athena_client",
@@ -346,29 +361,23 @@ def test_collect_athena_with_visits_and_entries(monkeypatch, tmp_path):
 
 
 def test_collect_athena_with_multiple_rows(monkeypatch):
-    result_rows = [
+    visit_rows = [
         {
             "repo_url": "https://github.com/org/repo",
             "visit": "1",
             "visit_date": "2024-01-01",
             "snapshot_id": "snap-shared",
-            "has_readme": "0",
-            "has_dot_github": "0",
-            "has_jenkinsfile": "1",
-            "has_travis_yml": "0",
         },
         {
             "repo_url": "https://github.com/org/repo",
             "visit": "2",
             "visit_date": "2024-02-01",
             "snapshot_id": "snap-shared",
-            "has_readme": "0",
-            "has_dot_github": "0",
-            "has_jenkinsfile": "1",
-            "has_travis_yml": "0",
         },
     ]
-    client = _make_athena_client_mock(result_rows)
+    directory_rows = [{"directory": "dir-xyz"}]
+    entry_rows = [{"directory_id": "dir-xyz", "entry_name": "Jenkinsfile", "type": "file"}]
+    client = _make_athena_client_mock(visit_rows, directory_rows, entry_rows)
 
     monkeypatch.setattr(
         "canary.collectors.software_heritage_athena._get_athena_client",
@@ -389,19 +398,17 @@ def test_collect_athena_with_multiple_rows(monkeypatch):
 
 
 def test_collect_athena_to_file_writes_jsonl(monkeypatch, tmp_path):
-    result_rows = [
+    visit_rows = [
         {
             "repo_url": "https://github.com/org/myrepo",
             "visit": "1",
             "visit_date": "2024-01-01",
             "snapshot_id": "snap-1",
-            "has_readme": "0",
-            "has_dot_github": "0",
-            "has_jenkinsfile": "0",
-            "has_travis_yml": "0",
         }
     ]
-    client = _make_athena_client_mock(result_rows)
+    directory_rows: list[dict] = []
+    entry_rows: list[dict] = []
+    client = _make_athena_client_mock(visit_rows, directory_rows, entry_rows)
 
     monkeypatch.setattr(
         "canary.collectors.software_heritage_athena._get_athena_client",
