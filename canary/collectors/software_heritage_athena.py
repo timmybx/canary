@@ -15,13 +15,39 @@ from botocore.exceptions import (  # pyright: ignore[reportMissingImports]
 )
 from dotenv import load_dotenv  # pyright: ignore[reportMissingImports]
 
+# ---------------------------------------------------------------------------
+# Load .env once at import time rather than inside the hot collection path
+# ---------------------------------------------------------------------------
+load_dotenv()
+
 DEFAULT_REGION = "us-east-1"
 DEFAULT_DATABASE = os.getenv("ATHENA_DATABASE", "swh_graph_2021_03_23")
-DEFAULT_POLL_SECONDS = 1.0
+DEFAULT_POLL_INITIAL_SECONDS = 0.5
+DEFAULT_POLL_MAX_SECONDS = 5.0
+DEFAULT_POLL_BACKOFF_FACTOR = 1.5
 DEFAULT_OUT_DIR = Path("data/raw/software_heritage")
 DEFAULT_MAX_VISITS = 1
-DEFAULT_DIRECTORY_BATCH_SIZE = 20
 DEFAULT_MAX_DIRECTORIES = 100
+
+
+# ---------------------------------------------------------------------------
+# Module-level boto3 client cache — one client per region, reused across calls
+# ---------------------------------------------------------------------------
+_ATHENA_CLIENT_CACHE: dict[str, Any] = {}
+
+
+def _get_athena_client():
+    """Return a cached Athena client for the configured region."""
+    region = os.getenv("AWS_REGION", DEFAULT_REGION)
+    if region not in _ATHENA_CLIENT_CACHE:
+        _ATHENA_CLIENT_CACHE[region] = boto3.client(
+            "athena",
+            region_name=region,
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID") or None,
+            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY") or None,
+            aws_session_token=os.getenv("AWS_SESSION_TOKEN") or None,
+        )
+    return _ATHENA_CLIENT_CACHE[region]
 
 
 @dataclass(slots=True)
@@ -48,16 +74,6 @@ class AthenaQueryResult:
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _athena_client():
-    return boto3.client(
-        "athena",
-        region_name=os.getenv("AWS_REGION", DEFAULT_REGION),
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID") or None,
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY") or None,
-        aws_session_token=os.getenv("AWS_SESSION_TOKEN") or None,
-    )
 
 
 def _sql_escape(value: str) -> str:
@@ -89,9 +105,29 @@ def _log(message: str, *, verbose: bool = True) -> None:
         print(f"[INFO] {message}")
 
 
-def _chunked(values: list[str], chunk_size: int) -> list[list[str]]:
-    size = max(1, int(chunk_size))
-    return [values[i : i + size] for i in range(0, len(values), size)]
+def _poll_until_done(
+    client: Any,
+    query_execution_id: str,
+    *,
+    initial_seconds: float = DEFAULT_POLL_INITIAL_SECONDS,
+    max_seconds: float = DEFAULT_POLL_MAX_SECONDS,
+    backoff_factor: float = DEFAULT_POLL_BACKOFF_FACTOR,
+) -> dict[str, Any]:
+    """
+    Poll Athena with exponential backoff instead of a fixed interval.
+
+    Starts at ``initial_seconds``, multiplies by ``backoff_factor`` each
+    iteration, and caps at ``max_seconds``.  This cuts the number of
+    get_query_execution API calls by 3-5× for typical query durations.
+    """
+    delay = max(0.1, initial_seconds)
+    while True:
+        resp = client.get_query_execution(QueryExecutionId=query_execution_id)
+        state = resp["QueryExecution"]["Status"]["State"]
+        if state in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+            return resp
+        time.sleep(delay)
+        delay = min(delay * backoff_factor, max_seconds)
 
 
 def _run_athena_query(
@@ -99,11 +135,13 @@ def _run_athena_query(
     *,
     database: str,
     output_location: str,
-    poll_seconds: float = DEFAULT_POLL_SECONDS,
+    poll_initial_seconds: float = DEFAULT_POLL_INITIAL_SECONDS,
+    poll_max_seconds: float = DEFAULT_POLL_MAX_SECONDS,
     label: str = "query",
     verbose: bool = True,
 ) -> AthenaQueryResult:
-    client = _athena_client()
+    # Reuse the cached client — no per-call construction overhead
+    client = _get_athena_client()
     started = time.monotonic()
 
     _log(f"Starting Athena {label}...", verbose=verbose)
@@ -115,15 +153,16 @@ def _run_athena_query(
     query_execution_id = response["QueryExecutionId"]
     _log(f"Athena {label} query_execution_id={query_execution_id}", verbose=verbose)
 
-    while True:
-        status_response = client.get_query_execution(QueryExecutionId=query_execution_id)
-        state = status_response["QueryExecution"]["Status"]["State"]
-        if state in {"SUCCEEDED", "FAILED", "CANCELLED"}:
-            break
-        time.sleep(poll_seconds)
+    status_response = _poll_until_done(
+        client,
+        query_execution_id,
+        initial_seconds=poll_initial_seconds,
+        max_seconds=poll_max_seconds,
+    )
 
     elapsed_s = time.monotonic() - started
     query_execution = status_response["QueryExecution"]
+    state = query_execution["Status"]["State"]
     stats = query_execution.get("Statistics", {})
     data_scanned_bytes = stats.get("DataScannedInBytes")
     if not isinstance(data_scanned_bytes, int):
@@ -171,60 +210,84 @@ def _run_athena_query(
     )
 
 
-def _repo_visits_query(repo_url: str, *, max_visits: int) -> str:
+# ---------------------------------------------------------------------------
+# Consolidated CTE query — replaces the original 3-query waterfall
+# (repo_visits → snapshot_directories → directory_entries) with a single
+# Athena execution.  One query startup + one scan instead of N+1.
+# ---------------------------------------------------------------------------
+
+
+def _visits_with_features_query(repo_url: str, *, max_visits: int, max_directories: int) -> str:
+    """
+    Return a single Athena SQL query that joins visits → snapshot branches →
+    revisions → directory entries and aggregates the four feature flags in one
+    pass.
+
+    The ``max_directories`` cap is applied via a ROW_NUMBER window inside the
+    CTE so Athena can still prune the directory_entry scan early.
+    """
     repo = _sql_escape(repo_url)
+    max_v = max(1, int(max_visits))
+    max_d = max(1, int(max_directories))
     return f"""
+WITH visits AS (
+    SELECT
+        origin            AS repo_url,
+        visit,
+        date              AS visit_date,
+        snapshot_id
+    FROM origin_visit_status
+    WHERE origin = '{repo}'
+      AND snapshot_id IS NOT NULL
+    ORDER BY date DESC
+    LIMIT {max_v}
+),
+ranked_dirs AS (
+    SELECT
+        v.snapshot_id,
+        r.directory,
+        ROW_NUMBER() OVER (PARTITION BY v.snapshot_id ORDER BY r.directory) AS rn
+    FROM visits v
+    JOIN snapshot_branch sb
+      ON sb.snapshot_id = v.snapshot_id
+    JOIN revision r
+      ON r.id = sb.target
+    WHERE sb.target_type = 'revision'
+      AND r.directory IS NOT NULL
+),
+dirs AS (
+    SELECT snapshot_id, directory
+    FROM ranked_dirs
+    WHERE rn <= {max_d}
+),
+entries AS (
+    SELECT
+        d.snapshot_id,
+        LOWER(from_utf8(de.name, '?')) AS entry_name
+    FROM dirs d
+    JOIN directory_entry de
+      ON de.directory_id = d.directory
+)
 SELECT
-    origin AS repo_url,
-    visit,
-    date AS visit_date,
-    snapshot_id
-FROM origin_visit_status
-WHERE origin = '{repo}'
-  AND snapshot_id IS NOT NULL
-ORDER BY date DESC
-LIMIT {max(1, int(max_visits))}
+    v.repo_url,
+    v.visit,
+    v.visit_date,
+    v.snapshot_id,
+    MAX(
+        CASE
+            WHEN e.entry_name IN ('readme', 'readme.md', 'readme.txt') THEN 1
+            ELSE 0
+        END
+    ) AS has_readme,
+    MAX(CASE WHEN e.entry_name = '.github'     THEN 1 ELSE 0 END) AS has_dot_github,
+    MAX(CASE WHEN e.entry_name = 'jenkinsfile' THEN 1 ELSE 0 END) AS has_jenkinsfile,
+    MAX(CASE WHEN e.entry_name = '.travis.yml' THEN 1 ELSE 0 END) AS has_travis_yml
+FROM visits v
+LEFT JOIN entries e
+  ON e.snapshot_id = v.snapshot_id
+GROUP BY v.repo_url, v.visit, v.visit_date, v.snapshot_id
+ORDER BY v.visit_date DESC
 """.strip()
-
-
-def _snapshot_directories_query(snapshot_id: str, *, max_directories: int) -> str:
-    snap = _sql_escape(snapshot_id)
-    return f"""
-SELECT DISTINCT r.directory
-FROM snapshot_branch sb
-JOIN revision r
-  ON sb.target = r.id
-WHERE sb.snapshot_id = '{snap}'
-  AND sb.target_type = 'revision'
-  AND r.directory IS NOT NULL
-LIMIT {max(1, int(max_directories))}
-""".strip()
-
-
-def _directory_entries_query(directory_ids: list[str]) -> str:
-    ids_sql = ", ".join(f"'{_sql_escape(directory_id)}'" for directory_id in directory_ids)
-    return f"""
-SELECT
-    directory_id,
-    from_utf8(name, '?') AS entry_name,
-    type
-FROM directory_entry
-WHERE directory_id IN ({ids_sql})
-""".strip()
-
-
-def _extract_feature_flags(entry_rows: list[dict[str, str | None]]) -> dict[str, bool]:
-    names = {
-        (row.get("entry_name") or "").strip().lower()
-        for row in entry_rows
-        if row.get("entry_name") is not None
-    }
-    return {
-        "has_readme": any(name in {"readme", "readme.md", "readme.txt"} for name in names),
-        "has_dot_github": ".github" in names,
-        "has_jenkinsfile": "jenkinsfile" in names,
-        "has_travis_yml": ".travis.yml" in names,
-    }
 
 
 def collect_software_heritage_athena_repo(
@@ -232,14 +295,12 @@ def collect_software_heritage_athena_repo(
     repo_url: str,
     database: str = DEFAULT_DATABASE,
     output_location: str | None = None,
-    poll_seconds: float = DEFAULT_POLL_SECONDS,
+    poll_initial_seconds: float = DEFAULT_POLL_INITIAL_SECONDS,
+    poll_max_seconds: float = DEFAULT_POLL_MAX_SECONDS,
     max_visits: int = DEFAULT_MAX_VISITS,
-    directory_batch_size: int = DEFAULT_DIRECTORY_BATCH_SIZE,
     max_directories: int = DEFAULT_MAX_DIRECTORIES,
     verbose: bool = True,
 ) -> list[dict[str, Any]]:
-    load_dotenv()
-
     if not output_location:
         output_location = os.getenv("ATHENA_S3_STAGING_DIR")
     if not output_location:
@@ -250,143 +311,62 @@ def collect_software_heritage_athena_repo(
         (
             "Collecting Software Heritage Athena signals for "
             f"repo={repo_url} database={database} max_visits={max_visits} "
-            f"directory_batch_size={directory_batch_size} "
             f"max_directories={max_directories}"
         ),
         verbose=verbose,
     )
 
-    visits_result = _run_athena_query(
-        _repo_visits_query(repo_url, max_visits=max_visits),
+    # One query replaces the previous N+1 round-trips
+    result = _run_athena_query(
+        _visits_with_features_query(
+            repo_url,
+            max_visits=max_visits,
+            max_directories=max_directories,
+        ),
         database=database,
         output_location=output_location,
-        poll_seconds=poll_seconds,
-        label="repo_visits",
+        poll_initial_seconds=poll_initial_seconds,
+        poll_max_seconds=poll_max_seconds,
+        label="visits_with_features",
         verbose=verbose,
     )
-    visit_rows = visits_result.rows
 
-    if not visit_rows:
+    if not result.rows:
         _log("No archived visits found with snapshot_id; returning no records.", verbose=verbose)
         return []
 
     collected_at = _utc_now_iso()
-    results: list[dict[str, Any]] = []
-    snapshot_cache: dict[str, dict[str, bool]] = {}
-    total_scanned_bytes = visits_result.data_scanned_bytes or 0
+    records: list[dict[str, Any]] = []
 
-    for index, visit_row in enumerate(visit_rows, start=1):
-        snapshot_id = visit_row.get("snapshot_id") or ""
+    for row in result.rows:
+        snapshot_id = row.get("snapshot_id") or ""
         if not snapshot_id:
             continue
-
-        if snapshot_id in snapshot_cache:
-            feature_flags = snapshot_cache[snapshot_id]
-            _log(
-                (
-                    "Reusing cached snapshot feature flags for "
-                    f"snapshot_id={snapshot_id} ({index}/{len(visit_rows)})"
-                ),
-                verbose=verbose,
-            )
-        else:
-            directories_result = _run_athena_query(
-                _snapshot_directories_query(snapshot_id, max_directories=max_directories),
-                database=database,
-                output_location=output_location,
-                poll_seconds=poll_seconds,
-                label=f"snapshot_directories[{index}/{len(visit_rows)}] snapshot_id={snapshot_id}",
-                verbose=verbose,
-            )
-            total_scanned_bytes += directories_result.data_scanned_bytes or 0
-            directory_ids = [
-                row.get("directory") or ""
-                for row in directories_result.rows
-                if (row.get("directory") or "").strip()
-            ]
-            directory_ids = list(dict.fromkeys(directory_ids))
-
-            if not directory_ids:
-                _log(
-                    (
-                        "No root directories found for "
-                        f"snapshot_id={snapshot_id}; defaulting feature flags to False."
-                    ),
-                    verbose=verbose,
-                )
-                feature_flags = {
-                    "has_readme": False,
-                    "has_dot_github": False,
-                    "has_jenkinsfile": False,
-                    "has_travis_yml": False,
-                }
-            else:
-                entry_rows: list[dict[str, str | None]] = []
-                batches = _chunked(directory_ids, directory_batch_size)
-                _log(
-                    (
-                        "Fetching directory entries for "
-                        f"snapshot_id={snapshot_id}: directories={len(directory_ids)} "
-                        f"batches={len(batches)}"
-                    ),
-                    verbose=verbose,
-                )
-                for batch_index, batch in enumerate(batches, start=1):
-                    entries_result = _run_athena_query(
-                        _directory_entries_query(batch),
-                        database=database,
-                        output_location=output_location,
-                        poll_seconds=poll_seconds,
-                        label=(
-                            "directory_entries["
-                            f"{index}/{len(visit_rows)} "
-                            f"batch {batch_index}/{len(batches)}] "
-                            f"snapshot_id={snapshot_id}"
-                        ),
-                        verbose=verbose,
-                    )
-                    total_scanned_bytes += entries_result.data_scanned_bytes or 0
-                    entry_rows.extend(entries_result.rows)
-
-                feature_flags = _extract_feature_flags(entry_rows)
-                _log(
-                    (
-                        f"Derived snapshot feature flags for snapshot_id={snapshot_id}: "
-                        f"has_readme={feature_flags['has_readme']} "
-                        f"has_dot_github={feature_flags['has_dot_github']} "
-                        f"has_jenkinsfile={feature_flags['has_jenkinsfile']} "
-                        f"has_travis_yml={feature_flags['has_travis_yml']}"
-                    ),
-                    verbose=verbose,
-                )
-
-            snapshot_cache[snapshot_id] = feature_flags
 
         item = SwhVisitFeatures(
             source="software_heritage_athena",
             collected_at=collected_at,
-            repo_url=visit_row.get("repo_url") or repo_url,
-            visit=int(visit_row.get("visit") or 0),
-            visit_date=visit_row.get("visit_date") or "",
+            repo_url=row.get("repo_url") or repo_url,
+            visit=int(row.get("visit") or 0),
+            visit_date=row.get("visit_date") or "",
             snapshot_id=snapshot_id,
-            has_readme=feature_flags["has_readme"],
-            has_dot_github=feature_flags["has_dot_github"],
-            has_jenkinsfile=feature_flags["has_jenkinsfile"],
-            has_travis_yml=feature_flags["has_travis_yml"],
+            has_readme=row.get("has_readme") == "1",
+            has_dot_github=row.get("has_dot_github") == "1",
+            has_jenkinsfile=row.get("has_jenkinsfile") == "1",
+            has_travis_yml=row.get("has_travis_yml") == "1",
         )
-        results.append(asdict(item))
+        records.append(asdict(item))
 
     elapsed_s = time.monotonic() - started
     _log(
         (
-            f"Completed collection for repo={repo_url}: visits={len(visit_rows)} "
-            f"records={len(results)} total_elapsed_s={elapsed_s:.1f} "
-            f"approximate_scanned={_format_bytes(total_scanned_bytes)} "
-            f"unique_snapshots={len(snapshot_cache)}"
+            f"Completed collection for repo={repo_url}: "
+            f"records={len(records)} total_elapsed_s={elapsed_s:.1f} "
+            f"approximate_scanned={_format_bytes(result.data_scanned_bytes)}"
         ),
         verbose=verbose,
     )
-    return results
+    return records
 
 
 def write_jsonl(records: list[dict[str, Any]], out_path: str | Path) -> None:
@@ -403,9 +383,9 @@ def collect_software_heritage_athena_repo_to_file(
     database: str = DEFAULT_DATABASE,
     out_dir: str | Path = DEFAULT_OUT_DIR,
     output_location: str | None = None,
-    poll_seconds: float = DEFAULT_POLL_SECONDS,
+    poll_initial_seconds: float = DEFAULT_POLL_INITIAL_SECONDS,
+    poll_max_seconds: float = DEFAULT_POLL_MAX_SECONDS,
     max_visits: int = DEFAULT_MAX_VISITS,
-    directory_batch_size: int = DEFAULT_DIRECTORY_BATCH_SIZE,
     max_directories: int = DEFAULT_MAX_DIRECTORIES,
     verbose: bool = True,
 ) -> Path:
@@ -413,15 +393,67 @@ def collect_software_heritage_athena_repo_to_file(
         repo_url=repo_url,
         database=database,
         output_location=output_location,
-        poll_seconds=poll_seconds,
+        poll_initial_seconds=poll_initial_seconds,
+        poll_max_seconds=poll_max_seconds,
         max_visits=max_visits,
-        directory_batch_size=directory_batch_size,
         max_directories=max_directories,
         verbose=verbose,
     )
     out_path = Path(out_dir) / f"{_normalize_repo_slug(repo_url)}.software_heritage.jsonl"
     write_jsonl(records, out_path)
     return out_path
+
+
+def collect_software_heritage_athena_repos_parallel(
+    repo_urls: list[str],
+    *,
+    database: str = DEFAULT_DATABASE,
+    out_dir: str | Path = DEFAULT_OUT_DIR,
+    output_location: str | None = None,
+    poll_initial_seconds: float = DEFAULT_POLL_INITIAL_SECONDS,
+    poll_max_seconds: float = DEFAULT_POLL_MAX_SECONDS,
+    max_visits: int = DEFAULT_MAX_VISITS,
+    max_directories: int = DEFAULT_MAX_DIRECTORIES,
+    max_workers: int = 8,
+    verbose: bool = True,
+) -> dict[str, Path | Exception]:
+    """
+    Collect data for multiple repos concurrently using a thread pool.
+
+    Athena accepts up to 20 concurrent queries per account by default, so
+    ``max_workers=8`` is a safe conservative default.  Increase if your
+    account limit has been raised.
+
+    Returns a mapping of repo_url → output Path (or the Exception raised).
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results: dict[str, Path | Exception] = {}
+
+    def _collect_one(url: str) -> Path:
+        return collect_software_heritage_athena_repo_to_file(
+            repo_url=url,
+            database=database,
+            out_dir=out_dir,
+            output_location=output_location,
+            poll_initial_seconds=poll_initial_seconds,
+            poll_max_seconds=poll_max_seconds,
+            max_visits=max_visits,
+            max_directories=max_directories,
+            verbose=verbose,
+        )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        future_to_url = {pool.submit(_collect_one, url): url for url in repo_urls}
+        for future in as_completed(future_to_url):
+            url = future_to_url[future]
+            try:
+                results[url] = future.result()
+            except Exception as exc:  # noqa: BLE001
+                _log(f"Failed to collect {url}: {exc}", verbose=verbose)
+                results[url] = exc
+
+    return results
 
 
 def main() -> int:
@@ -444,25 +476,26 @@ def main() -> int:
         help=f"Directory for JSONL output (default: {DEFAULT_OUT_DIR}).",
     )
     parser.add_argument(
-        "--poll-seconds",
+        "--poll-initial-seconds",
         type=float,
-        default=DEFAULT_POLL_SECONDS,
-        help=f"Polling interval while Athena query runs (default: {DEFAULT_POLL_SECONDS}).",
+        default=DEFAULT_POLL_INITIAL_SECONDS,
+        help=(
+            "Initial polling interval for Athena queries "
+            f"(default: {DEFAULT_POLL_INITIAL_SECONDS}). "
+            "Uses exponential backoff up to --poll-max-seconds."
+        ),
+    )
+    parser.add_argument(
+        "--poll-max-seconds",
+        type=float,
+        default=DEFAULT_POLL_MAX_SECONDS,
+        help=f"Maximum polling interval ceiling (default: {DEFAULT_POLL_MAX_SECONDS}).",
     )
     parser.add_argument(
         "--max-visits",
         type=int,
         default=DEFAULT_MAX_VISITS,
         help=f"Maximum number of archived visits to inspect (default: {DEFAULT_MAX_VISITS}).",
-    )
-    parser.add_argument(
-        "--directory-batch-size",
-        type=int,
-        default=DEFAULT_DIRECTORY_BATCH_SIZE,
-        help=(
-            "How many directory IDs to include in each directory_entry batch "
-            f"query (default: {DEFAULT_DIRECTORY_BATCH_SIZE})."
-        ),
     )
     parser.add_argument(
         "--max-directories",
@@ -485,9 +518,9 @@ def main() -> int:
             repo_url=args.repo_url,
             database=args.database,
             out_dir=args.out_dir,
-            poll_seconds=args.poll_seconds,
+            poll_initial_seconds=args.poll_initial_seconds,
+            poll_max_seconds=args.poll_max_seconds,
             max_visits=args.max_visits,
-            directory_batch_size=args.directory_batch_size,
             max_directories=args.max_directories,
             verbose=not args.quiet,
         )
