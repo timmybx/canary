@@ -6,7 +6,8 @@ ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_ROOT_USER_ACTION=ignore
+    PIP_ROOT_USER_ACTION=ignore \
+    XDG_CACHE_HOME=/tmp/.cache
 
 # Install pinned build tooling (hash-locked).
 # Include pip/setuptools/wheel in requirements-build.txt by generating it with:
