@@ -59,6 +59,7 @@ skip_covered = false
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+cache-dir = "/tmp/.ruff_cache"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

@@ -6,12 +6,16 @@ services:
     working_dir: /app
     environment:
       - CANARY_DATA_DIR=/app/data
+      - TMPDIR=/tmp
+      - RUFF_CACHE_DIR=/tmp/.ruff_cache
       - PIP_DISABLE_PIP_VERSION_CHECK=1
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
     security_opt:
       - no-new-privileges:true
+    tmpfs:
+      - /tmp
     entrypoint: ["sh", "/app/docker-entrypoint.sh"]
     command: ["pytest", "-q"]
 
@@ -24,6 +28,8 @@ services:
       - CANARY_DATA_DIR=/app/data
       - CANARY_WEB_HOST=0.0.0.0
       - CANARY_WEB_PORT=8000
+      - TMPDIR=/tmp
+      - RUFF_CACHE_DIR=/tmp/.ruff_cache
       - PIP_DISABLE_PIP_VERSION_CHECK=1
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
