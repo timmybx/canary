@@ -250,6 +250,18 @@ def test_collect_github_plugin_fetches_and_writes(tmp_path: Path, monkeypatch):
         "canary.collectors.github_plugin.fetch_github_workflows_dir",
         lambda *a, **kw: [{"name": "ci.yml"}],
     )
+    monkeypatch.setattr(
+        "canary.collectors.github_plugin.fetch_github_codeowners",
+        lambda *a, **kw: {"name": "CODEOWNERS"},
+    )
+    monkeypatch.setattr(
+        "canary.collectors.github_plugin.fetch_github_security_policy",
+        lambda *a, **kw: {"name": "SECURITY.md"},
+    )
+    monkeypatch.setattr(
+        "canary.collectors.github_plugin.fetch_github_dependabot_config",
+        lambda *a, **kw: {"name": "dependabot.yml"},
+    )
 
     result = collect_github_plugin_real(
         plugin_id="good-plugin",

@@ -11,7 +11,7 @@ def test_build_feature_bundle_loads_software_heritage_features(tmp_path: Path) -
     registry_dir = data_raw / "registry"
     plugins_dir = data_raw / "plugins"
     github_dir = data_raw / "github"
-    swh_dir = data_raw / "software_heritage"
+    swh_dir = data_raw / "software_heritage_api"
     health_dir = data_raw / "healthscore" / "plugins"
 
     for p in [registry_dir, plugins_dir, github_dir, swh_dir, health_dir]:
@@ -83,6 +83,7 @@ def test_build_feature_bundle_loads_software_heritage_features(tmp_path: Path) -
         out_path=tmp_path / "out.jsonl",
         out_csv_path=None,
         summary_path=None,
+        software_heritage_backend="api",
     )
 
     row = rows[0]
