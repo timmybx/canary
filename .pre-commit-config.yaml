@@ -5,7 +5,7 @@
 repos:
   # Ruff (lint + autofix) + Ruff formatter
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.6
+    rev: v0.15.8
     hooks:
       - id: ruff-check
         args: [--fix]
@@ -42,3 +42,4 @@ repos:
           - numpy>=1.26
           - pandas>=2.2
           - scikit-learn>=1.5
+          - pytest>=7.0
