@@ -118,9 +118,25 @@ def _extract_swh_visits(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _load_swh_records(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
+def _load_swh_records(
+    plugin_id: str,
+    data_raw_dir: Path,
+    backend: str | None = None,
+) -> dict[str, Any]:
     plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
-    swh_dir = data_raw_dir / "software_heritage"
+
+    if backend == "athena":
+        swh_dir = data_raw_dir / "software_heritage_athena"
+        return {
+            "index": _read_json(swh_dir / f"{plugin_id}.swh_athena_index.json")
+            if (swh_dir / f"{plugin_id}.swh_athena_index.json").exists()
+            else None,
+            "visits": _read_jsonl(swh_dir / f"{plugin_id}.swh_athena_visits.jsonl")
+            if (swh_dir / f"{plugin_id}.swh_athena_visits.jsonl").exists()
+            else None,
+        }
+
+    swh_dir = data_raw_dir / "software_heritage_api"
     return {
         "index": _read_json(swh_dir / f"{plugin_id}.swh_index.json")
         if (swh_dir / f"{plugin_id}.swh_index.json").exists()
@@ -135,6 +151,7 @@ def _load_software_heritage_monthly_features(
     data_raw_dir: Path,
     plugin_ids: list[str],
     months: list[dict[str, Any]],
+    backend: str | None = None,
 ) -> dict[tuple[str, str], dict[str, Any]]:
     out: dict[tuple[str, str], dict[str, Any]] = {}
 
@@ -148,7 +165,7 @@ def _load_software_heritage_monthly_features(
     ]
 
     for plugin_id in plugin_ids:
-        raw = _load_swh_records(plugin_id, data_raw_dir)
+        raw = _load_swh_records(plugin_id, data_raw_dir, backend=backend)
         index_payload = raw["index"] if isinstance(raw["index"], dict) else {}
         visits_payload = raw["visits"]
         visits = _extract_swh_visits(visits_payload)
@@ -159,6 +176,16 @@ def _load_software_heritage_monthly_features(
             if dt is not None:
                 normalized_dates.append(dt)
         normalized_dates.sort()
+
+        is_athena = (backend == "athena") or (index_payload.get("backend") == "athena")
+        origin_found = (
+            bool(index_payload.get("record_count", 0) > 0)
+            if is_athena
+            else bool(index_payload.get("origin_found"))
+        )
+        snapshot_found = (
+            bool(normalized_dates) if is_athena else bool(index_payload.get("snapshot_found"))
+        )
 
         for month in month_meta:
             window_start = month["window_start"]
@@ -178,9 +205,8 @@ def _load_software_heritage_monthly_features(
 
             out[(plugin_id, month["month"])] = {
                 "swh_present_any": bool(index_payload) or bool(normalized_dates),
-                "swh_origin_found": bool(index_payload.get("origin_found")),
-                "swh_has_snapshot_to_date": bool(to_date)
-                and bool(index_payload.get("snapshot_found")),
+                "swh_origin_found": origin_found,
+                "swh_has_snapshot_to_date": bool(to_date) and snapshot_found,
                 "swh_visit_count_to_date": len(to_date),
                 "swh_visits_this_month": len(this_month),
                 "swh_visits_last_365d": len(trailing),
@@ -669,6 +695,7 @@ def build_monthly_feature_bundle(
     summary_path: str | Path | None = (
         "data/processed/features/plugins.monthly.features.summary.json"
     ),
+    software_heritage_backend: str | None = "athena",
 ) -> list[dict[str, Any]]:
     data_raw_dir = Path(data_raw_dir)
     registry_path = Path(registry_path)
@@ -685,7 +712,12 @@ def build_monthly_feature_bundle(
     )
     months = iter_months(start_month, end_month)
     gharchive_monthly = _load_gharchive_monthly_features(data_raw_dir)
-    swh_rows = _load_software_heritage_monthly_features(data_raw_dir, plugin_ids, months)
+    swh_rows = _load_software_heritage_monthly_features(
+        data_raw_dir,
+        plugin_ids,
+        months,
+        backend=software_heritage_backend,
+    )
     advisory_monthly = _load_advisory_monthly_features(data_raw_dir, plugin_ids, months)
     registry_by_plugin = {
         canonicalize_plugin_id(str(rec.get("plugin_id") or "").strip(), data_dir=data_raw_dir): rec
@@ -751,6 +783,7 @@ def build_monthly_feature_bundle(
             "rows_with_advisory_this_month": sum(
                 1 for r in rows if r.get("had_advisory_this_month")
             ),
+            "software_heritage_backend": software_heritage_backend,
             "out_path": str(out_path),
             "out_csv_path": str(out_csv) if out_csv is not None else None,
         }

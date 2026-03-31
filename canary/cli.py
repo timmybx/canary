@@ -21,7 +21,10 @@ from canary.collectors.plugins_registry import (
     collect_plugins_registry_real,
     collect_plugins_registry_sample,
 )
-from canary.collectors.software_heritage import collect_software_heritage_real
+from canary.collectors.software_heritage_backend import (
+    collect_software_heritage,
+    default_out_dir_for_backend,
+)
 from canary.plugin_aliases import canonicalize_plugin_id
 from canary.scoring.baseline import score_plugin_baseline
 from canary.train.baseline import train_baseline
@@ -299,12 +302,23 @@ def _cmd_collect_github(args: argparse.Namespace) -> int:
 
 
 def _cmd_collect_software_heritage(args: argparse.Namespace) -> int:
-    result = collect_software_heritage_real(
+    out_dir = args.out_dir
+    if out_dir is None:
+        out_dir = default_out_dir_for_backend(args.backend)
+
+    result = collect_software_heritage(
         plugin_id=args.plugin,
         data_dir=args.data_dir,
-        out_dir=args.out_dir,
+        out_dir=out_dir,
+        backend=args.backend,
         timeout_s=float(args.timeout_s),
         overwrite=bool(args.overwrite),
+        database=args.database,
+        output_location=args.output_location,
+        max_visits=int(args.max_visits),
+        directory_batch_size=int(args.directory_batch_size),
+        max_directories=int(args.max_directories),
+        verbose=not bool(args.quiet),
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0
@@ -336,6 +350,7 @@ def _cmd_build_feature_bundle(args: argparse.Namespace) -> int:
         out_path=args.out,
         out_csv_path=args.out_csv,
         summary_path=args.summary_out,
+        software_heritage_backend=args.software_heritage_backend,
     )
     print(f"Wrote {len(records)} feature rows to {args.out}")
     if args.out_csv:
@@ -354,6 +369,7 @@ def _cmd_build_monthly_feature_bundle(args: argparse.Namespace) -> int:
         out_path=args.out,
         out_csv_path=args.out_csv,
         summary_path=args.summary_out,
+        software_heritage_backend=args.software_heritage_backend,
     )
     print(f"Wrote {len(records)} monthly feature rows to {args.out}")
     print(f"Wrote monthly feature CSV to {args.out_csv}")
@@ -382,7 +398,10 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
     advisories_dir = data_raw / "advisories"
     github_dir = data_raw / "github"
     health_dir = data_raw / "healthscore"
-    swh_dir = data_raw / "software_heritage"
+    swh_backend = args.software_heritage_backend
+    swh_dir = data_raw / (
+        "software_heritage_athena" if swh_backend == "athena" else "software_heritage_api"
+    )
 
     plugins_dir.mkdir(parents=True, exist_ok=True)
     advisories_dir.mkdir(parents=True, exist_ok=True)
@@ -496,19 +515,32 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
                     )
                     gh_written += 1
 
-            swh_index_path = swh_dir / f"{plugin_id}.swh_index.json"
+            if swh_backend == "athena":
+                swh_index_path = swh_dir / f"{plugin_id}.swh_athena_index.json"
+            else:
+                swh_index_path = swh_dir / f"{plugin_id}.swh_index.json"
+
             if do_software_heritage:
                 if _nonempty(swh_index_path):
                     swh_skipped += 1
                 else:
                     if not args.real:
                         raise SystemExit("ERROR: enrich software-heritage requires --real")
-                    collect_software_heritage_real(
+                    collect_software_heritage(
                         plugin_id=plugin_id,
                         data_dir=str(data_raw),
                         out_dir=str(swh_dir),
+                        backend=swh_backend,
                         timeout_s=float(args.software_heritage_timeout_s),
                         overwrite=False,
+                        database=args.software_heritage_athena_database,
+                        output_location=args.software_heritage_athena_output_location,
+                        max_visits=int(args.software_heritage_athena_max_visits),
+                        directory_batch_size=int(
+                            args.software_heritage_athena_directory_batch_size
+                        ),
+                        max_directories=int(args.software_heritage_athena_max_directories),
+                        verbose=not bool(args.software_heritage_quiet),
                     )
                     swh_written += 1
 
@@ -824,19 +856,55 @@ def build_parser() -> argparse.ArgumentParser:
         help="Raw dataset root (reads plugins/<id>.snapshot.json)",
     )
     software_heritage.add_argument(
+        "--backend",
+        choices=["athena", "api"],
+        default="athena",
+        help="Software Heritage backend to use",
+    )
+    software_heritage.add_argument(
         "--out-dir",
-        default="data/raw/software_heritage",
-        help="Output directory for Software Heritage JSON files",
+        default=None,
+        help="Output directory (defaults by backend)",
     )
     software_heritage.add_argument(
         "--timeout-s",
         default=20.0,
-        help="Network timeout per request",
+        help="Network timeout per request (API backend)",
+    )
+    software_heritage.add_argument(
+        "--database",
+        default="swh_jenkins",
+        help="Athena database (Athena backend)",
+    )
+    software_heritage.add_argument(
+        "--output-location",
+        default=None,
+        help="Athena staging S3 path (Athena backend)",
+    )
+    software_heritage.add_argument(
+        "--max-visits",
+        default=1,
+        help="Max visits to retrieve (Athena backend)",
+    )
+    software_heritage.add_argument(
+        "--directory-batch-size",
+        default=20,
+        help="Directory batch size (Athena backend)",
+    )
+    software_heritage.add_argument(
+        "--max-directories",
+        default=100,
+        help="Max directories per snapshot (Athena backend)",
+    )
+    software_heritage.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Reduce Athena logging",
     )
     software_heritage.add_argument(
         "--overwrite",
         action="store_true",
-        help="Overwrite existing Software Heritage JSON files",
+        help="Overwrite existing Software Heritage files",
     )
     software_heritage.set_defaults(func=_cmd_collect_software_heritage)
 
@@ -876,6 +944,42 @@ def build_parser() -> argparse.ArgumentParser:
         "--software-heritage-timeout-s",
         default=20.0,
         help="Software Heritage timeout per request",
+    )
+    enrich.add_argument(
+        "--software-heritage-backend",
+        choices=["athena", "api"],
+        default="athena",
+        help="Software Heritage backend to use during enrich",
+    )
+    enrich.add_argument(
+        "--software-heritage-athena-database",
+        default="swh_jenkins",
+        help="Athena database for software heritage enrich",
+    )
+    enrich.add_argument(
+        "--software-heritage-athena-output-location",
+        default=None,
+        help="Athena staging S3 path for software heritage enrich",
+    )
+    enrich.add_argument(
+        "--software-heritage-athena-max-visits",
+        default=1,
+        help="Athena max visits per plugin",
+    )
+    enrich.add_argument(
+        "--software-heritage-athena-directory-batch-size",
+        default=20,
+        help="Athena directory batch size",
+    )
+    enrich.add_argument(
+        "--software-heritage-athena-max-directories",
+        default=100,
+        help="Athena max directories per snapshot",
+    )
+    enrich.add_argument(
+        "--software-heritage-quiet",
+        action="store_true",
+        help="Reduce Athena logging during enrich",
     )
     enrich.set_defaults(func=_cmd_collect_enrich)
 
@@ -922,6 +1026,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--summary-out",
         default="data/processed/features/plugins.features.summary.json",
         help="Optional summary JSON path",
+    )
+    features.add_argument(
+        "--software-heritage-backend",
+        choices=["athena", "api"],
+        default="athena",
+        help="Software Heritage backend to read from",
     )
     features.set_defaults(func=_cmd_build_feature_bundle)
 
@@ -992,6 +1102,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--summary-out",
         default="data/processed/features/plugins.monthly.features.summary.json",
         help="Optional summary JSON path",
+    )
+    monthly_features.add_argument(
+        "--software-heritage-backend",
+        choices=["athena", "api"],
+        default="athena",
+        help="Software Heritage backend to read from",
     )
     monthly_features.set_defaults(func=_cmd_build_monthly_feature_bundle)
 

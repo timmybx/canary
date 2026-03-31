@@ -30,8 +30,10 @@ data/cache/**
 !data/raw/healthscore/
 !data/raw/healthscore/plugins/
 !data/raw/healthscore/plugins/.gitkeep
-!data/raw/software_heritage/
-!data/raw/software_heritage/.gitkeep
+!data/raw/software_heritage_api/
+!data/raw/software_heritage_api/.gitkeep
+!data/raw/software_heritage_athena/
+!data/raw/software_heritage_athena/.gitkeep
 !data/raw/gharchive/
 !data/raw/gharchive/normalized-events/
 !data/raw/gharchive/normalized-events/.gitkeep

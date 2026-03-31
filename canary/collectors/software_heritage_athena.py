@@ -23,7 +23,7 @@ DEFAULT_DATABASE = os.getenv("ATHENA_DATABASE", "swh_jenkins")
 DEFAULT_POLL_INITIAL_SECONDS = 0.5
 DEFAULT_POLL_MAX_SECONDS = 5.0
 DEFAULT_POLL_BACKOFF_FACTOR = 1.5
-DEFAULT_OUT_DIR = Path("data/raw/software_heritage")
+DEFAULT_OUT_DIR = Path("data/raw/software_heritage_athena")
 DEFAULT_MAX_VISITS = 1
 DEFAULT_DIRECTORY_BATCH_SIZE = 20
 DEFAULT_MAX_DIRECTORIES = 100
@@ -534,6 +534,151 @@ def collect_software_heritage_athena_repos_parallel(
                 results[url] = exc
 
     return results
+
+
+def _nonempty(path: Path) -> bool:
+    try:
+        return path.exists() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _read_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_plugin_snapshot(plugin_id: str, *, data_dir: str) -> dict[str, Any]:
+    snap_path = Path(data_dir) / "plugins" / f"{plugin_id}.snapshot.json"
+    if not snap_path.exists():
+        raise FileNotFoundError(
+            f"Plugin snapshot not found: {snap_path}. "
+            f"Run: canary collect plugin --id {plugin_id} --real"
+        )
+    payload = _read_json(snap_path)
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Invalid snapshot JSON for plugin '{plugin_id}'")
+    return payload
+
+
+def _scm_to_url(val: object) -> str | None:
+    if val is None:
+        return None
+    if isinstance(val, str):
+        v = val.strip()
+        return v or None
+    if isinstance(val, dict):
+        link = val.get("link") or val.get("url")
+        if isinstance(link, str):
+            v = link.strip()
+            return v or None
+    return None
+
+
+def _infer_repo_url(snapshot: dict[str, Any]) -> str | None:
+    url = _scm_to_url(snapshot.get("repo_url"))
+    if url:
+        return url
+
+    scm = snapshot.get("scm_url")
+    url = _scm_to_url(scm)
+    if url:
+        return url
+
+    plugin_api = snapshot.get("plugin_api")
+    if isinstance(plugin_api, dict):
+        url = _scm_to_url(plugin_api.get("scm"))
+        if url:
+            return url
+
+    return None
+
+
+def _safe_slug(plugin_id: str) -> str:
+    return plugin_id.strip().replace("/", "_")
+
+
+def collect_software_heritage_athena_real(
+    *,
+    plugin_id: str,
+    data_dir: str = "data/raw",
+    out_dir: str | Path = "data/raw/software_heritage_athena",
+    overwrite: bool = False,
+    database: str = DEFAULT_DATABASE,
+    output_location: str | None = None,
+    max_visits: int = DEFAULT_MAX_VISITS,
+    directory_batch_size: int = DEFAULT_DIRECTORY_BATCH_SIZE,
+    max_directories: int = DEFAULT_MAX_DIRECTORIES,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    snapshot = _load_plugin_snapshot(plugin_id, data_dir=data_dir)
+    repo_url = _infer_repo_url(snapshot)
+    if not repo_url:
+        raise RuntimeError(
+            f"No repo_url/scm_url found for plugin '{plugin_id}' in its snapshot. "
+            "Collect the plugin snapshot first or curate repo_url in the snapshot."
+        )
+
+    out_base = Path(out_dir)
+    out_base.mkdir(parents=True, exist_ok=True)
+    slug = _safe_slug(plugin_id)
+
+    visits_path = out_base / f"{slug}.swh_athena_visits.jsonl"
+    index_path = out_base / f"{slug}.swh_athena_index.json"
+
+    if (not overwrite) and _nonempty(index_path) and _nonempty(visits_path):
+        return {
+            "plugin_id": plugin_id,
+            "repo_url": repo_url,
+            "backend": "athena",
+            "database": database,
+            "written": 0,
+            "skipped": 1,
+            "files": {
+                "index": str(index_path),
+                "visits": str(visits_path),
+            },
+        }
+
+    records = collect_software_heritage_athena_repo(
+        repo_url=repo_url,
+        database=database,
+        output_location=output_location,
+        max_visits=max_visits,
+        directory_batch_size=directory_batch_size,
+        max_directories=max_directories,
+        verbose=verbose,
+    )
+    write_jsonl(records, visits_path)
+
+    index_payload = {
+        "plugin_id": plugin_id,
+        "repo_url": repo_url,
+        "backend": "athena",
+        "database": database,
+        "collected_at": _utc_now_iso(),
+        "record_count": len(records),
+        "files": {
+            "visits": str(visits_path),
+        },
+    }
+    index_path.write_text(
+        json.dumps(index_payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    return {
+        "plugin_id": plugin_id,
+        "repo_url": repo_url,
+        "backend": "athena",
+        "database": database,
+        "written": 1,
+        "skipped": 0,
+        "files": {
+            "index": str(index_path),
+            "visits": str(visits_path),
+        },
+        "record_count": len(records),
+    }
 
 
 def main() -> int:

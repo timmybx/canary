@@ -553,9 +553,102 @@ def _snapshot_branch_count(payload: Any) -> int:
     return 0
 
 
-def _load_software_heritage_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
+def _resolve_swh_backend_dir(
+    data_raw_dir: Path,
+    backend: str | None = None,
+) -> Path:
+    if backend == "athena":
+        return data_raw_dir / "software_heritage_athena"
+    if backend == "api":
+        return data_raw_dir / "software_heritage_api"
+
+    athena_dir = data_raw_dir / "software_heritage_athena"
+    if athena_dir.exists():
+        return athena_dir
+    return data_raw_dir / "software_heritage_api"
+
+
+def _load_software_heritage_features_athena(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
     plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
-    swh_dir = data_raw_dir / "software_heritage"
+    swh_dir = data_raw_dir / "software_heritage_athena"
+
+    index_path = swh_dir / f"{plugin_id}.swh_athena_index.json"
+    visits_path = swh_dir / f"{plugin_id}.swh_athena_visits.jsonl"
+
+    row: dict[str, Any] = {
+        "swh_present": False,
+        "swh_origin_found": False,
+        "swh_has_snapshot": False,
+        "swh_visit_count": 0,
+        "swh_first_visit_date": None,
+        "swh_latest_visit_date": None,
+        "swh_latest_visit_status": None,
+        "swh_latest_visit_type": None,
+        "swh_archive_age_days": None,
+        "swh_visits_last_365d": 0,
+        "swh_snapshot_branch_count": 0,
+        "swh_has_readme": False,
+        "swh_has_dot_github": False,
+        "swh_has_jenkinsfile": False,
+        "swh_has_travis_yml": False,
+        "swh_backend": "athena",
+    }
+
+    if not index_path.exists():
+        return row
+
+    row["swh_present"] = True
+    index_payload = _read_json(index_path) if index_path.exists() else {}
+    visits = _read_jsonl(visits_path) if visits_path.exists() else []
+
+    row["swh_origin_found"] = bool(index_payload.get("record_count", 0) > 0)
+    row["swh_has_snapshot"] = bool(visits)
+
+    visit_dates: list[str] = []
+    for visit in visits:
+        parsed = _parse_iso_date_prefix(visit.get("visit_date"))
+        if parsed:
+            visit_dates.append(parsed)
+
+    visit_dates = sorted(visit_dates)
+    row["swh_visit_count"] = len(visits)
+    row["swh_first_visit_date"] = visit_dates[0] if visit_dates else None
+    row["swh_latest_visit_date"] = visit_dates[-1] if visit_dates else None
+    row["swh_archive_age_days"] = _days_between_iso_dates(
+        row["swh_first_visit_date"], row["swh_latest_visit_date"]
+    )
+
+    if visit_dates:
+        latest = datetime.fromisoformat(visit_dates[-1])
+        trailing_start = latest.date().toordinal() - 365
+        row["swh_visits_last_365d"] = sum(
+            1 for d in visit_dates if datetime.fromisoformat(d).date().toordinal() >= trailing_start
+        )
+
+    if visits:
+        latest_visit = visits[0]
+        row["swh_has_readme"] = bool(latest_visit.get("has_readme"))
+        row["swh_has_dot_github"] = bool(latest_visit.get("has_dot_github"))
+        row["swh_has_jenkinsfile"] = bool(latest_visit.get("has_jenkinsfile"))
+        row["swh_has_travis_yml"] = bool(latest_visit.get("has_travis_yml"))
+
+    return row
+
+
+def _load_software_heritage_features(
+    plugin_id: str,
+    data_raw_dir: Path,
+    backend: str | None = None,
+) -> dict[str, Any]:
+    resolved = _resolve_swh_backend_dir(data_raw_dir, backend=backend)
+    if resolved.name == "software_heritage_athena":
+        return _load_software_heritage_features_athena(plugin_id, data_raw_dir)
+    return _load_software_heritage_features_api(plugin_id, data_raw_dir)
+
+
+def _load_software_heritage_features_api(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
+    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    swh_dir = data_raw_dir / "software_heritage_api"
 
     index_path = swh_dir / f"{plugin_id}.swh_index.json"
     origin_path = swh_dir / f"{plugin_id}.swh_origin.json"
@@ -674,6 +767,7 @@ def build_feature_bundle(
     out_path: str | Path = "data/processed/features/plugins.features.jsonl",
     out_csv_path: str | Path | None = "data/processed/features/plugins.features.csv",
     summary_path: str | Path | None = "data/processed/features/plugins.features.summary.json",
+    software_heritage_backend: str | None = "athena",
 ) -> list[dict[str, Any]]:
     """Build a unified per-plugin feature bundle from collected CANARY artifacts.
 
@@ -706,7 +800,13 @@ def build_feature_bundle(
         row.update(_load_snapshot_features(plugin_id, data_raw_dir))
         row.update(_load_advisory_features(plugin_id, data_raw_dir))
         row.update(_load_healthscore_features(plugin_id, data_raw_dir))
-        row.update(_load_software_heritage_features(plugin_id, data_raw_dir))
+        row.update(
+            _load_software_heritage_features(
+                plugin_id,
+                data_raw_dir,
+                software_heritage_backend,
+            )
+        )
         row.update(_load_github_features(plugin_id, data_raw_dir))
         row.update(_load_gharchive_features(plugin_id, data_raw_dir))
         rows.append(row)
