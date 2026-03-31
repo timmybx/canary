@@ -435,6 +435,11 @@ def main() -> int:
         action="store_true",
         help="Print SQL without executing anything.",
     )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip confirmation prompts.",
+    )
     args = parser.parse_args()
 
     if not args.output_location:
@@ -497,7 +502,7 @@ def main() -> int:
         print(f"  destination: {loc(meta['subdir'])}")
         print(f"{'=' * 70}")
 
-        if meta["warn"]:
+        if meta["warn"] and not args.yes:
             print(f"\n{meta['warn']}")
             confirm = input("\nProceed? [y/N] ").strip().lower()
             if confirm != "y":

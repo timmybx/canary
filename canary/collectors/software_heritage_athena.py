@@ -220,12 +220,11 @@ def _repo_visits_query(repo_url: str, *, max_visits: int) -> str:
 SELECT
     origin AS repo_url,
     visit,
-    date AS visit_date,
+    visit_date,
     snapshot_id
-FROM origin_visit_status
+FROM jenkins_visits
 WHERE origin = '{repo}'
-  AND snapshot_id IS NOT NULL
-ORDER BY date DESC
+ORDER BY visit_date DESC
 LIMIT {max(1, int(max_visits))}
 """.strip()
 
@@ -234,11 +233,10 @@ def _snapshot_directories_query(snapshot_id: str, *, max_directories: int) -> st
     snap = _sql_escape(snapshot_id)
     return f"""
 SELECT DISTINCT r.directory
-FROM snapshot_branch sb
-JOIN revision r
+FROM jenkins_snapshot_branch sb
+JOIN jenkins_revision r
   ON sb.target = r.id
 WHERE sb.snapshot_id = '{snap}'
-  AND sb.target_type = 'revision'
   AND r.directory IS NOT NULL
 LIMIT {max(1, int(max_directories))}
 """.strip()
@@ -249,9 +247,9 @@ def _directory_entries_query(directory_ids: list[str]) -> str:
     return f"""
 SELECT
     directory_id,
-    from_utf8(name, '?') AS entry_name,
+    LOWER(entry_name) AS entry_name,
     type
-FROM directory_entry
+FROM jenkins_directory_entry
 WHERE directory_id IN ({ids_sql})
 """.strip()
 
@@ -584,7 +582,7 @@ def main() -> int:
         type=int,
         default=DEFAULT_DIRECTORY_BATCH_SIZE,
         help=(
-            "How many directory IDs to include in each directory_entry batch "
+            "How many directory IDs to include in each jenkins_directory_entry batch "
             f"query (default: {DEFAULT_DIRECTORY_BATCH_SIZE})."
         ),
     )
