@@ -193,6 +193,18 @@ def test_collect_plugin_snapshot_real_with_github_signals(monkeypatch):
         "canary.collectors.github_repo.fetch_github_workflows_dir",
         lambda *a, **kw: [{"name": "ci.yml"}],
     )
+    monkeypatch.setattr(
+        "canary.collectors.github_repo.fetch_github_codeowners",
+        lambda *a, **kw: {"name": "CODEOWNERS"},
+    )
+    monkeypatch.setattr(
+        "canary.collectors.github_repo.fetch_github_security_policy",
+        lambda *a, **kw: {"name": "SECURITY.md"},
+    )
+    monkeypatch.setattr(
+        "canary.collectors.github_repo.fetch_github_dependabot_config",
+        lambda *a, **kw: {"name": "dependabot.yml"},
+    )
 
     snap = collect_plugin_snapshot(
         plugin_id="cucumber-reports",

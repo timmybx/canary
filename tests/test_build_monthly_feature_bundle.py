@@ -12,7 +12,7 @@ def test_build_monthly_feature_bundle_swh_to_date_is_leakage_safe(tmp_path: Path
     plugins_dir = data_raw / "plugins"
     github_dir = data_raw / "github"
     health_dir = data_raw / "healthscore" / "plugins"
-    swh_dir = data_raw / "software_heritage"
+    swh_dir = data_raw / "software_heritage_api"
 
     for p in [registry_dir, plugins_dir, github_dir, health_dir, swh_dir]:
         p.mkdir(parents=True, exist_ok=True)
@@ -68,6 +68,7 @@ def test_build_monthly_feature_bundle_swh_to_date_is_leakage_safe(tmp_path: Path
         out_path=tmp_path / "out.jsonl",
         out_csv_path=None,
         summary_path=None,
+        software_heritage_backend="api",
     )
 
     april = next(r for r in rows if r["month"] == "2025-04")
