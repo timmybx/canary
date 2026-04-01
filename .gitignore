@@ -11,6 +11,7 @@ dist/
 .DS_Store
 .env
 compose.override.yaml
+.local
 
 # --- Generated data outputs (ignore by default) ---
 data/archive/**
