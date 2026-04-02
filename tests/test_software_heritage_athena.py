@@ -127,6 +127,19 @@ def test_extract_feature_flags_all_false_on_empty():
         "has_dot_github": False,
         "has_jenkinsfile": False,
         "has_travis_yml": False,
+        "has_security_md": False,
+        "has_changelog": False,
+        "has_contributing_md": False,
+        "has_dockerfile": False,
+        "has_pom_xml": False,
+        "has_build_gradle": False,
+        "has_mvn_wrapper": False,
+        "has_tests_directory": False,
+        "has_github_actions": False,
+        "has_dependabot": False,
+        "has_sonar_config": False,
+        "has_snyk_config": False,
+        "top_level_entry_count": 0,
     }
 
 
@@ -138,7 +151,10 @@ def test_extract_feature_flags_multiple_files():
         {"entry_name": ".travis.yml"},
     ]
     flags = _extract_feature_flags(rows)
-    assert all(flags.values())
+    assert flags["has_readme"] is True
+    assert flags["has_dot_github"] is True
+    assert flags["has_jenkinsfile"] is True
+    assert flags["has_travis_yml"] is True
 
 
 # ---------------------------------------------------------------------------
