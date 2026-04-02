@@ -26,6 +26,7 @@ SELECT
   TIMESTAMP(JSON_EXTRACT_SCALAR(payload, '$.pull_request.closed_at')) AS pr_closed_ts,
   TIMESTAMP(JSON_EXTRACT_SCALAR(payload, '$.issue.created_at')) AS issue_created_ts,
   TIMESTAMP(JSON_EXTRACT_SCALAR(payload, '$.issue.closed_at')) AS issue_closed_ts,
+  JSON_EXTRACT_SCALAR(payload, '$.ref_type') AS ref_type,
   LOWER(
     CONCAT(
       IFNULL(JSON_EXTRACT_SCALAR(payload, '$.pull_request.title'), ''),
@@ -44,7 +45,10 @@ WHERE repo.name IN UNNEST(@repo_names)
     'PullRequestEvent',
     'PullRequestReviewEvent',
     'IssuesEvent',
-    'ReleaseEvent'
+    'ReleaseEvent',
+    'WatchEvent',
+    'ForkEvent',
+    'CreateEvent'
   )
 """
 
@@ -247,6 +251,7 @@ def _build_normalized_event_row(
         "pr_closed_ts": _normalize_timestamp_value(raw_row.get("pr_closed_ts")),
         "issue_created_ts": _normalize_timestamp_value(raw_row.get("issue_created_ts")),
         "issue_closed_ts": _normalize_timestamp_value(raw_row.get("issue_closed_ts")),
+        "ref_type": raw_row.get("ref_type"),
         "text_blob": text_blob,
     }
 

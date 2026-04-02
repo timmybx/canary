@@ -16,6 +16,123 @@ from canary.build.features_bundle import (
 )
 from canary.plugin_aliases import canonicalize_plugin_id
 
+# ---------------------------------------------------------------------------
+# GH Archive keyword sets for text_blob analysis
+# ---------------------------------------------------------------------------
+
+_SECURITY_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "cve",
+        "vulnerability",
+        "vulnerable",
+        "vuln",
+        "exploit",
+        "exploitable",
+        "security fix",
+        "security patch",
+        "security update",
+        "security advisory",
+        "rce",
+        "remote code execution",
+        "xss",
+        "cross-site",
+        "injection",
+        "sql injection",
+        "csrf",
+        "ssrf",
+        "xxe",
+        "deserialization",
+        "authentication bypass",
+        "auth bypass",
+        "privilege escalation",
+        "path traversal",
+        "directory traversal",
+        "open redirect",
+        "information disclosure",
+        "data leak",
+        "sanitize",
+        "sanitise",
+        "arbitrary code",
+        "arbitrary file",
+        "buffer overflow",
+    }
+)
+
+_HOTFIX_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "hotfix",
+        "hot fix",
+        "hot-fix",
+        "urgent fix",
+        "critical fix",
+        "emergency fix",
+        "emergency patch",
+        "emergency release",
+        "critical patch",
+        "critical update",
+        "critical bug",
+    }
+)
+
+_DEPENDENCY_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "bump ",
+        "bumps ",
+        "update dependency",
+        "upgrade dependency",
+        "dependabot",
+        "renovate",
+        "greenkeeper",
+        "snyk",
+    }
+)
+
+_BOT_LOGINS: frozenset[str] = frozenset(
+    {
+        "dependabot",
+        "dependabot-preview",
+        "renovate-bot",
+        "greenkeeper",
+        "snyk-bot",
+        "github-actions",
+        "codecov-io",
+        "coveralls",
+        "sonarcloud",
+        "mergify",
+        "semantic-release-bot",
+    }
+)
+
+
+def _is_bot_actor(login: str) -> bool:
+    """Return True if the actor login looks like a bot."""
+    if not login:
+        return False
+    low = login.lower()
+    if low.endswith("[bot]"):
+        return True
+    return low in _BOT_LOGINS
+
+
+def _text_blob_matches(text: str | None, keywords: frozenset[str]) -> bool:
+    """Return True if any keyword appears in the lowercased text blob."""
+    if not text:
+        return False
+    return any(kw in text for kw in keywords)
+
+
+def _percentile(values: list[float], p: float) -> float | None:
+    """Return the p-th percentile (0-100) of a sorted or unsorted list."""
+    if not values:
+        return None
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+    idx = (p / 100) * (n - 1)
+    lo = int(idx)
+    hi = min(lo + 1, n - 1)
+    frac = idx - lo
+    return sorted_vals[lo] * (1 - frac) + sorted_vals[hi] * frac
+
 
 def _parse_month(month_str: str) -> date:
     try:
@@ -74,6 +191,7 @@ GHARCHIVE_MONTHLY_KEY_MAP = {
 GHARCHIVE_ZERO_DEFAULTS: dict[str, Any] = {
     "gharchive_present": False,
     "gharchive_sample_percent": None,
+    # --- core event counts ---
     "gharchive_events_total": 0,
     "gharchive_push_events": 0,
     "gharchive_pull_request_events": 0,
@@ -86,6 +204,25 @@ GHARCHIVE_ZERO_DEFAULTS: dict[str, Any] = {
     "gharchive_unique_actors": 0,
     "gharchive_days_active": 0,
     "gharchive_source_window_count": 0,
+    # --- new event type counts ---
+    "gharchive_watch_events": 0,  # stars received this month
+    "gharchive_fork_events": 0,  # forks created this month
+    "gharchive_branch_create_events": 0,  # new branches created
+    "gharchive_tag_create_events": 0,  # new tags created (release discipline)
+    # --- actor quality signals ---
+    "gharchive_bot_events": 0,  # events from known bot accounts
+    "gharchive_human_events": 0,  # events from human accounts
+    "gharchive_unique_human_actors": 0,
+    "gharchive_owner_push_fraction": None,  # fraction of pushes from top contributor
+    # --- text_blob keyword signals ---
+    "gharchive_security_keyword_events": 0,  # PRs/issues mentioning CVE, vuln, exploit etc.
+    "gharchive_hotfix_keyword_events": 0,  # PRs/issues mentioning hotfix, urgent fix etc.
+    "gharchive_dependency_bump_events": 0,  # PRs/issues from dependabot or bump commits
+    # --- time-to-merge / time-to-close (median hours) ---
+    "gharchive_pr_merge_time_p50_hours": None,
+    "gharchive_pr_merge_time_p90_hours": None,
+    "gharchive_issue_close_time_p50_hours": None,
+    "gharchive_issue_close_time_p90_hours": None,
 }
 ADVISORY_ZERO_DEFAULTS: dict[str, Any] = {
     "advisories_present_any": False,
@@ -238,14 +375,33 @@ def _parse_iso_date(value: Any) -> date | None:
         return None
 
 
+def _parse_iso_timestamp(value: Any) -> datetime | None:
+    """Parse an ISO 8601 timestamp string into a timezone-aware datetime."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
 def _load_gharchive_monthly_features(data_raw_dir: Path) -> dict[tuple[str, str], dict[str, Any]]:
     gharchive_dir = data_raw_dir / "gharchive" / "normalized-events"
     out: dict[tuple[str, str], dict[str, Any]] = {}
     source_windows: dict[tuple[str, str], set[tuple[str | None, str | None]]] = defaultdict(set)
     active_days: dict[tuple[str, str], set[str]] = defaultdict(set)
     active_actors: dict[tuple[str, str], set[str]] = defaultdict(set)
+    human_actors: dict[tuple[str, str], set[str]] = defaultdict(set)
+    # For owner concentration: track push counts per actor per (plugin, month)
+    push_counts: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    # For time-to-merge/close: accumulate durations in hours
+    pr_merge_hours: dict[tuple[str, str], list[float]] = defaultdict(list)
+    issue_close_hours: dict[tuple[str, str], list[float]] = defaultdict(list)
+
     if not gharchive_dir.exists():
         return out
+
     for path in sorted(gharchive_dir.glob("*.gharchive.events.jsonl")):
         rows = _read_jsonl(path)
         for row in rows:
@@ -266,26 +422,73 @@ def _load_gharchive_monthly_features(data_raw_dir: Path) -> dict[tuple[str, str]
 
             event_type = str(row.get("event_type") or "").strip()
             action = str(row.get("action") or "").strip().lower()
+            actor_login = str(row.get("actor_login") or "").strip()
+            text_blob = row.get("text_blob")
+            ref_type = str(row.get("ref_type") or "").strip().lower()
+
+            # --- actor classification ---
+            is_bot = _is_bot_actor(actor_login)
+            if is_bot:
+                bucket["gharchive_bot_events"] += 1
+            else:
+                bucket["gharchive_human_events"] += 1
+
+            # --- core event type counting ---
             if event_type == "PushEvent":
                 bucket["gharchive_push_events"] += 1
+                if actor_login and not is_bot:
+                    push_counts[key][actor_login] += 1
             elif event_type == "PullRequestEvent":
                 bucket["gharchive_pull_request_events"] += 1
                 if action == "closed":
                     bucket["gharchive_pull_request_closed_events"] += 1
                 if row.get("pr_merged") is True:
                     bucket["gharchive_pull_request_merged_events"] += 1
+                    # time-to-merge
+                    pr_created = _parse_iso_timestamp(row.get("pr_created_ts"))
+                    pr_closed = _parse_iso_timestamp(row.get("pr_closed_ts"))
+                    if pr_created and pr_closed and pr_closed > pr_created:
+                        hours = (pr_closed - pr_created).total_seconds() / 3600
+                        pr_merge_hours[key].append(hours)
             elif event_type == "PullRequestReviewEvent":
                 bucket["gharchive_pull_request_review_events"] += 1
             elif event_type == "IssuesEvent":
                 bucket["gharchive_issues_events"] += 1
                 if action == "closed":
                     bucket["gharchive_issues_closed_events"] += 1
+                    # time-to-close
+                    iss_created = _parse_iso_timestamp(row.get("issue_created_ts"))
+                    iss_closed = _parse_iso_timestamp(row.get("issue_closed_ts"))
+                    if iss_created and iss_closed and iss_closed > iss_created:
+                        hours = (iss_closed - iss_created).total_seconds() / 3600
+                        issue_close_hours[key].append(hours)
             elif event_type == "ReleaseEvent":
                 bucket["gharchive_release_events"] += 1
+            elif event_type == "WatchEvent":
+                bucket["gharchive_watch_events"] += 1
+            elif event_type == "ForkEvent":
+                bucket["gharchive_fork_events"] += 1
+            elif event_type == "CreateEvent":
+                if ref_type == "branch":
+                    bucket["gharchive_branch_create_events"] += 1
+                elif ref_type == "tag":
+                    bucket["gharchive_tag_create_events"] += 1
 
-            actor_login = str(row.get("actor_login") or "").strip()
+            # --- text_blob keyword signals ---
+            if _text_blob_matches(text_blob, _SECURITY_KEYWORDS):
+                bucket["gharchive_security_keyword_events"] += 1
+            if _text_blob_matches(text_blob, _HOTFIX_KEYWORDS):
+                bucket["gharchive_hotfix_keyword_events"] += 1
+            if _text_blob_matches(text_blob, _DEPENDENCY_KEYWORDS) or (
+                actor_login and _is_bot_actor(actor_login) and event_type == "PullRequestEvent"
+            ):
+                bucket["gharchive_dependency_bump_events"] += 1
+
+            # --- actor / day tracking ---
             if actor_login:
                 active_actors[key].add(actor_login)
+                if not is_bot:
+                    human_actors[key].add(actor_login)
             event_date = str(row.get("event_date") or "").strip()
             if event_date:
                 active_days[key].add(event_date)
@@ -295,10 +498,32 @@ def _load_gharchive_monthly_features(data_raw_dir: Path) -> dict[tuple[str, str]
                     str(row.get("source_window_end_yyyymmdd") or "").strip() or None,
                 )
             )
+
     for key, bucket in out.items():
         bucket["gharchive_unique_actors"] = len(active_actors.get(key, set()))
         bucket["gharchive_days_active"] = len(active_days.get(key, set()))
         bucket["gharchive_source_window_count"] = len(source_windows.get(key, set()))
+        bucket["gharchive_unique_human_actors"] = len(human_actors.get(key, set()))
+
+        # owner concentration: fraction of pushes from single most active human
+        pc = push_counts.get(key, {})
+        if pc:
+            total_pushes = sum(pc.values())
+            top_pushes = max(pc.values())
+            bucket["gharchive_owner_push_fraction"] = (
+                top_pushes / total_pushes if total_pushes > 0 else None
+            )
+
+        # time-to-merge percentiles
+        pm = pr_merge_hours.get(key, [])
+        bucket["gharchive_pr_merge_time_p50_hours"] = _percentile(pm, 50)
+        bucket["gharchive_pr_merge_time_p90_hours"] = _percentile(pm, 90)
+
+        # time-to-close percentiles
+        ic = issue_close_hours.get(key, [])
+        bucket["gharchive_issue_close_time_p50_hours"] = _percentile(ic, 50)
+        bucket["gharchive_issue_close_time_p90_hours"] = _percentile(ic, 90)
+
     return out
 
 
@@ -523,6 +748,17 @@ def _add_rolling_gharchive_features(rows: list[dict[str, Any]]) -> list[dict[str
         "gharchive_release_events",
         "gharchive_unique_actors",
         "gharchive_days_active",
+        # new signals
+        "gharchive_watch_events",
+        "gharchive_fork_events",
+        "gharchive_tag_create_events",
+        "gharchive_branch_create_events",
+        "gharchive_bot_events",
+        "gharchive_human_events",
+        "gharchive_unique_human_actors",
+        "gharchive_security_keyword_events",
+        "gharchive_hotfix_keyword_events",
+        "gharchive_dependency_bump_events",
     ]
 
     for i, row in enumerate(rows):
@@ -680,6 +916,48 @@ def _add_rolling_gharchive_features(rows: list[dict[str, Any]]) -> list[dict[str
                 row["gharchive_activity_burstiness_6m"] = None
         else:
             row["gharchive_activity_burstiness_6m"] = None
+
+        # --- new derived features ---
+
+        # staleness for new event types
+        row["gharchive_months_since_release_tag"] = _months_since_last_nonzero(
+            rows, i, "gharchive_tag_create_events"
+        )
+        row["gharchive_months_since_security_keyword"] = _months_since_last_nonzero(
+            rows, i, "gharchive_security_keyword_events"
+        )
+
+        # bot ratio: fraction of events from bots (high = potentially abandoned)
+        total_events = _num(row, "gharchive_events_total_trailing_3m")
+        bot_events_3m = _num(row, "gharchive_bot_events_trailing_3m")
+        row["gharchive_bot_event_ratio_3m"] = _clip(
+            _safe_div_smooth(bot_events_3m, total_events, min_denom=5.0),
+            low=0.0,
+            high=1.0,
+        )
+
+        # security keyword rate: security events per total PR+issue events (leading indicator)
+        pr_issue_3m = _num(row, "gharchive_pull_request_events_trailing_3m") + _num(
+            row, "gharchive_issues_events_trailing_3m"
+        )
+        sec_3m = _num(row, "gharchive_security_keyword_events_trailing_3m")
+        row["gharchive_security_keyword_rate_3m"] = _clip(
+            _safe_div_smooth(sec_3m, pr_issue_3m, min_denom=5.0),
+            low=0.0,
+            high=1.0,
+        )
+
+        # cumulative star / fork proxies (trailing sums as historical approximations)
+        row["gharchive_stars_trailing_6m"] = _num(row, "gharchive_watch_events_trailing_6m")
+        row["gharchive_forks_trailing_6m"] = _num(row, "gharchive_fork_events_trailing_6m")
+
+        # delta signals for new event types
+        row["gharchive_security_keyword_events_trailing_3m_delta_prev_3m"] = (
+            sec_3m - _previous_window_sum(rows, i, "gharchive_security_keyword_events", 3)
+        )
+        row["gharchive_watch_events_trailing_3m_delta_prev_3m"] = _num(
+            row, "gharchive_watch_events_trailing_3m"
+        ) - _previous_window_sum(rows, i, "gharchive_watch_events", 3)
 
     return rows
 
