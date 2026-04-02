@@ -241,6 +241,38 @@ SWH_ZERO_DEFAULTS: dict[str, Any] = {
     "swh_visits_last_365d": 0,
     "swh_latest_visit_date_to_date": None,
     "swh_archive_age_days_to_date": None,
+    # structural / governance flags
+    "swh_has_readme": False,
+    "swh_has_dot_github": False,
+    "swh_has_jenkinsfile": False,
+    "swh_has_travis_yml": False,
+    "swh_has_security_md": False,
+    "swh_has_changelog": False,
+    "swh_has_contributing_md": False,
+    "swh_has_dockerfile": False,
+    "swh_has_pom_xml": False,
+    "swh_has_build_gradle": False,
+    "swh_has_mvn_wrapper": False,
+    "swh_has_tests_directory": False,
+    "swh_has_github_actions": False,
+    "swh_has_dependabot": False,
+    "swh_has_sonar_config": False,
+    "swh_has_snyk_config": False,
+    "swh_top_level_entry_count": 0,
+    # revision-history signals
+    "swh_commit_count": 0,
+    "swh_days_since_last_commit": None,
+    "swh_author_committer_lag_p50_hours": None,
+    "swh_author_committer_lag_p90_hours": None,
+    "swh_timezone_diversity": 0,
+    "swh_weekend_commit_fraction": None,
+    "swh_security_fix_commit_count": 0,
+    "swh_merge_commit_fraction": None,
+    "swh_conventional_commit_fraction": None,
+    "swh_issue_reference_rate": None,
+    "swh_empty_message_rate": None,
+    "swh_author_committer_mismatch_rate": None,
+    "swh_late_night_commit_fraction": None,
 }
 
 
@@ -301,18 +333,56 @@ def _load_software_heritage_monthly_features(
         for m in months
     ]
 
+    athena_bool_keys = [
+        "has_readme",
+        "has_dot_github",
+        "has_jenkinsfile",
+        "has_travis_yml",
+        "has_security_md",
+        "has_changelog",
+        "has_contributing_md",
+        "has_dockerfile",
+        "has_pom_xml",
+        "has_build_gradle",
+        "has_mvn_wrapper",
+        "has_tests_directory",
+        "has_github_actions",
+        "has_dependabot",
+        "has_sonar_config",
+        "has_snyk_config",
+    ]
+    athena_int_keys = {
+        "top_level_entry_count": "swh_top_level_entry_count",
+        "commit_count": "swh_commit_count",
+        "timezone_diversity": "swh_timezone_diversity",
+        "security_fix_commit_count": "swh_security_fix_commit_count",
+    }
+    athena_float_keys = {
+        "days_since_last_commit": "swh_days_since_last_commit",
+        "author_committer_lag_p50_hours": "swh_author_committer_lag_p50_hours",
+        "author_committer_lag_p90_hours": "swh_author_committer_lag_p90_hours",
+        "weekend_commit_fraction": "swh_weekend_commit_fraction",
+        "merge_commit_fraction": "swh_merge_commit_fraction",
+        "conventional_commit_fraction": "swh_conventional_commit_fraction",
+        "issue_reference_rate": "swh_issue_reference_rate",
+        "empty_message_rate": "swh_empty_message_rate",
+        "author_committer_mismatch_rate": "swh_author_committer_mismatch_rate",
+        "late_night_commit_fraction": "swh_late_night_commit_fraction",
+    }
+
     for plugin_id in plugin_ids:
         raw = _load_swh_records(plugin_id, data_raw_dir, backend=backend)
         index_payload = raw["index"] if isinstance(raw["index"], dict) else {}
         visits_payload = raw["visits"]
         visits = _extract_swh_visits(visits_payload)
 
-        normalized_dates: list[date] = []
+        normalized_visits: list[dict[str, Any]] = []
         for visit in visits:
             dt = _parse_iso_date(visit.get("date") or visit.get("visit_date"))
             if dt is not None:
-                normalized_dates.append(dt)
-        normalized_dates.sort()
+                normalized_visits.append({"date": dt, "record": visit})
+        normalized_visits.sort(key=lambda x: x["date"])
+        normalized_dates = [item["date"] for item in normalized_visits]
 
         is_athena = (backend == "athena") or (index_payload.get("backend") == "athena")
         origin_found = (
@@ -328,20 +398,24 @@ def _load_software_heritage_monthly_features(
             window_start = month["window_start"]
             window_end = month["window_end"]
 
-            to_date = [d for d in normalized_dates if d <= window_end]
-            this_month = [d for d in normalized_dates if window_start <= d <= window_end]
+            to_date = [item for item in normalized_visits if item["date"] <= window_end]
+            this_month = [
+                item for item in normalized_visits if window_start <= item["date"] <= window_end
+            ]
             trailing = [
-                d for d in normalized_dates if (window_end - d).days <= 365 and d <= window_end
+                item["date"]
+                for item in normalized_visits
+                if (window_end - item["date"]).days <= 365 and item["date"] <= window_end
             ]
 
-            if not index_payload and not normalized_dates:
+            if not index_payload and not normalized_visits:
                 continue
 
-            first_date = to_date[0] if to_date else None
-            latest_date = to_date[-1] if to_date else None
+            first_date = to_date[0]["date"] if to_date else None
+            latest_date = to_date[-1]["date"] if to_date else None
 
-            out[(plugin_id, month["month"])] = {
-                "swh_present_any": bool(index_payload) or bool(normalized_dates),
+            row = {
+                "swh_present_any": bool(index_payload) or bool(normalized_visits),
                 "swh_origin_found": origin_found,
                 "swh_has_snapshot_to_date": bool(to_date) and snapshot_found,
                 "swh_visit_count_to_date": len(to_date),
@@ -352,6 +426,17 @@ def _load_software_heritage_monthly_features(
                     (latest_date - first_date).days if first_date and latest_date else None
                 ),
             }
+
+            if is_athena and to_date:
+                latest_visit = to_date[-1]["record"]
+                for key in athena_bool_keys:
+                    row[f"swh_{key}"] = bool(latest_visit.get(key))
+                for src_key, dst_key in athena_int_keys.items():
+                    row[dst_key] = int(latest_visit.get(src_key) or 0)
+                for src_key, dst_key in athena_float_keys.items():
+                    row[dst_key] = _safe_float(latest_visit.get(src_key))
+
+            out[(plugin_id, month["month"])] = row
 
     return out
 
