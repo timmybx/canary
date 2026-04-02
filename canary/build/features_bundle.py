@@ -591,6 +591,19 @@ def _load_software_heritage_features_athena(plugin_id: str, data_raw_dir: Path) 
         "swh_has_dot_github": False,
         "swh_has_jenkinsfile": False,
         "swh_has_travis_yml": False,
+        "swh_has_security_md": False,
+        "swh_has_changelog": False,
+        "swh_has_contributing_md": False,
+        "swh_has_dockerfile": False,
+        "swh_has_pom_xml": False,
+        "swh_has_build_gradle": False,
+        "swh_has_mvn_wrapper": False,
+        "swh_has_tests_directory": False,
+        "swh_has_github_actions": False,
+        "swh_has_dependabot": False,
+        "swh_has_sonar_config": False,
+        "swh_has_snyk_config": False,
+        "swh_top_level_entry_count": 0,
         "swh_backend": "athena",
     }
 
@@ -631,6 +644,19 @@ def _load_software_heritage_features_athena(plugin_id: str, data_raw_dir: Path) 
         row["swh_has_dot_github"] = bool(latest_visit.get("has_dot_github"))
         row["swh_has_jenkinsfile"] = bool(latest_visit.get("has_jenkinsfile"))
         row["swh_has_travis_yml"] = bool(latest_visit.get("has_travis_yml"))
+        row["swh_has_security_md"] = bool(latest_visit.get("has_security_md"))
+        row["swh_has_changelog"] = bool(latest_visit.get("has_changelog"))
+        row["swh_has_contributing_md"] = bool(latest_visit.get("has_contributing_md"))
+        row["swh_has_dockerfile"] = bool(latest_visit.get("has_dockerfile"))
+        row["swh_has_pom_xml"] = bool(latest_visit.get("has_pom_xml"))
+        row["swh_has_build_gradle"] = bool(latest_visit.get("has_build_gradle"))
+        row["swh_has_mvn_wrapper"] = bool(latest_visit.get("has_mvn_wrapper"))
+        row["swh_has_tests_directory"] = bool(latest_visit.get("has_tests_directory"))
+        row["swh_has_github_actions"] = bool(latest_visit.get("has_github_actions"))
+        row["swh_has_dependabot"] = bool(latest_visit.get("has_dependabot"))
+        row["swh_has_sonar_config"] = bool(latest_visit.get("has_sonar_config"))
+        row["swh_has_snyk_config"] = bool(latest_visit.get("has_snyk_config"))
+        row["swh_top_level_entry_count"] = int(latest_visit.get("top_level_entry_count") or 0)
 
     return row
 

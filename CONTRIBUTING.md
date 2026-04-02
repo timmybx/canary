@@ -40,7 +40,7 @@ docker compose run --rm canary ruff format .
 Security checks:
 ```bash
 docker compose run --rm canary bandit -r canary -q
-docker compose run --rm canary python -m canary.devtools.pip_audit_wrapper
+docker compose run --build --rm canary python -m canary.devtools.pip_audit_wrapper
 ```
 
 If `pip-audit` is blocked by a known advisory with no upstream fix yet, add the advisory ID

@@ -11,7 +11,7 @@ format:
 	docker compose run --rm canary ruff format .
 
 audit:
-	docker compose run --rm canary python -m canary.devtools.pip_audit_wrapper
+	docker compose run --build --rm canary python -m canary.devtools.pip_audit_wrapper
 
 ruff: lint format
 
@@ -24,10 +24,10 @@ pyright:
 	docker compose run --rm canary pyright
 
 reqs:
-	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip<26' && pip-compile --allow-unsafe --generate-hashes -o requirements-build.txt requirements-build.in"
-	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip<26' && pip-compile --generate-hashes -o requirements-ci.txt requirements-ci.in"
-	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip<26' && pip-compile --generate-hashes -o requirements.txt pyproject.toml"
-	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip<26' && pip-compile --extra=dev --generate-hashes -o requirements-dev.txt pyproject.toml"
+	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip>=26,<27' && pip-compile --allow-unsafe --generate-hashes -o requirements-build.txt requirements-build.in"
+	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip>=26,<27' && pip-compile --generate-hashes -o requirements-ci.txt requirements-ci.in"
+	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip>=26,<27' && pip-compile --generate-hashes -o requirements.txt pyproject.toml"
+	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip>=26,<27' && pip-compile --extra=dev --generate-hashes -o requirements-dev.txt pyproject.toml"
 
 all: ruff security pyright reqs test
 

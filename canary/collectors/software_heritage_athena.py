@@ -57,10 +57,25 @@ class SwhVisitFeatures:
     visit: int
     visit_date: str
     snapshot_id: str
+    # --- existing CI / governance flags ---
     has_readme: bool
     has_dot_github: bool
     has_jenkinsfile: bool
     has_travis_yml: bool
+    # --- new directory-structure signals (free: same query, more name checks) ---
+    has_security_md: bool  # explicit security policy
+    has_changelog: bool  # disciplined release tracking
+    has_contributing_md: bool  # contributor guidance
+    has_dockerfile: bool  # containerisation
+    has_pom_xml: bool  # Maven build (standard for Jenkins plugins)
+    has_build_gradle: bool  # Gradle build
+    has_mvn_wrapper: bool  # reproducible Maven wrapper (.mvn/)
+    has_tests_directory: bool  # src/test, tests/, or spec/ present
+    has_github_actions: bool  # .github/workflows directory (GitHub Actions)
+    has_dependabot: bool  # .github/dependabot.yml automated deps
+    has_sonar_config: bool  # sonar-project.properties
+    has_snyk_config: bool  # .snyk file
+    top_level_entry_count: int  # rough complexity proxy
 
 
 @dataclass(slots=True)
@@ -254,17 +269,49 @@ WHERE directory_id IN ({ids_sql})
 """.strip()
 
 
-def _extract_feature_flags(entry_rows: list[dict[str, str | None]]) -> dict[str, bool]:
+def _extract_feature_flags(entry_rows: list[dict[str, str | None]]) -> dict[str, Any]:
     names = {
         (row.get("entry_name") or "").strip().lower()
         for row in entry_rows
         if row.get("entry_name") is not None
     }
     return {
+        # existing flags
         "has_readme": any(name in {"readme", "readme.md", "readme.txt"} for name in names),
         "has_dot_github": ".github" in names,
         "has_jenkinsfile": "jenkinsfile" in names,
         "has_travis_yml": ".travis.yml" in names,
+        # new directory-structure signals
+        "has_security_md": any(
+            name in {"security.md", "security.txt", "security"} for name in names
+        ),
+        "has_changelog": any(
+            name
+            in {
+                "changelog",
+                "changelog.md",
+                "changelog.txt",
+                "changes",
+                "changes.md",
+                "history.md",
+            }
+            for name in names
+        ),
+        "has_contributing_md": any(
+            name in {"contributing", "contributing.md", "contributing.txt"} for name in names
+        ),
+        "has_dockerfile": any(name in {"dockerfile", "dockerfile.build"} for name in names),
+        "has_pom_xml": "pom.xml" in names,
+        "has_build_gradle": any(name in {"build.gradle", "build.gradle.kts"} for name in names),
+        "has_mvn_wrapper": ".mvn" in names,
+        "has_tests_directory": any(name in {"tests", "test", "spec", "src"} for name in names),
+        "has_github_actions": ("workflows" in names),  # inside .github; captured as top-level entry
+        "has_dependabot": "dependabot.yml" in names,
+        "has_sonar_config": any(
+            name in {"sonar-project.properties", ".sonarcloud.properties"} for name in names
+        ),
+        "has_snyk_config": ".snyk" in names,
+        "top_level_entry_count": len(names),
     }
 
 
@@ -361,6 +408,19 @@ def collect_software_heritage_athena_repo(
                     "has_dot_github": False,
                     "has_jenkinsfile": False,
                     "has_travis_yml": False,
+                    "has_security_md": False,
+                    "has_changelog": False,
+                    "has_contributing_md": False,
+                    "has_dockerfile": False,
+                    "has_pom_xml": False,
+                    "has_build_gradle": False,
+                    "has_mvn_wrapper": False,
+                    "has_tests_directory": False,
+                    "has_github_actions": False,
+                    "has_dependabot": False,
+                    "has_sonar_config": False,
+                    "has_snyk_config": False,
+                    "top_level_entry_count": 0,
                 }
             else:
                 entry_rows: list[dict[str, str | None]] = []
@@ -391,13 +451,12 @@ def collect_software_heritage_athena_repo(
                     total_scanned_bytes += entries_result.data_scanned_bytes or 0
                     entry_rows.extend(entries_result.rows)
 
-                    # Short-circuit: stop fetching batches once all 4 flags are True
-                    if _extract_feature_flags(entry_rows) == {
-                        "has_readme": True,
-                        "has_dot_github": True,
-                        "has_jenkinsfile": True,
-                        "has_travis_yml": True,
-                    }:
+                    # Short-circuit: stop fetching batches once all boolean flags are True
+                    _current_flags = _extract_feature_flags(entry_rows)
+                    _all_bool_flags = {
+                        k: v for k, v in _current_flags.items() if isinstance(v, bool)
+                    }
+                    if all(_all_bool_flags.values()):
                         _log(
                             f"All feature flags found after batch {batch_index}/{len(batches)}; "
                             "skipping remaining batches.",
@@ -412,7 +471,10 @@ def collect_software_heritage_athena_repo(
                         f"has_readme={feature_flags['has_readme']} "
                         f"has_dot_github={feature_flags['has_dot_github']} "
                         f"has_jenkinsfile={feature_flags['has_jenkinsfile']} "
-                        f"has_travis_yml={feature_flags['has_travis_yml']}"
+                        f"has_travis_yml={feature_flags['has_travis_yml']} "
+                        f"has_pom_xml={feature_flags['has_pom_xml']} "
+                        f"has_dockerfile={feature_flags['has_dockerfile']} "
+                        f"top_level_entry_count={feature_flags['top_level_entry_count']}"
                     ),
                     verbose=verbose,
                 )
@@ -430,6 +492,19 @@ def collect_software_heritage_athena_repo(
             has_dot_github=feature_flags["has_dot_github"],
             has_jenkinsfile=feature_flags["has_jenkinsfile"],
             has_travis_yml=feature_flags["has_travis_yml"],
+            has_security_md=feature_flags["has_security_md"],
+            has_changelog=feature_flags["has_changelog"],
+            has_contributing_md=feature_flags["has_contributing_md"],
+            has_dockerfile=feature_flags["has_dockerfile"],
+            has_pom_xml=feature_flags["has_pom_xml"],
+            has_build_gradle=feature_flags["has_build_gradle"],
+            has_mvn_wrapper=feature_flags["has_mvn_wrapper"],
+            has_tests_directory=feature_flags["has_tests_directory"],
+            has_github_actions=feature_flags["has_github_actions"],
+            has_dependabot=feature_flags["has_dependabot"],
+            has_sonar_config=feature_flags["has_sonar_config"],
+            has_snyk_config=feature_flags["has_snyk_config"],
+            top_level_entry_count=feature_flags["top_level_entry_count"],
         )
         results.append(asdict(item))
 

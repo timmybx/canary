@@ -12,6 +12,9 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+    dns:
+      - ${DOCKER_DNS_1:-1.1.1.1}
+      - ${DOCKER_DNS_2:-8.8.8.8}
     security_opt:
       - no-new-privileges:true
     tmpfs:
@@ -34,6 +37,9 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+    dns:
+      - ${DOCKER_DNS_1:-1.1.1.1}
+      - ${DOCKER_DNS_2:-8.8.8.8}
     security_opt:
       - no-new-privileges:true
     tmpfs:
