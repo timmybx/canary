@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.5] - 2026-04-02
+### Added
+- Software Heritage Athena backend support for collection and enrich flows, including Athena-specific raw data layout and collector wiring through the CLI/backend layer.
+- Expanded Software Heritage feature extraction for both feature bundles and monthly features, including additional repository-structure flags, revision-level activity signals, and the late-night commit fraction metric.
+- Additional GH Archive-derived behavioral features covering bot activity, keyword/security signals, and timing-oriented event summaries.
+- Data documentation for `data/raw/gharchive` and `data/raw/software_heritage_athena` to clarify the new raw artifact layouts.
+
+### Changed
+- Feature bundle assembly now prefers the configured Software Heritage backend and normalizes Athena visit inputs into the same modeling-friendly shape used by downstream build steps.
+- Software Heritage Athena collection was refined around Jenkins Athena tables, cached clients, batched directory inspection, timestamp normalization, and improved visit/snapshot feature derivation.
+- Local tooling and container workflows were updated for more reliable security and typing checks, including the pip-audit wrapper flow, explicit compose DNS settings, `/tmp` cache handling, and requirement regeneration aligned to `pip>=26,<27`.
+- Repository documentation was refreshed across README/CITATION-style materials to reflect the expanded data sources, metrics, and research references.
+
+### Fixed
+- Pyright/test breakages caused by newly added Software Heritage fields and backend refactors.
+- Dependabot/pip audit workflow issues, including cache permission problems and the vulnerable pre-26 pip pin in requirements regeneration.
+- Follow-up correctness issues in Software Heritage visit normalization, empty/default revision metrics, and bundled feature propagation for newly added SWH signals.
+
 ## [0.1.4] - 2026-03-20
 ### Added
 - GH Archive and BigQuery-backed collection workflow for plugin event history, including CLI support and data directory scaffolding for raw and normalized monthly event outputs.
