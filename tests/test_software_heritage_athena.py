@@ -230,11 +230,13 @@ def test_swh_visit_features_asdict():
         issue_reference_rate=None,
         empty_message_rate=None,
         author_committer_mismatch_rate=None,
+        late_night_commit_fraction=None,
     )
     d = asdict(feat)
     assert d["source"] == "software_heritage_athena"
     assert d["has_readme"] is True
     assert d["has_travis_yml"] is True
+    assert d["late_night_commit_fraction"] is None
 
 
 # ---------------------------------------------------------------------------
