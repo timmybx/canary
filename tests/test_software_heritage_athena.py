@@ -218,6 +218,18 @@ def test_swh_visit_features_asdict():
         has_sonar_config=False,
         has_snyk_config=False,
         top_level_entry_count=0,
+        commit_count=0,
+        days_since_last_commit=None,
+        author_committer_lag_p50_hours=None,
+        author_committer_lag_p90_hours=None,
+        timezone_diversity=0,
+        weekend_commit_fraction=None,
+        security_fix_commit_count=0,
+        merge_commit_fraction=None,
+        conventional_commit_fraction=None,
+        issue_reference_rate=None,
+        empty_message_rate=None,
+        author_committer_mismatch_rate=None,
     )
     d = asdict(feat)
     assert d["source"] == "software_heritage_athena"
