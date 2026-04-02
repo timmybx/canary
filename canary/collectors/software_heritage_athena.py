@@ -404,6 +404,7 @@ def _extract_revision_signals(
         "issue_reference_rate": None,
         "empty_message_rate": None,
         "author_committer_mismatch_rate": None,
+        "late_night_commit_fraction": None,
     }
 
     if not revision_rows:
