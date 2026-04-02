@@ -600,7 +600,7 @@ def _cmd_score(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="canary",
-        description="CANARY: Component Anomaly & Near-term Advisory Risk Yardstick",
+        description="CANARY: Component Analytics & Near-term Advisory Risk Yardstick",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 

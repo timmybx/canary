@@ -10,7 +10,7 @@
 [![zizmor](https://github.com/timmybx/canary/actions/workflows/zizmor.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/zizmor.yml)
 [![CodeQL](https://github.com/timmybx/canary/actions/workflows/codeql.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/codeql.yml)
 
-# 🐤 CANARY — Component Anomaly & Near-term Advisory Risk Yardstick
+# 🐤 CANARY — Component Analytics & Near-term Advisory Risk Yardstick
 
 CANARY is a research prototype for collecting software ecosystem signals for Jenkins plugins and turning them into transparent, explainable risk indicators.
 
