@@ -128,6 +128,7 @@ class SwhVisitFeatures:
     issue_reference_rate: float | None  # issue tracker linkage
     empty_message_rate: float | None  # poor discipline signal
     author_committer_mismatch_rate: float | None  # tz offset mismatch as review proxy
+    late_night_commit_fraction: float | None  # commits 0–4 AM local time (Eyolfson et al.)
 
 
 @dataclass(slots=True)
@@ -416,6 +417,7 @@ def _extract_revision_signals(
     lag_hours: list[float] = []
     tz_offsets: set[int] = set()
     weekend_commits = 0
+    late_night_commits = 0  # local hour 0–3 inclusive (Eyolfson et al. 2011)
     security_commits = 0
     merge_commits = 0
     conventional_commits = 0
@@ -432,6 +434,14 @@ def _extract_revision_signals(
             # weekend: Saturday=5, Sunday=6
             if author_dt.weekday() >= 5:
                 weekend_commits += 1
+            # late-night: convert UTC to local time using author timezone offset
+            try:
+                tz_offset_min = int(row.get("author_tz_offset_minutes") or 0)
+            except (ValueError, TypeError):
+                tz_offset_min = 0
+            local_hour = (author_dt.hour + tz_offset_min // 60) % 24
+            if 0 <= local_hour < 4:
+                late_night_commits += 1
 
         if committer_dt:
             committer_dates.append(committer_dt)
@@ -504,6 +514,9 @@ def _extract_revision_signals(
         "issue_reference_rate": _round_or_none(_rate(issue_ref_commits), 4),
         "empty_message_rate": _round_or_none(_rate(empty_message_commits), 4),
         "author_committer_mismatch_rate": _round_or_none(_rate(tz_mismatch_commits), 4),
+        "late_night_commit_fraction": _round_or_none(
+            late_night_commits / len(author_dates) if author_dates else None, 4
+        ),
     }
 
 
@@ -787,6 +800,7 @@ def collect_software_heritage_athena_repo(
             issue_reference_rate=revision_signals["issue_reference_rate"],
             empty_message_rate=revision_signals["empty_message_rate"],
             author_committer_mismatch_rate=revision_signals["author_committer_mismatch_rate"],
+            late_night_commit_fraction=revision_signals["late_night_commit_fraction"],
         )
         results.append(asdict(item))
 

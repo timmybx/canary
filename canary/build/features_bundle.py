@@ -617,6 +617,7 @@ def _load_software_heritage_features_athena(plugin_id: str, data_raw_dir: Path) 
         "swh_issue_reference_rate": None,
         "swh_empty_message_rate": None,
         "swh_author_committer_mismatch_rate": None,
+        "swh_late_night_commit_fraction": None,
         "swh_backend": "athena",
     }
 
@@ -691,6 +692,7 @@ def _load_software_heritage_features_athena(plugin_id: str, data_raw_dir: Path) 
         row["swh_author_committer_mismatch_rate"] = latest_visit.get(
             "author_committer_mismatch_rate"
         )
+        row["swh_late_night_commit_fraction"] = latest_visit.get("late_night_commit_fraction")
 
     return row
 
