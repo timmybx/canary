@@ -604,6 +604,19 @@ def _load_software_heritage_features_athena(plugin_id: str, data_raw_dir: Path) 
         "swh_has_sonar_config": False,
         "swh_has_snyk_config": False,
         "swh_top_level_entry_count": 0,
+        # revision signals
+        "swh_commit_count": 0,
+        "swh_days_since_last_commit": None,
+        "swh_author_committer_lag_p50_hours": None,
+        "swh_author_committer_lag_p90_hours": None,
+        "swh_timezone_diversity": 0,
+        "swh_weekend_commit_fraction": None,
+        "swh_security_fix_commit_count": 0,
+        "swh_merge_commit_fraction": None,
+        "swh_conventional_commit_fraction": None,
+        "swh_issue_reference_rate": None,
+        "swh_empty_message_rate": None,
+        "swh_author_committer_mismatch_rate": None,
         "swh_backend": "athena",
     }
 
@@ -657,6 +670,27 @@ def _load_software_heritage_features_athena(plugin_id: str, data_raw_dir: Path) 
         row["swh_has_sonar_config"] = bool(latest_visit.get("has_sonar_config"))
         row["swh_has_snyk_config"] = bool(latest_visit.get("has_snyk_config"))
         row["swh_top_level_entry_count"] = int(latest_visit.get("top_level_entry_count") or 0)
+        # revision signals
+        row["swh_commit_count"] = int(latest_visit.get("commit_count") or 0)
+        row["swh_days_since_last_commit"] = latest_visit.get("days_since_last_commit")
+        row["swh_author_committer_lag_p50_hours"] = latest_visit.get(
+            "author_committer_lag_p50_hours"
+        )
+        row["swh_author_committer_lag_p90_hours"] = latest_visit.get(
+            "author_committer_lag_p90_hours"
+        )
+        row["swh_timezone_diversity"] = int(latest_visit.get("timezone_diversity") or 0)
+        row["swh_weekend_commit_fraction"] = latest_visit.get("weekend_commit_fraction")
+        row["swh_security_fix_commit_count"] = int(
+            latest_visit.get("security_fix_commit_count") or 0
+        )
+        row["swh_merge_commit_fraction"] = latest_visit.get("merge_commit_fraction")
+        row["swh_conventional_commit_fraction"] = latest_visit.get("conventional_commit_fraction")
+        row["swh_issue_reference_rate"] = latest_visit.get("issue_reference_rate")
+        row["swh_empty_message_rate"] = latest_visit.get("empty_message_rate")
+        row["swh_author_committer_mismatch_rate"] = latest_visit.get(
+            "author_committer_mismatch_rate"
+        )
 
     return row
 

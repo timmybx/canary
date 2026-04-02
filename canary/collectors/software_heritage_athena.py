@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -27,6 +28,44 @@ DEFAULT_OUT_DIR = Path("data/raw/software_heritage_athena")
 DEFAULT_MAX_VISITS = 1
 DEFAULT_DIRECTORY_BATCH_SIZE = 20
 DEFAULT_MAX_DIRECTORIES = 100
+
+# ---------------------------------------------------------------------------
+# Commit message keyword sets for revision signal extraction
+# ---------------------------------------------------------------------------
+
+_SECURITY_COMMIT_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "cve",
+        "vulnerability",
+        "vuln",
+        "exploit",
+        "security fix",
+        "security patch",
+        "security update",
+        "rce",
+        "xss",
+        "injection",
+        "csrf",
+        "ssrf",
+        "privilege escalation",
+        "path traversal",
+        "authentication bypass",
+        "arbitrary code",
+        "buffer overflow",
+        "sanitize",
+        "sanitise",
+        "information disclosure",
+    }
+)
+
+_CONVENTIONAL_COMMIT_RE = re.compile(
+    r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+?\))?!?:",
+    re.IGNORECASE,
+)
+
+_ISSUE_REF_RE = re.compile(r"#\d+")
+
+_MERGE_COMMIT_RE = re.compile(r"^merge\b", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +115,19 @@ class SwhVisitFeatures:
     has_sonar_config: bool  # sonar-project.properties
     has_snyk_config: bool  # .snyk file
     top_level_entry_count: int  # rough complexity proxy
+    # --- revision-based signals (from jenkins_revision_meta) ---
+    commit_count: int  # total commits in snapshot
+    days_since_last_commit: float | None  # staleness relative to visit date
+    author_committer_lag_p50_hours: float | None  # code review proxy (median lag)
+    author_committer_lag_p90_hours: float | None  # code review proxy (90th pct)
+    timezone_diversity: int  # distinct tz offsets (distributed team proxy)
+    weekend_commit_fraction: float | None  # hobbyist vs professional maintenance
+    security_fix_commit_count: int  # commits mentioning CVE/vuln/etc
+    merge_commit_fraction: float | None  # PR workflow indicator
+    conventional_commit_fraction: float | None  # commit message discipline
+    issue_reference_rate: float | None  # issue tracker linkage
+    empty_message_rate: float | None  # poor discipline signal
+    author_committer_mismatch_rate: float | None  # tz offset mismatch as review proxy
 
 
 @dataclass(slots=True)
@@ -269,6 +321,192 @@ WHERE directory_id IN ({ids_sql})
 """.strip()
 
 
+def _revision_meta_query(snapshot_id: str) -> str:
+    """
+    Pull all revision metadata for a snapshot from the pre-extracted
+    jenkins_revision_meta table.  One row per commit reachable from
+    any branch tip in the snapshot.
+    """
+    snap = _sql_escape(snapshot_id)
+    return f"""
+SELECT
+    jrm.revision_id,
+    jrm.author_date,
+    jrm.committer_date,
+    jrm.author_tz_offset_minutes,
+    jrm.committer_tz_offset_minutes,
+    jrm.commit_message
+FROM jenkins_snapshot_branch jsb
+JOIN jenkins_revision_meta jrm
+  ON jsb.target = jrm.revision_id
+WHERE jsb.snapshot_id = '{snap}'
+""".strip()
+
+
+def _safe_median(values: list[float]) -> float | None:
+    """Return the median of a non-empty list, or None."""
+    if not values:
+        return None
+    s = sorted(values)
+    n = len(s)
+    mid = n // 2
+    if n % 2 == 0:
+        return (s[mid - 1] + s[mid]) / 2.0
+    return s[mid]
+
+
+def _safe_percentile(values: list[float], p: float) -> float | None:
+    """Return the p-th percentile (0-100) of a list, or None."""
+    if not values:
+        return None
+    s = sorted(values)
+    n = len(s)
+    idx = (p / 100.0) * (n - 1)
+    lo = int(idx)
+    hi = min(lo + 1, n - 1)
+    return s[lo] * (1 - (idx - lo)) + s[hi] * (idx - lo)
+
+
+def _parse_swh_timestamp(value: str | None) -> datetime | None:
+    """Parse SWH timestamp strings into timezone-aware datetimes."""
+    if not value:
+        return None
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+    except ValueError:
+        return None
+
+
+def _extract_revision_signals(
+    revision_rows: list[dict[str, str | None]],
+    visit_date_str: str,
+) -> dict[str, Any]:
+    """
+    Compute all revision-based signals from the rows returned by
+    _revision_meta_query.  Returns a dict ready to unpack into
+    SwhVisitFeatures fields.
+    """
+    _EMPTY: dict[str, Any] = {
+        "commit_count": 0,
+        "days_since_last_commit": None,
+        "author_committer_lag_p50_hours": None,
+        "author_committer_lag_p90_hours": None,
+        "timezone_diversity": 0,
+        "weekend_commit_fraction": None,
+        "security_fix_commit_count": 0,
+        "merge_commit_fraction": None,
+        "conventional_commit_fraction": None,
+        "issue_reference_rate": None,
+        "empty_message_rate": None,
+        "author_committer_mismatch_rate": None,
+    }
+
+    if not revision_rows:
+        return _EMPTY
+
+    visit_dt = _parse_swh_timestamp(visit_date_str)
+    n = len(revision_rows)
+
+    author_dates: list[datetime] = []
+    committer_dates: list[datetime] = []
+    lag_hours: list[float] = []
+    tz_offsets: set[int] = set()
+    weekend_commits = 0
+    security_commits = 0
+    merge_commits = 0
+    conventional_commits = 0
+    issue_ref_commits = 0
+    empty_message_commits = 0
+    tz_mismatch_commits = 0
+
+    for row in revision_rows:
+        author_dt = _parse_swh_timestamp(row.get("author_date"))
+        committer_dt = _parse_swh_timestamp(row.get("committer_date"))
+
+        if author_dt:
+            author_dates.append(author_dt)
+            # weekend: Saturday=5, Sunday=6
+            if author_dt.weekday() >= 5:
+                weekend_commits += 1
+
+        if committer_dt:
+            committer_dates.append(committer_dt)
+
+        if author_dt and committer_dt and committer_dt >= author_dt:
+            lag_h = (committer_dt - author_dt).total_seconds() / 3600.0
+            lag_hours.append(lag_h)
+
+        # timezone diversity
+        tz_author = row.get("author_tz_offset_minutes")
+        tz_committer = row.get("committer_tz_offset_minutes")
+        try:
+            if tz_author is not None:
+                tz_offsets.add(int(tz_author))
+        except (ValueError, TypeError):
+            pass
+
+        # author/committer tz mismatch as code review proxy
+        try:
+            if tz_author is not None and tz_committer is not None:
+                if int(tz_author) != int(tz_committer):
+                    tz_mismatch_commits += 1
+        except (ValueError, TypeError):
+            pass
+
+        # commit message signals
+        msg = (row.get("commit_message") or "").strip()
+        msg_lower = msg.lower()
+
+        if not msg or msg in {".", "-", "wip"}:
+            empty_message_commits += 1
+
+        if any(kw in msg_lower for kw in _SECURITY_COMMIT_KEYWORDS):
+            security_commits += 1
+
+        if _MERGE_COMMIT_RE.match(msg):
+            merge_commits += 1
+
+        if _CONVENTIONAL_COMMIT_RE.match(msg):
+            conventional_commits += 1
+
+        if _ISSUE_REF_RE.search(msg):
+            issue_ref_commits += 1
+
+    # staleness: days between most recent author_date and visit date
+    days_since: float | None = None
+    if author_dates and visit_dt:
+        latest = max(author_dates)
+        delta = visit_dt - latest
+        days_since = max(0.0, delta.total_seconds() / 86400.0)
+
+    def _round_or_none(value: float | None, ndigits: int) -> float | None:
+        return round(value, ndigits) if value is not None else None
+
+    def _rate(count: int) -> float | None:
+        return count / n if n > 0 else None
+
+    return {
+        "commit_count": n,
+        "days_since_last_commit": _round_or_none(days_since, 1),
+        "author_committer_lag_p50_hours": _round_or_none(_safe_percentile(lag_hours, 50), 2),
+        "author_committer_lag_p90_hours": _round_or_none(_safe_percentile(lag_hours, 90), 2),
+        "timezone_diversity": len(tz_offsets),
+        "weekend_commit_fraction": _round_or_none(
+            weekend_commits / len(author_dates) if author_dates else None, 4
+        ),
+        "security_fix_commit_count": security_commits,
+        "merge_commit_fraction": _round_or_none(_rate(merge_commits), 4),
+        "conventional_commit_fraction": _round_or_none(_rate(conventional_commits), 4),
+        "issue_reference_rate": _round_or_none(_rate(issue_ref_commits), 4),
+        "empty_message_rate": _round_or_none(_rate(empty_message_commits), 4),
+        "author_committer_mismatch_rate": _round_or_none(_rate(tz_mismatch_commits), 4),
+    }
+
+
 def _extract_feature_flags(entry_rows: list[dict[str, str | None]]) -> dict[str, Any]:
     names = {
         (row.get("entry_name") or "").strip().lower()
@@ -305,7 +543,7 @@ def _extract_feature_flags(entry_rows: list[dict[str, str | None]]) -> dict[str,
         "has_build_gradle": any(name in {"build.gradle", "build.gradle.kts"} for name in names),
         "has_mvn_wrapper": ".mvn" in names,
         "has_tests_directory": any(name in {"tests", "test", "spec", "src"} for name in names),
-        "has_github_actions": ("workflows" in names),  # inside .github; captured as top-level entry
+        "has_github_actions": "workflows" in names,  # inside .github — captured as top-level entry
         "has_dependabot": "dependabot.yml" in names,
         "has_sonar_config": any(
             name in {"sonar-project.properties", ".sonarcloud.properties"} for name in names
@@ -361,6 +599,7 @@ def collect_software_heritage_athena_repo(
     collected_at = _utc_now_iso()
     results: list[dict[str, Any]] = []
     snapshot_cache: dict[str, dict[str, bool]] = {}
+    revision_cache: dict[str, dict[str, Any]] = {}
     total_scanned_bytes = visits_result.data_scanned_bytes or 0
 
     for index, visit_row in enumerate(visit_rows, start=1):
@@ -481,6 +720,36 @@ def collect_software_heritage_athena_repo(
 
             snapshot_cache[snapshot_id] = feature_flags
 
+        # --- revision signals ---
+        # Use cached revision signals if we've seen this snapshot before
+        revision_signals = revision_cache.get(snapshot_id)
+        if revision_signals is None:
+            revision_result = _run_athena_query(
+                _revision_meta_query(snapshot_id),
+                database=database,
+                output_location=output_location,
+                poll_initial_seconds=poll_initial_seconds,
+                poll_max_seconds=poll_max_seconds,
+                label=f"revision_meta[{index}/{len(visit_rows)}] snapshot_id={snapshot_id}",
+                verbose=verbose,
+            )
+            total_scanned_bytes += revision_result.data_scanned_bytes or 0
+            revision_signals = _extract_revision_signals(
+                revision_result.rows,
+                visit_row.get("visit_date") or "",
+            )
+            revision_cache[snapshot_id] = revision_signals
+            _log(
+                (
+                    f"Revision signals for snapshot_id={snapshot_id}: "
+                    f"commit_count={revision_signals['commit_count']} "
+                    f"days_since_last_commit={revision_signals['days_since_last_commit']} "
+                    f"security_fix_commit_count={revision_signals['security_fix_commit_count']} "
+                    f"weekend_commit_fraction={revision_signals['weekend_commit_fraction']}"
+                ),
+                verbose=verbose,
+            )
+
         item = SwhVisitFeatures(
             source="software_heritage_athena",
             collected_at=collected_at,
@@ -505,6 +774,19 @@ def collect_software_heritage_athena_repo(
             has_sonar_config=feature_flags["has_sonar_config"],
             has_snyk_config=feature_flags["has_snyk_config"],
             top_level_entry_count=feature_flags["top_level_entry_count"],
+            # revision signals
+            commit_count=revision_signals["commit_count"],
+            days_since_last_commit=revision_signals["days_since_last_commit"],
+            author_committer_lag_p50_hours=revision_signals["author_committer_lag_p50_hours"],
+            author_committer_lag_p90_hours=revision_signals["author_committer_lag_p90_hours"],
+            timezone_diversity=revision_signals["timezone_diversity"],
+            weekend_commit_fraction=revision_signals["weekend_commit_fraction"],
+            security_fix_commit_count=revision_signals["security_fix_commit_count"],
+            merge_commit_fraction=revision_signals["merge_commit_fraction"],
+            conventional_commit_fraction=revision_signals["conventional_commit_fraction"],
+            issue_reference_rate=revision_signals["issue_reference_rate"],
+            empty_message_rate=revision_signals["empty_message_rate"],
+            author_committer_mismatch_rate=revision_signals["author_committer_mismatch_rate"],
         )
         results.append(asdict(item))
 
