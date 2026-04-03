@@ -247,9 +247,9 @@ from commits reachable from the snapshot's branch tips.
 | `author_committer_lag_p50_hours` | float \| None | Median time between when a commit was authored and when it was committed (merged). A larger lag suggests an async review workflow — someone other than the author is merging changes — which is a proxy for code review culture. Cánovas Izquierdo & Mens (2022) identified PR latency as a key indicator of maintainer responsiveness and team health. |
 | `author_committer_lag_p90_hours` | float \| None | 90th percentile of author-to-commit lag. The tail of this distribution captures how long the slowest code reviews take, which may indicate a bottleneck in the review process. |
 | `timezone_diversity` | int | Number of distinct timezone offsets (in minutes) among commit authors. Higher diversity suggests a geographically distributed contributor base, which generally correlates with healthier open-source community dynamics. Exploratory signal; not directly validated in the vulnerability prediction literature. |
-| `weekend_commit_fraction` | float \| None | Fraction of commits authored on a Saturday or Sunday. Claes et al. (2018) analyzed commit timestamps in 86 open-source projects and found that two-thirds of developers follow a standard work schedule and rarely commit on weekends, establishing weekend commits as a marker of volunteer or hobbyist maintenance. Projects with high weekend fractions may respond more slowly to vulnerability disclosures. |
+| `weekend_commit_fraction` | float \| None | Fraction of commits authored on a Saturday or Sunday. Claes et al. (2018) analyzed commit timestamps across 86 open-source projects and found that two-thirds of developers follow a standard work schedule and rarely commit on weekends, establishing weekend commits as a marker of volunteer or hobbyist maintenance. Projects with high weekend fractions may respond more slowly to vulnerability disclosures. |
 | `security_fix_commit_count` | int | Number of commits whose message contains security-related keywords (CVE, vulnerability, exploit, RCE, XSS, injection, etc.). Goldman et al. (2024) demonstrated that proactively scanning commits and issues for security trigger words can surface vulnerability exposure before official disclosure. A direct historical signal of past security issues. |
-| `merge_commit_fraction` | float \| None | Fraction of commits that are merge commits (message starts with "Merge"). A high merge fraction indicates a PR-based workflow rather than direct pushes to main. Croft et al. (2023) found in a large-scale analysis that code review coverage is directly associated with security outcomes in open-source projects. |
+| `merge_commit_fraction` | float \| None | Fraction of commits that are merge commits (message starts with "Merge"). A high merge fraction indicates a PR-based workflow rather than direct pushes to main. Thompson (2017) found in a large-scale analysis that code review coverage is directly associated with security outcomes in open-source projects. |
 | `conventional_commit_fraction` | float \| None | Fraction of commits following the Conventional Commits specification (`feat:`, `fix:`, `chore:`, etc.). Tian et al. (2023) found that commit message quality has a measurable impact on software defect proneness, providing empirical backing for this discipline signal. |
 | `issue_reference_rate` | float \| None | Fraction of commit messages containing a GitHub issue reference (`#NNN`). Tian et al. (2023) specifically identified issue report and pull request links in commit messages as a key dimension of commit message quality associated with lower defect proneness. |
 | `empty_message_rate` | float \| None | Fraction of commits with no meaningful commit message. Tian et al. (2023) demonstrated that commit message quality impacts defect proneness; empty messages represent the lowest-quality extreme of this spectrum. |
@@ -314,13 +314,14 @@ Cánovas Izquierdo, J. L., & Mens, T. (2022). Pull request latency explained:
 an empirical overview. *Empirical Software Engineering*, *27*(6), 131.
 https://doi.org/10.1007/s10664-022-10172-1
 
-Claes, M., Mens, T., & Grosjean, P. (2018). Do programmers work at night or
+Claes, M., Mäntylä, M. V., Kuutila, M., & Adams, B. (2018). Do programmers work at night or
 during the weekend? *Proceedings of the 40th International Conference on Software
 Engineering (ICSE 2018)*, 705–716. https://doi.org/10.1145/3180155.3180193
 
-Croft, B., Bazrafshan, N., & Ernst, N. (2023). *Large-scale analysis of modern
-code review practices and software security outcomes*. University of California,
-Berkeley Technical Report. https://www2.eecs.berkeley.edu/Pubs/TechRpts/2017/EECS-2017-217.pdf
+Thompson, C. (2017). *Large-scale analysis of modern code review practices and
+software security in open source software* (Technical Report No. UCB/EECS-2017-217).
+University of California, Berkeley.
+https://www2.eecs.berkeley.edu/Pubs/TechRpts/2017/EECS-2017-217.pdf
 
 Eyolfson, J., Tan, L., & Lam, P. (2011). Do time of day and developer experience
 affect commit bugginess? *Proceedings of the 8th Working Conference on Mining

@@ -153,10 +153,10 @@ can be scaled if needed.
 | `gharchive_sample_percent` | The sampling rate used during collection. Required to correctly interpret all count fields. |
 | `gharchive_events_total` | Total events of all types. A general activity level signal — completely inactive plugins are far more likely to have unpatched vulnerabilities (Panter & Eisty, 2026). |
 | `gharchive_push_events` | Number of push events (direct commits to any branch). High push frequency suggests active development; low values over multiple months indicate a stale codebase associated with elevated vulnerability risk (Alexopoulos et al., 2022). |
-| `gharchive_pull_request_events` | Number of PR-related events (opened, closed, reopened). PR activity indicates a collaborative review workflow. Croft (2017) found in a large-scale study that code review coverage is directly associated with reduced security issues in open-source projects. |
+| `gharchive_pull_request_events` | Number of PR-related events (opened, closed, reopened). PR activity indicates a collaborative review workflow. Thompson (2017) found in a large-scale study that code review coverage is directly associated with reduced security issues in open-source projects. |
 | `gharchive_pull_request_closed_events` | PRs that were closed (merged or rejected). Together with opened PRs, this gives a view of PR throughput. |
 | `gharchive_pull_request_merged_events` | PRs that were merged. The ratio of merged to opened PRs reflects how much proposed work actually gets accepted. |
-| `gharchive_pull_request_review_events` | Review events (approvals, change requests, comments). A direct signal of code review activity — Croft (2017) found that review intensity, not just the presence of review, is what correlates with security outcomes. |
+| `gharchive_pull_request_review_events` | Review events (approvals, change requests, comments). A direct signal of code review activity — Thompson (2017) found that review intensity, not just the presence of review, is what correlates with security outcomes. |
 | `gharchive_issues_events` | Issues opened, closed, or otherwise touched. Active issue tracking suggests maintainers are engaged with user-reported problems, including potential security reports. |
 | `gharchive_issues_closed_events` | Issues that were closed. Relative to opened issues, this indicates how quickly problems are being resolved. |
 | `gharchive_release_events` | GitHub release publications. Regular releases indicate a disciplined release process. Infrequent releases may mean security fixes sit in code longer before reaching users (Alexopoulos et al., 2022). |
@@ -169,7 +169,7 @@ can be scaled if needed.
 | `gharchive_bot_events` | Events attributable to known bot accounts (Dependabot, Renovate, GitHub Actions, etc.). Bot-driven activity indicates automated tooling is in place. Alfadel et al. (2023) found that automated dependency management tools significantly increase the rate of security patch uptake. |
 | `gharchive_human_events` | Events from human (non-bot) actors. A repo where only bots are active may be effectively abandoned by human maintainers. |
 | `gharchive_unique_human_actors` | Distinct human (non-bot) actors this month. A purer bus-factor signal than `unique_actors` since it excludes automation noise. Xu et al. (2025) identified contributor diversity as a key predictor of OSS project health. |
-| `gharchive_owner_push_fraction` | Fraction of push events from the single most active human pusher. High values indicate one person controls the codebase. The XZ Utils supply chain attack (Ladisa et al., 2024) highlighted bus-factor concentration as a critical security risk vector in OSS. |
+| `gharchive_owner_push_fraction` | Fraction of push events from the single most active human pusher. High values indicate one person controls the codebase. The XZ Utils supply chain attack (Przymus & Durieux, 2025) highlighted bus-factor concentration as a critical security risk vector in OSS. |
 | `gharchive_security_keyword_events` | PR or issue events whose title/body contains security-related keywords (CVE, vulnerability, exploit, RCE, XSS, injection, etc.). Goldman & Landsman (2024) demonstrated that scanning GitHub activity for security trigger words can surface vulnerability exposure before official CVE assignment — making this a direct leading indicator. |
 | `gharchive_hotfix_keyword_events` | Events mentioning hotfix, urgent fix, emergency release, etc. Hotfixes are often triggered by critical bugs or security disclosures. |
 | `gharchive_dependency_bump_events` | PRs or issues related to dependency updates (Dependabot PRs, "bump" commits, Renovate). Alfadel et al. (2023) found that projects using automated dependency tooling update dependencies 1.6× more frequently, directly reducing their vulnerability exposure window. |
@@ -231,13 +231,13 @@ comparable across plugins with very different activity levels.
 
 | Field | Predictive rationale |
 |-------|----------------------|
-| `gharchive_prs_per_push_3m` | PRs per push event over 3 months. High values indicate most code changes go through PR review. Croft (2017) found code review coverage to be directly associated with security outcomes. |
+| `gharchive_prs_per_push_3m` | PRs per push event over 3 months. High values indicate most code changes go through PR review. Thompson (2017) found code review coverage to be directly associated with security outcomes. |
 | `gharchive_prs_per_push_6m` | Same as above over a 6-month window for trend stability. |
 | `gharchive_merge_rate_3m` | Fraction of opened PRs that were merged over 3 months. Very low merge rates may indicate maintainer disengagement; very high rates may indicate rubber-stamp reviews. |
 | `gharchive_merge_rate_6m` | Same over 6 months. |
 | `gharchive_pr_close_rate_3m` | Fraction of opened PRs that were closed (merged or rejected) over 3 months. Low close rates indicate a growing backlog of unreviewed contributions. |
 | `gharchive_pr_close_rate_6m` | Same over 6 months. |
-| `gharchive_pr_review_intensity_3m` | Review events per PR over 3 months. Higher values mean more thorough scrutiny of incoming code. Croft (2017) found that a diversity of experienced reviewers, not just review quantity, predicts security outcomes. |
+| `gharchive_pr_review_intensity_3m` | Review events per PR over 3 months. Higher values mean more thorough scrutiny of incoming code. Thompson (2017) found that a diversity of experienced reviewers, not just review quantity, predicts security outcomes. |
 | `gharchive_pr_review_intensity_6m` | Same over 6 months. |
 | `gharchive_issue_close_rate_3m` | Fraction of opened issues closed over 3 months. Low values suggest maintainers are not keeping up with bug reports. |
 | `gharchive_issue_close_rate_6m` | Same over 6 months. |
@@ -321,12 +321,12 @@ vulnerabilities live in the code? A large-scale empirical measurement study on
 FOSS vulnerability lifetimes. *Proceedings of the 31st USENIX Security Symposium*,
 4187–4204. https://www.usenix.org/system/files/sec22-alexopoulos.pdf
 
-Claes, M., Mens, T., & Grosjean, P. (2018). Do programmers work at night or
+Claes, M., Mäntylä, M. V., Kuutila, M., & Adams, B. (2018). Do programmers work at night or
 during the weekend? *Proceedings of the 40th International Conference on Software
 Engineering (ICSE 2018)*, 705–716. https://doi.org/10.1145/3180155.3180193
 
-Croft, B. (2017). *Large-scale analysis of modern code review practices and
-software security outcomes* (Technical Report No. EECS-2017-217). University of
+Thompson, C. (2017). *Large-scale analysis of modern code review practices and
+software security in open source software* (Technical Report No. UCB/EECS-2017-217). University of
 California, Berkeley.
 https://www2.eecs.berkeley.edu/Pubs/TechRpts/2017/EECS-2017-217.pdf
 
@@ -334,8 +334,8 @@ Goldman, I., & Landsman, I. (2024). *50 shades of vulnerabilities: Uncovering
 flaws in open-source vulnerability disclosures*. Aqua Nautilus Research.
 https://www.aquasec.com/blog/50-shades-of-vulnerabilities-uncovering-flaws-in-open-source-vulnerability-disclosures/
 
-Ladisa, P., Plate, H., Martinez, M., & Barais, O. (2024). *A software engineering
-analysis of the XZ Utils supply chain attack*. arXiv preprint arXiv:2504.17473.
+Przymus, P., & Durieux, T. (2025). *Wolves in the repository: A software engineering
+analysis of the XZ Utils supply chain attack*. Presented at MSR 2025. arXiv preprint arXiv:2504.17473.
 https://arxiv.org/pdf/2504.17473
 
 Panter, S. K., & Eisty, N. U. (2026). *MALTA: Maintenance-aware technical lag
