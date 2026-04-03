@@ -1,0 +1,12 @@
+-r requirements.txt
+
+pytest>=8.0.0
+pytest-cov>=5.0.0
+Pygments>=2.20.0
+ruff>=0.6.0
+bandit>=1.7.9
+pip-audit>=2.7.3
+pip-tools>=7.4.1
+pyright>=1.1.390
+pre-commit
+atheris>=2.3.0
