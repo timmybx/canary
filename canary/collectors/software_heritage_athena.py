@@ -25,7 +25,7 @@ DEFAULT_POLL_INITIAL_SECONDS = 0.5
 DEFAULT_POLL_MAX_SECONDS = 5.0
 DEFAULT_POLL_BACKOFF_FACTOR = 1.5
 DEFAULT_OUT_DIR = Path("data/raw/software_heritage_athena")
-DEFAULT_MAX_VISITS = 1
+DEFAULT_MAX_VISITS = 100
 DEFAULT_DIRECTORY_BATCH_SIZE = 20
 DEFAULT_MAX_DIRECTORIES = 100
 
@@ -826,6 +826,60 @@ def write_jsonl(records: list[dict[str, Any]], out_path: str | Path) -> None:
             f.write(json.dumps(record, sort_keys=True) + "\n")
 
 
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                rows.append(payload)
+    return rows
+
+
+def _merge_swh_visit_records(
+    existing_records: list[dict[str, Any]],
+    new_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Merge visit records while preserving historical entries and deduplicating by
+    visit identity. New records win on collisions so schema upgrades refresh the
+    stored payload for an existing visit.
+    """
+    merged: dict[tuple[Any, ...], dict[str, Any]] = {}
+
+    def _visit_key(record: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            record.get("repo_url"),
+            record.get("snapshot_id"),
+            record.get("visit"),
+            record.get("visit_date"),
+        )
+
+    for record in existing_records:
+        merged[_visit_key(record)] = record
+    for record in new_records:
+        merged[_visit_key(record)] = record
+
+    def _sort_key(record: dict[str, Any]) -> tuple[str, int, str]:
+        visit_date = str(record.get("visit_date") or "")
+        try:
+            visit = int(record.get("visit") or 0)
+        except (TypeError, ValueError):
+            visit = 0
+        snapshot_id = str(record.get("snapshot_id") or "")
+        return (visit_date, visit, snapshot_id)
+
+    return sorted(merged.values(), key=_sort_key)
+
+
 def collect_software_heritage_athena_repo_to_file(
     *,
     repo_url: str,
@@ -997,19 +1051,16 @@ def collect_software_heritage_athena_real(
     visits_path = out_base / f"{slug}.swh_athena_visits.jsonl"
     index_path = out_base / f"{slug}.swh_athena_index.json"
 
-    if (not overwrite) and _nonempty(index_path) and _nonempty(visits_path):
-        return {
-            "plugin_id": plugin_id,
-            "repo_url": repo_url,
-            "backend": "athena",
-            "database": database,
-            "written": 0,
-            "skipped": 1,
-            "files": {
-                "index": str(index_path),
-                "visits": str(visits_path),
-            },
-        }
+    existing_records: list[dict[str, Any]] = []
+    if (not overwrite) and _nonempty(visits_path):
+        existing_records = _read_jsonl(visits_path)
+        _log(
+            (
+                f"Loaded existing Athena visit records for plugin={plugin_id}: "
+                f"count={len(existing_records)}"
+            ),
+            verbose=verbose,
+        )
 
     records = collect_software_heritage_athena_repo(
         repo_url=repo_url,
@@ -1020,7 +1071,8 @@ def collect_software_heritage_athena_real(
         max_directories=max_directories,
         verbose=verbose,
     )
-    write_jsonl(records, visits_path)
+    merged_records = records if overwrite else _merge_swh_visit_records(existing_records, records)
+    write_jsonl(merged_records, visits_path)
 
     index_payload = {
         "plugin_id": plugin_id,
@@ -1028,7 +1080,7 @@ def collect_software_heritage_athena_real(
         "backend": "athena",
         "database": database,
         "collected_at": _utc_now_iso(),
-        "record_count": len(records),
+        "record_count": len(merged_records),
         "files": {
             "visits": str(visits_path),
         },
@@ -1043,13 +1095,14 @@ def collect_software_heritage_athena_real(
         "repo_url": repo_url,
         "backend": "athena",
         "database": database,
-        "written": 1,
+        "written": len(records),
         "skipped": 0,
         "files": {
             "index": str(index_path),
             "visits": str(visits_path),
         },
-        "record_count": len(records),
+        "record_count": len(merged_records),
+        "fetched_record_count": len(records),
     }
 
 

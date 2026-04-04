@@ -13,6 +13,7 @@ from canary.collectors.software_heritage_athena import (
     SwhVisitFeatures,
     _directory_entries_query,
     _extract_feature_flags,
+    _extract_revision_signals,
     _format_bytes,
     _log,
     _normalize_repo_slug,
@@ -155,6 +156,29 @@ def test_extract_feature_flags_multiple_files():
     assert flags["has_dot_github"] is True
     assert flags["has_jenkinsfile"] is True
     assert flags["has_travis_yml"] is True
+
+
+def test_extract_revision_signals_includes_late_night_commit_fraction():
+    rows = [
+        {
+            "author_date": "2024-01-01T06:00:00+00:00",
+            "committer_date": "2024-01-01T06:30:00+00:00",
+            "author_tz_offset_minutes": -300,
+            "committer_tz_offset_minutes": -300,
+            "commit_message": "feat: add thing",
+        },
+        {
+            "author_date": "2024-01-01T18:00:00+00:00",
+            "committer_date": "2024-01-01T18:10:00+00:00",
+            "author_tz_offset_minutes": 0,
+            "committer_tz_offset_minutes": 0,
+            "commit_message": "fix: daylight work",
+        },
+    ]
+
+    signals = _extract_revision_signals(rows, "2024-01-02T00:00:00+00:00")
+
+    assert signals["late_night_commit_fraction"] == 0.5
 
 
 # ---------------------------------------------------------------------------
