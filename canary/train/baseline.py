@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     average_precision_score,
     classification_report,
@@ -17,7 +16,6 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
 DEFAULT_EXCLUDE_COLUMNS = {
     # Identifiers / bookkeeping
@@ -40,6 +38,11 @@ DEFAULT_EXCLUDE_COLUMNS = {
     "advisory_this_month",
     "advisory_count_this_month",
 }
+
+
+# ---------------------------------------------------------------------------
+# I/O helpers
+# ---------------------------------------------------------------------------
 
 
 def _load_jsonl(path: str | Path) -> list[dict[str, Any]]:
@@ -163,8 +166,69 @@ def _write_predictions_csv(
             )
 
 
-def train_baseline(
+# ---------------------------------------------------------------------------
+# Feature importance helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_feature_importance(
+    model: Any,
+    feature_cols: list[str],
+    model_name: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """
+    Return (top_positive, top_negative) feature importance dicts.
+
+    For logistic regression: uses signed coefficients.
+    For tree-based models: uses feature_importances_ (unsigned),
+    reported under top_positive only.
+    """
+    # Unwrap a Pipeline to get to the actual classifier
+    clf = model
+    if hasattr(model, "named_steps"):
+        last_step_name = list(model.named_steps.keys())[-1]
+        clf = model.named_steps[last_step_name]
+
+    top_positive: list[dict[str, Any]] = []
+    top_negative: list[dict[str, Any]] = []
+
+    # Logistic regression — signed coefficients
+    if hasattr(clf, "coef_"):
+        coef_pairs = sorted(
+            zip(feature_cols, clf.coef_[0], strict=False),
+            key=lambda x: abs(float(x[1])),
+            reverse=True,
+        )
+        top_positive = [{"feature": f, "coefficient": float(c)} for f, c in coef_pairs if c > 0][
+            :20
+        ]
+        top_negative = [{"feature": f, "coefficient": float(c)} for f, c in coef_pairs if c < 0][
+            :20
+        ]
+
+    # Tree-based — unsigned feature importances
+    elif hasattr(clf, "feature_importances_"):
+        importance_pairs = sorted(
+            zip(feature_cols, clf.feature_importances_, strict=False),
+            key=lambda x: float(x[1]),
+            reverse=True,
+        )
+        top_positive = [
+            {"feature": f, "importance": float(imp)} for f, imp in importance_pairs if imp > 0
+        ][:20]
+
+    return top_positive, top_negative
+
+
+# ---------------------------------------------------------------------------
+# Core training function — model-agnostic
+# ---------------------------------------------------------------------------
+
+
+def train_model(
     *,
+    estimator: Any,
+    model_name: str,
     in_path: str | Path = "data/processed/features/plugins.monthly.labeled.jsonl",
     target_col: str = "label_advisory_within_6m",
     out_dir: str | Path = "data/processed/models/baseline_6m",
@@ -173,13 +237,15 @@ def train_baseline(
     include_prefixes: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """
-    Train a simple logistic regression baseline on monthly plugin rows.
+    Train *estimator* on monthly plugin rows using a time-based split.
 
-    Uses a time-based split:
-      - train rows with month < test_start_month
-      - test rows with month >= test_start_month
+    The estimator must be sklearn-compatible (fit / predict_proba).
+    Imputation of missing values is always applied before the estimator.
+    For logistic regression the estimator should include a scaler step
+    (as in the registry).  Tree-based models receive raw imputed features.
 
-    Returns a metrics summary dictionary.
+    Returns a metrics dict and writes metrics.json, test_predictions.csv,
+    and pr_curve.json to *out_dir*.
     """
     rows = _load_jsonl(in_path)
 
@@ -189,7 +255,10 @@ def train_baseline(
 
     usable_rows = sorted(
         usable_rows,
-        key=lambda r: (_month_to_sortable(_parse_month_value(r)), str(r.get("plugin_id", ""))),
+        key=lambda r: (
+            _month_to_sortable(_parse_month_value(r)),
+            str(r.get("plugin_id", "")),
+        ),
     )
 
     feature_cols = _select_feature_columns(
@@ -223,42 +292,19 @@ def train_baseline(
     y_train = np.array([int(row[target_col]) for row in train_rows], dtype=int)
     y_test = np.array([int(row[target_col]) for row in test_rows], dtype=int)
 
-    preprocessor = ColumnTransformer(
-        transformers=[
-            (
-                "num",
-                Pipeline(
-                    steps=[
-                        ("imputer", SimpleImputer(strategy="median")),
-                        ("scaler", StandardScaler()),
-                    ]
-                ),
-                feature_cols,
-            )
-        ],
+    # Imputation wraps the estimator so it never sees NaNs
+    imputer = ColumnTransformer(
+        transformers=[("impute", SimpleImputer(strategy="median"), feature_cols)],
         remainder="drop",
     )
+    full_pipeline = Pipeline(steps=[("impute", imputer), ("model", estimator)])
+    full_pipeline.fit(X_train, y_train)
 
-    model = Pipeline(
-        steps=[
-            ("preprocess", preprocessor),
-            (
-                "clf",
-                LogisticRegression(
-                    max_iter=1000,
-                    class_weight="balanced",
-                    random_state=42,
-                ),
-            ),
-        ]
-    )
-
-    model.fit(X_train, y_train)
-
-    y_prob = model.predict_proba(X_test)[:, 1]
+    y_prob = full_pipeline.predict_proba(X_test)[:, 1]
     y_pred = (y_prob >= 0.5).astype(int)
 
     metrics: dict[str, Any] = {
+        "model_name": model_name,
         "input_path": str(in_path),
         "target_col": target_col,
         "test_start_month": test_start_month,
@@ -284,21 +330,14 @@ def train_baseline(
         metrics["roc_auc"] = float(roc_auc_score(y_test, y_prob))
         metrics["average_precision"] = float(average_precision_score(y_test, y_prob))
 
-    # Model coefficients
-    clf: LogisticRegression = model.named_steps["clf"]
-    coef_pairs = sorted(
-        zip(feature_cols, clf.coef_[0], strict=False),
-        key=lambda x: abs(float(x[1])),
-        reverse=True,
+    top_positive, top_negative = _extract_feature_importance(
+        full_pipeline.named_steps["model"],
+        feature_cols,
+        model_name,
     )
-    metrics["top_positive_features"] = [
-        {"feature": feature, "coefficient": float(coef)} for feature, coef in coef_pairs if coef > 0
-    ][:20]
-    metrics["top_negative_features"] = [
-        {"feature": feature, "coefficient": float(coef)} for feature, coef in coef_pairs if coef < 0
-    ][:20]
+    metrics["top_positive_features"] = top_positive
+    metrics["top_negative_features"] = top_negative
 
-    # Precision at top-k slices
     ranked = sorted(
         zip(test_rows, y_test.tolist(), y_prob.tolist(), strict=False),
         key=lambda x: x[2],
@@ -307,9 +346,8 @@ def train_baseline(
     topk_summary: dict[str, Any] = {}
     for k in (10, 25, 50, 100):
         if len(ranked) >= k:
-            top = ranked[:k]
-            precision_at_k = sum(int(item[1]) for item in top) / k
-            topk_summary[f"precision_at_{k}"] = float(precision_at_k)
+            top_k = ranked[:k]
+            topk_summary[f"precision_at_{k}"] = float(sum(int(item[1]) for item in top_k) / k)
     metrics["ranking_metrics"] = topk_summary
 
     out_path = Path(out_dir)
@@ -325,15 +363,53 @@ def train_baseline(
         y_prob=y_prob,
     )
 
-    # Save PR curve points for later plotting if wanted
-    precision, recall, thresholds = precision_recall_curve(y_test, y_prob)
-    pr_curve = {
-        "precision": precision.tolist(),
-        "recall": recall.tolist(),
-        "thresholds": thresholds.tolist(),
-    }
+    precision_arr, recall_arr, thresholds_arr = precision_recall_curve(y_test, y_prob)
     (out_path / "pr_curve.json").write_text(
-        json.dumps(pr_curve, indent=2, sort_keys=True), encoding="utf-8"
+        json.dumps(
+            {
+                "precision": precision_arr.tolist(),
+                "recall": recall_arr.tolist(),
+                "thresholds": thresholds_arr.tolist(),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
     )
 
     return metrics
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compatible wrapper
+# ---------------------------------------------------------------------------
+
+
+def train_baseline(
+    *,
+    in_path: str | Path = "data/processed/features/plugins.monthly.labeled.jsonl",
+    target_col: str = "label_advisory_within_6m",
+    out_dir: str | Path = "data/processed/models/baseline_6m",
+    test_start_month: str = "2025-10",
+    extra_exclude: set[str] | None = None,
+    include_prefixes: tuple[str, ...] | None = None,
+    model_name: str = "logistic",
+) -> dict[str, Any]:
+    """
+    Train a model by name using the CANARY model registry.
+
+    Defaults to logistic regression for backwards compatibility.
+    """
+    from canary.train.registry import get_model
+
+    estimator = get_model(model_name)
+    return train_model(
+        estimator=estimator,
+        model_name=model_name,
+        in_path=in_path,
+        target_col=target_col,
+        out_dir=out_dir,
+        test_start_month=test_start_month,
+        extra_exclude=extra_exclude,
+        include_prefixes=include_prefixes,
+    )

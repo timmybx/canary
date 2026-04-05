@@ -67,9 +67,11 @@ def _cmd_train_baseline(args: argparse.Namespace) -> int:
         test_start_month=args.test_start_month,
         extra_exclude=extra_exclude,
         include_prefixes=include_prefixes,
+        model_name=args.model,
     )
 
     print(f"Trained baseline for target {metrics['target_col']}")
+    print(f"Model:      {metrics['model_name']}")
     print(f"Train rows: {metrics['train_row_count']}  positives: {metrics['train_positive_count']}")
     print(f"Test rows:  {metrics['test_row_count']}  positives: {metrics['test_positive_count']}")
     print(f"Features:   {metrics['feature_count']}")
@@ -678,6 +680,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-prefixes",
         default="",
         help="Comma-separated feature name prefixes to include (for example: gharchive_,window_)",
+    )
+    train_baseline_parser.add_argument(
+        "--model",
+        default="logistic",
+        help=(
+            "Model to train. Available: logistic, random_forest, xgboost, lightgbm. "
+            "xgboost and lightgbm require optional dependencies to be installed. "
+            "(default: logistic)"
+        ),
     )
     train_baseline_parser.set_defaults(func=_cmd_train_baseline)
 
