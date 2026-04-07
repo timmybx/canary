@@ -91,7 +91,7 @@ The script runs four sequential Athena CTAS jobs:
 > confirmation before running it. It only needs to be run once. All future
 > collector queries scan kilobytes from the extracted tables.
 
-The date window for `jenkins_visits` is **2019-01-01 to 2019-12-31**, chosen because
+The date window for `jenkins_visits` is **2018-01-01 to 2019-12-31**, chosen because
 2019 has the best SWH archival coverage for Jenkins plugins (~878 plugins with at
 least one snapshot, vs ~140 for 2020 which had crawling gaps).
 

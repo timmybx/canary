@@ -11,7 +11,7 @@ What gets extracted
 jenkins_plugin_urls     A tiny reference table of the 2053 plugin URLs.
                         Used as a join key in subsequent steps.
 
-jenkins_visits          One row per (plugin, month) for 2019-01-01 to
+jenkins_visits          One row per (plugin, month) for 2018-01-01 to
                         2019-12-31 (the dataset snapshot date), keeping only
                         the most recent visit per calendar month so you get
                         ~12-15 data points per plugin rather than every
@@ -226,7 +226,7 @@ def _sql_create_jenkins_visits(
     dest_location: str,
 ) -> str:
     """
-    Extract one visit per plugin per calendar month for 2019-01-01 to
+    Extract one visit per plugin per calendar month for 2018-01-01 to
     2019-12-31 (the dataset snapshot date).
 
     ROW_NUMBER() picks the latest visit within each (plugin, year, month)
@@ -258,8 +258,8 @@ WITH ranked AS (
     FROM "{src_database}"."origin_visit_status" ovs
     INNER JOIN "{dest_database}"."jenkins_plugin_urls" pu
         ON ovs.origin = pu.url
-    WHERE ovs.date     >= TIMESTAMP '2019-01-01 00:00:00'
-      AND ovs.date      < TIMESTAMP '2019-12-31 00:00:00'
+    WHERE ovs.date     >= TIMESTAMP '2018-01-01 00:00:00'
+      AND ovs.date < TIMESTAMP '2020-01-01 00:00:00'
       AND ovs.snapshot_id IS NOT NULL
 )
 SELECT origin, visit, visit_date, snapshot_id

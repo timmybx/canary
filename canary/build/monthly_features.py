@@ -433,8 +433,23 @@ def _load_software_heritage_monthly_features(
                     row[f"swh_{key}"] = bool(latest_visit.get(key))
                 for src_key, dst_key in athena_int_keys.items():
                     row[dst_key] = int(latest_visit.get(src_key) or 0)
+
                 for src_key, dst_key in athena_float_keys.items():
-                    row[dst_key] = _safe_float(latest_visit.get(src_key))
+                    if src_key == "days_since_last_commit":
+                        # Recompute relative to observation month boundary
+                        # latest_visit stores the raw author_dates via commit_count,
+                        # but we need the last commit date itself — stored as visit_dt - days_since
+                        stored_days = _safe_float(latest_visit.get("days_since_last_commit"))
+                        visit_dt_str = latest_visit.get("visit_date") or latest_visit.get("date")
+                        visit_dt = _parse_iso_date(visit_dt_str)
+                        if stored_days is not None and visit_dt is not None:
+                            last_commit_date = visit_dt - timedelta(days=stored_days)
+                            recomputed = (window_end - last_commit_date).days
+                            row[dst_key] = max(0.0, float(recomputed))
+                        else:
+                            row[dst_key] = None
+                    else:
+                        row[dst_key] = _safe_float(latest_visit.get(src_key))
 
             out[(plugin_id, month["month"])] = row
 
