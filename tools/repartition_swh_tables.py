@@ -33,7 +33,7 @@ so you can verify correctness before deleting it.
 Usage
 -----
     python repartition_swh_tables.py \\
-        --database      swh_graph_2021_03_23 \\
+        --database      swh_graph_2025_10_08 \\
         --location-prefix s3://YOUR-BUCKET/swh \\
         --output-location s3://YOUR-BUCKET/athena-results/
 
@@ -293,7 +293,7 @@ def main() -> int:
     parser.add_argument(
         "--database",
         required=True,
-        help="Athena database name, e.g. swh_graph_2021_03_23",
+        help="Athena database name, e.g. swh_graph_2025_10_08",
     )
     parser.add_argument(
         "--location-prefix",

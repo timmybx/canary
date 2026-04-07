@@ -42,7 +42,7 @@ tables — effectively free compared to hitting the public dataset repeatedly.
 Usage
 -----
     python extract_jenkins_swh_subset.py \\
-        --database        swh_graph_2021_03_23 \\
+        --database        swh_graph_2025_10_08 \\
         --plugins-jsonl   data/plugins.jsonl \\
         --dest-bucket     s3://canary-athena-east-bucket-results \\
         --output-location s3://canary-athena-east-bucket-results/athena-results/
@@ -259,7 +259,7 @@ WITH ranked AS (
     INNER JOIN "{dest_database}"."jenkins_plugin_urls" pu
         ON ovs.origin = pu.url
     WHERE ovs.date     >= TIMESTAMP '2018-01-01 00:00:00'
-      AND ovs.date < TIMESTAMP '2020-01-01 00:00:00'
+      AND ovs.date < TIMESTAMP '2025-10-01 00:00:00'
       AND ovs.snapshot_id IS NOT NULL
 )
 SELECT origin, visit, visit_date, snapshot_id
@@ -393,7 +393,7 @@ def main() -> int:
     parser.add_argument(
         "--database",
         required=True,
-        help="Source SWH Athena database, e.g. swh_graph_2021_03_23",
+        help="Source SWH Athena database, e.g. swh_graph_2025_10_08",
     )
     parser.add_argument(
         "--plugins-jsonl",

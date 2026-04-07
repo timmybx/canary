@@ -157,14 +157,14 @@ def main() -> int:
     parser.add_argument(
         "--database-name",
         required=True,
-        help="Athena database name to create, e.g. swh_graph_2021_03_23",
+        help="Athena database name to create, e.g. swh_graph_2025_10_08",
     )
     parser.add_argument(
         "--location-prefix",
         required=True,
         help=(
             "S3 prefix for the Software Heritage dataset, e.g. "
-            "s3://softwareheritage/graph/2021-03-23"
+            "s3://softwareheritage/graph/2025-10-08"
         ),
     )
     parser.add_argument(

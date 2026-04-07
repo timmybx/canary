@@ -12,35 +12,36 @@ The Software Heritage (SWH) Graph Dataset is a public archive of source code fro
 virtually every public Git repository on GitHub, GitLab, and other forges. Multiple
 dataset versions are available at
 [docs.softwareheritage.org](https://docs.softwareheritage.org/devel/swh-export/graph/dataset.html),
-ranging from 2022 through 2025. This pipeline uses the **2021-03-23** export, which
-is hosted as a public dataset on AWS S3 and is directly queryable via Athena without
-requiring a separate download or account agreement.
+ranging from 2022 through 2025. This pipeline uses the **2025-10-08** export
+(30 TiB columnar ORC), which is hosted as a public dataset on AWS S3 at
+`s3://softwareheritage/graph/2025-10-08/orc` and is directly queryable via Athena
+without requiring a separate download or account agreement. The schema is identical
+to earlier SWH exports (`origin_visit_status`, `snapshot_branch`, `directory_entry`,
+and `revision` all have the same column names and types), so the extraction pipeline
+requires no changes beyond pointing at the new database name.
 
-The 2021-03-23 dataset was chosen deliberately for this study rather than as a
-default. The observation window for the CANARY prediction task is **2018–2019**:
-plugins are observed at a point in time in 2018 or 2019 and labeled based on whether
-an advisory is published in the subsequent 180 days. Repository state features must
-therefore reflect what existed during that observation period. The 2021-03-23 SWH
-export contains the complete git history from 2018 and 2019 — commits, directory
-entries, and revision metadata are immutable git objects and do not disappear from
-the archive as newer snapshots are published. A more recent SWH export (e.g.,
-2024-12-06 or 2025-10-08) would contain the same historical data plus additional
-commits and repositories added after 2021, but would be proportionally more
-expensive to query (the 2025 export is roughly 4× larger than the 2021 export,
-which would increase the one-time `directory_entry` extraction cost from ~$32 to
-~$130+) without materially improving feature quality for the 2018–2019 window.
+The 2025-10-08 dataset was chosen to support a **longitudinal study spanning
+2018–2025**. The CANARY prediction task observes Jenkins plugins at monthly
+intervals and labels them based on whether a security advisory is published in the
+subsequent 180 days. Using a seven-year observation window rather than a single year
+provides substantially more labeled examples, supports temporal cross-validation
+across multiple eras of the Jenkins ecosystem, and allows the study to assess whether
+predictive signals remain stable as development practices evolve (e.g., the
+widespread adoption of GitHub Actions and Dependabot after 2020).
 
 An important point about temporal validity: the directory-structure signals
 (`has_dependabot`, `has_github_actions`, `has_security_md`, etc.) reflect the
-state of the repository **at the time of the specific SWH archival visit** in
-2018 or 2019, not the state of the repository today. This is because the
-`jenkins_visits` table constrains all downstream joins to snapshot IDs from those
-visit dates, so the directory entries retrieved are those pointed to by 2018/2019
-commits — not by any later commit. Features such as `has_dependabot` will therefore
-be absent for most 2018 observations (Dependabot was not widely adopted until
-2020–2021), which is the correct historical representation.
+state of the repository **at the time of the specific SWH archival visit**, not
+the state of the repository today. This is because the `jenkins_visits` table
+constrains all downstream joins to snapshot IDs from those dated visits, so the
+directory entries retrieved are those pointed to by commits at that point in time —
+not by any later commit. Features such as `has_dependabot` will therefore be absent
+for most 2018–2019 observations (Dependabot was not widely adopted until 2020–2021),
+which is the correct historical representation. The 2025-10-08 export date refers
+to when Software Heritage published the dataset; the visit-anchored signals are
+accurate to the observation date regardless of which export version is used.
 
-Rather than querying the full multi-TB dataset on every collection run, this
+Rather than querying the full 30 TiB dataset on every collection run, this
 pipeline performs a **one-time extraction** of just the Jenkins plugin subset into
 a compact set of Athena tables in your own S3 bucket. All subsequent collector
 runs query only those small tables, completing in seconds at negligible cost.
@@ -69,14 +70,14 @@ ATHENA_DATABASE=swh_jenkins    # the extracted subset database
 
 ## Step 1 — Register the full SWH dataset as Athena tables
 
-The Software Heritage 2021-03-23 dataset lives at `s3://softwareheritage/graph/2021-03-23/`
-and is publicly readable without credentials. You need to register it in your AWS
-Glue catalog so Athena can query it.
+The Software Heritage 2025-10-08 dataset lives at
+`s3://softwareheritage/graph/2025-10-08/orc` and is publicly readable without
+credentials. You need to register it in your AWS Glue catalog so Athena can query it.
 
 ```bash
 python tools/create_swh_athena_tables.py \
-  --database-name swh_graph_2021_03_23 \
-  --location-prefix s3://softwareheritage/graph/2021-03-23 \
+  --database-name swh_graph_2025_10_08 \
+  --location-prefix s3://softwareheritage/graph/2025-10-08 \
   --output-location s3://YOUR-BUCKET/athena-results/
 ```
 
@@ -85,9 +86,10 @@ No data is copied; queries read directly from the public bucket. This step takes
 about 2 minutes.
 
 > **Note:** The full dataset tables (`directory_entry`, `snapshot_branch`, `revision`,
-> etc.) each scan tens to hundreds of GB per query. Do not run ad-hoc queries against
-> them without understanding the cost implications (~$5/TB at standard Athena pricing).
-> The extraction steps below are the only time you should query the full tables.
+> etc.) are large — `directory_entry` alone is roughly 30 TiB across all tables.
+> Do not run ad-hoc queries against them without understanding the cost implications
+> (~$5/TB at standard Athena pricing). The extraction steps below are the only time
+> you should query the full tables.
 
 ---
 
@@ -101,7 +103,7 @@ those plugins from the heavy SWH tables. The results land in a new
 
 ```bash
 python tools/extract_jenkins_swh_subset.py \
-  --database swh_graph_2021_03_23 \
+  --database swh_graph_2025_10_08 \
   --plugins-jsonl data/raw/registry/plugins.jsonl \
   --dest-bucket s3://YOUR-BUCKET \
   --output-location s3://YOUR-BUCKET/athena-results/
@@ -112,29 +114,38 @@ The script runs four sequential Athena CTAS jobs:
 | Step | Table created | Source scan | Est. time | Est. cost |
 |------|--------------|-------------|-----------|-----------|
 | 1 | `jenkins_plugin_urls` | — (VALUES clause) | ~5 s | $0.00 |
-| 2 | `jenkins_visits` | ~36 GB | ~30 s | $0.18 |
-| 3 | `jenkins_snapshot_branch` | ~93 GB | ~10 min | $0.46 |
-| 4 | `jenkins_directory_entry` | ~6.5 TB | 1–3 hours | ~$32 |
+| 2 | `jenkins_visits` | ~150 GB | ~2 min | ~$0.75 |
+| 3 | `jenkins_snapshot_branch` | ~400 GB | ~20 min | ~$2.00 |
+| 4 | `jenkins_directory_entry` | ~30 TiB | 3–6 hours | ~$150 |
 
 > **The directory_entry step** is the expensive one. The script will prompt for
 > confirmation before running it (pass `--yes` to skip the prompt in non-interactive
 > environments). It only needs to be run once. All future collector queries scan
 > kilobytes from the extracted tables.
 
-The date window for `jenkins_visits` is **2018-01-01 to 2019-12-31**. The 2018
-data provides warm-up history for trailing window features (3-month, 6-month GH
-Archive aggregates), and 2019 serves as the primary prediction window. Combined
-coverage is **1,088 unique plugins** across both years (854 with 2018 data, 878
-with 2019 data).
+The date window for `jenkins_visits` is **2018-01-01 to 2025-10-01**, covering the
+full seven-year longitudinal study period. Earlier years (2018–2022) provide the
+primary training data; later years (2023–2025) serve as held-out evaluation windows
+for temporal generalizability assessment.
 
 ### Important: Athena CTAS and S3 data
 
 Athena's `DROP TABLE` command removes only the Glue catalog metadata — it does
 **not** delete the underlying S3 data. If you need to rebuild any table, you must
-manually delete the S3 prefix before rerunning the CTAS, otherwise Athena will
-fail with `HIVE_PATH_ALREADY_EXISTS`. Example for a full rebuild:
+first drop the table in Athena AND manually delete the S3 prefix, otherwise Athena
+will fail with `HIVE_PATH_ALREADY_EXISTS`. Always do both steps together:
+
+```sql
+-- Step 1: drop Glue metadata (run in Athena console)
+DROP TABLE IF EXISTS swh_jenkins.jenkins_visits;
+DROP TABLE IF EXISTS swh_jenkins.jenkins_snapshot_branch;
+DROP TABLE IF EXISTS swh_jenkins.jenkins_directory_entry;
+DROP TABLE IF EXISTS swh_jenkins.jenkins_revision;
+DROP TABLE IF EXISTS swh_jenkins.jenkins_revision_meta;
+```
 
 ```bash
+# Step 2: delete S3 data (run in your shell)
 aws s3 rm s3://YOUR-BUCKET/swh_jenkins/visits/ --recursive
 aws s3 rm s3://YOUR-BUCKET/swh_jenkins/snapshot_branch/ --recursive
 aws s3 rm s3://YOUR-BUCKET/swh_jenkins/directory_entry/ --recursive
@@ -142,24 +153,27 @@ aws s3 rm s3://YOUR-BUCKET/swh_jenkins/revision/ --recursive
 aws s3 rm s3://YOUR-BUCKET/swh_jenkins/revision_meta/ --recursive
 ```
 
-Then rerun the extraction steps with `--drop-existing` to clear the Glue metadata
-before recreating each table.
+Note: `jenkins_plugin_urls` does not need to be rebuilt unless the plugin registry
+changes, as it contains only the static list of plugin GitHub URLs.
 
 ### Sanity checks after extraction
 
 Run these in the Athena console with `swh_jenkins` selected as the database:
 
 ```sql
-SELECT COUNT(*) FROM jenkins_visits;                         -- expect ~3,475
-SELECT COUNT(DISTINCT origin) FROM jenkins_visits;           -- expect ~1,088
+-- Overall coverage
+SELECT COUNT(*) FROM jenkins_visits;
+SELECT COUNT(DISTINCT origin) FROM jenkins_visits;
+
+-- Year-by-year breakdown to confirm full 2018-2025 coverage
 SELECT year(visit_date) AS yr,
        COUNT(*) AS visits,
        COUNT(DISTINCT origin) AS plugins
 FROM jenkins_visits
 GROUP BY year(visit_date)
 ORDER BY yr;
--- expect: 2018 → ~1,011 visits / ~854 plugins
---         2019 → ~2,464 visits / ~878 plugins
+
+-- Downstream tables
 SELECT COUNT(*) FROM jenkins_snapshot_branch;
 SELECT COUNT(*) FROM jenkins_directory_entry;
 ```
@@ -184,13 +198,14 @@ AS
 SELECT DISTINCT
     r.id,
     r.directory
-FROM swh_graph_2021_03_23.revision r
+FROM swh_graph_2025_10_08.revision r
 INNER JOIN swh_jenkins.jenkins_snapshot_branch jsb
     ON r.id = jsb.target
 WHERE r.directory IS NOT NULL;
 ```
 
-Expected scan: ~50–100 GB (~$0.50). Expected output: a few thousand rows, a few MB.
+Expected scan: ~200–400 GB (~$1–2). Expected output: tens of thousands of rows
+given the expanded 2018–2025 window.
 
 Sanity check:
 
@@ -222,14 +237,14 @@ SELECT
     r.date_offset                 AS author_tz_offset_minutes,
     r.committer_offset            AS committer_tz_offset_minutes,
     from_utf8(r.message, '?')     AS commit_message
-FROM swh_graph_2021_03_23.revision r
+FROM swh_graph_2025_10_08.revision r
 INNER JOIN swh_jenkins.jenkins_snapshot_branch jsb
     ON r.id = jsb.target
 WHERE r.directory IS NOT NULL;
 ```
 
-Expected scan: ~50–100 GB (~$0.50). Expected output: ~8,000–10,000 rows
-(somewhat more than the previous ~7,000 now that 2018 snapshots are included).
+Expected scan: ~200–400 GB (~$1–2). Expected output: substantially more rows than
+the previous ~7,000 given the seven-year observation window.
 
 > **Note:** The `author` and `committer` identity fields in the SWH ORC export are
 > stored as opaque binary blobs (a custom git-object encoding), not as readable JSON.
@@ -267,16 +282,26 @@ Output lands in `data/raw/software_heritage_athena/` as two files per plugin:
 - `<plugin_id>.swh_athena_index.json` — collection metadata
 
 Each query against the extracted tables scans roughly **700 KB** and completes in
-**~10 seconds**, compared to ~522 GB and ~97 seconds against the full SWH dataset.
+**~10 seconds**, compared to hundreds of GB and minutes against the full SWH dataset.
 
-After collection, rebuild the monthly feature bundle covering both years:
+After collection, rebuild the monthly feature bundle covering the full study period:
 
 ```bash
-canary build monthly-features --start 2018-01 --end 2019-12
+canary build monthly-features --start 2018-01 --end 2025-09
 ```
 
-Then retrain with `--test-start-month 2019-06` to get a proper multi-month
-held-out evaluation window with 2018 data warming up the trailing features.
+Then retrain using a temporal cross-validation design. A suggested split for the
+longitudinal study:
+
+| Split | Period | Role |
+|-------|--------|------|
+| Train | 2018-01 – 2022-12 | Primary training window |
+| Validation | 2023-01 – 2023-12 | Hyperparameter tuning / threshold selection |
+| Test | 2024-01 – 2025-06 | Final held-out evaluation |
+
+This design allows assessment of whether the model generalizes across a meaningful
+shift in ecosystem practices (pre- vs. post-widespread Dependabot/GitHub Actions
+adoption).
 
 ---
 
@@ -284,25 +309,28 @@ held-out evaluation window with 2018 data warming up the trailing features.
 
 All tables live in the `swh_jenkins` Glue database.
 
-| Table | Approx. rows | Description |
-|-------|-------------|-------------|
-| `jenkins_plugin_urls` | ~3,949 | Canonical GitHub URLs for all Jenkins plugins (both `<id>` and `<id>-plugin` variants) |
-| `jenkins_visits` | ~3,475 | One visit per plugin per calendar month, 2018–2019, most recent visit per month |
-| `jenkins_snapshot_branch` | ~10,000+ | `snapshot_id → revision_id` mappings for all Jenkins snapshots |
-| `jenkins_directory_entry` | ~30,000+ | Root directory entry names for all Jenkins snapshot directories |
-| `jenkins_revision` | ~8,000–10,000 | Minimal `id → directory` join table used by the collector |
-| `jenkins_revision_meta` | ~8,000–10,000 | Commit dates, timezone offsets, and messages for all Jenkins revisions |
+| Table | Description |
+|-------|-------------|
+| `jenkins_plugin_urls` | Canonical GitHub URLs for all Jenkins plugins (~3,949 rows, both `<id>` and `<id>-plugin` variants) |
+| `jenkins_visits` | One visit per plugin per calendar month, 2018–2025, most recent visit per month |
+| `jenkins_snapshot_branch` | `snapshot_id → revision_id` mappings for all Jenkins snapshots in the study window |
+| `jenkins_directory_entry` | Root directory entry names for all Jenkins snapshot directories |
+| `jenkins_revision` | Minimal `id → directory` join table used by the collector's snapshot directory query |
+| `jenkins_revision_meta` | Commit dates, timezone offsets, and decoded commit messages for all Jenkins revisions |
+
+> **Note on row counts:** Actual row counts will be significantly larger than the
+> previous 2018–2019 extraction due to the seven-year window. Run the sanity check
+> queries in Step 2 after extraction to confirm coverage.
 
 ---
 
 ## Features collected
 
 Each output record contains the following fields. All signals reflect the state of
-the repository at the time of the specific SWH archival visit in 2018 or 2019,
-making them valid historical features for a vulnerability prediction model without
-data leakage. The signals are anchored to the observation date because all
-downstream joins follow the visit → snapshot → revision → directory chain from
-the dated visit record.
+the repository at the time of the specific SWH archival visit, making them valid
+historical features for a vulnerability prediction model without data leakage. The
+signals are anchored to the observation date because all downstream joins follow the
+visit → snapshot → revision → directory chain from the dated visit record.
 
 ### Record metadata
 
@@ -319,14 +347,18 @@ the dated visit record.
 
 Derived from the root directory listing of the repository at visit time. These are
 boolean presence/absence signals — cheap to collect (one Athena query) and directly
-interpretable.
+interpretable. Because they are anchored to the visit date, their prevalence changes
+over the study window: features like `has_travis_yml` are common in 2018–2019 and
+decline after 2020, while `has_github_actions` and `has_dependabot` are rare before
+2020 and become common thereafter. This temporal variation is a feature of the
+longitudinal design, not a data quality issue.
 
 | Field | Type | Predictive rationale |
 |-------|------|----------------------|
 | `has_readme` | bool | A README signals basic project hygiene. Projects without one tend to be less actively maintained. |
 | `has_dot_github` | bool | A `.github/` directory indicates use of GitHub-specific tooling (issue templates, PR templates, Actions). Its presence correlates with community maturity. |
 | `has_jenkinsfile` | bool | A Jenkinsfile means the project uses its own CI pipeline, suggesting the maintainer actively runs builds. Projects that don't build their own code are less likely to catch regressions. |
-| `has_travis_yml` | bool | Travis CI was the dominant CI platform for open-source Java projects in 2018–2019. Presence indicates automated testing was in place at observation time. |
+| `has_travis_yml` | bool | Travis CI was the dominant CI platform for open-source Java projects in 2018–2019. Presence indicates automated testing was in place at observation time. Prevalence declines after 2020 as teams migrated to GitHub Actions. |
 | `has_security_md` | bool | An explicit `SECURITY.md` describes how to report vulnerabilities and is associated with faster patch cycles. Ayala et al. (2025) found that having a security contact point was the most commonly mentioned aspect of a security policy among OSS maintainers who had experienced security incidents. |
 | `has_changelog` | bool | A changelog (`CHANGELOG.md`, `CHANGES.md`, etc.) indicates disciplined release tracking. Projects that document changes tend to have more deliberate release processes. |
 | `has_contributing_md` | bool | A `CONTRIBUTING.md` lowers the barrier for external contributors, which diversifies the contributor base and reduces bus-factor risk. Xu et al. (2025) identified disruption to contributor diversity as an early marker of project abandonment and elevated security risk. |
@@ -335,8 +367,8 @@ interpretable.
 | `has_build_gradle` | bool | Gradle build file. Some plugins use Gradle instead of or alongside Maven. |
 | `has_mvn_wrapper` | bool | The `.mvn/` Maven wrapper directory ensures builds use a pinned Maven version, improving reproducibility and reducing supply-chain risk. |
 | `has_tests_directory` | bool | Presence of a `src/`, `tests/`, `test/`, or `spec/` directory suggests an automated test suite exists. Projects with tests tend to catch regressions and security issues earlier. |
-| `has_github_actions` | bool | A `workflows/` directory inside `.github/` indicates GitHub Actions CI. GitHub Actions launched in late 2019, so this feature will be absent for most 2018 observations — which is the correct historical representation. |
-| `has_dependabot` | bool | A `dependabot.yml` file enables automated dependency update PRs. Alfadel et al. (2023) found that maintainers update dependencies 1.6× more frequently when using automated dependency tools, directly reducing the vulnerability exposure window. Dependabot was not widely adopted until 2020–2021, so this feature will rarely be present in 2018–2019 observations. |
+| `has_github_actions` | bool | A `workflows/` directory inside `.github/` indicates GitHub Actions CI. Rare before 2020; becomes common after 2021. The temporal variation in this signal is informative for the longitudinal study. |
+| `has_dependabot` | bool | A `dependabot.yml` file enables automated dependency update PRs. Alfadel et al. (2023) found that maintainers update dependencies 1.6× more frequently when using automated dependency tools, directly reducing the vulnerability exposure window. Rare before 2020; becomes common after 2021. |
 | `has_sonar_config` | bool | SonarQube/SonarCloud configuration (`sonar-project.properties`) indicates static analysis is part of the build process, which can catch security-relevant code patterns. |
 | `has_snyk_config` | bool | A `.snyk` policy file indicates the project uses Snyk for dependency vulnerability scanning. |
 | `top_level_entry_count` | int | Number of entries in the repository root directory. A rough proxy for project complexity — very large or very small counts may indicate unusual project structure. |
@@ -366,11 +398,10 @@ from commits reachable from the snapshot's branch tips.
 
 ## Data limitations
 
-**Coverage:** 1,088 of the 2,053 Jenkins plugins in the registry have SWH archival
-data in 2018 or 2019 (854 in 2018, 878 in 2019). The remaining ~965 were either not
-yet created, not archived by SWH during that period, or used a non-standard
-repository URL format not matched by the `jenkinsci/<id>` or `jenkinsci/<id>-plugin`
-patterns.
+**Coverage:** Not all Jenkins plugins have SWH archival data for every year in the
+study window. Coverage is best in 2019 and improves gradually through 2025 as SWH
+crawling matured. Run the year-by-year sanity check query after extraction to assess
+per-year plugin coverage before finalizing the train/test split design.
 
 **Author identity:** The SWH ORC export stores author/committer identity as binary
 git-object blobs. Contributor names and email addresses are not recoverable from
@@ -383,16 +414,18 @@ not subdirectory contents. Signals like test file counts, dependency file conten
 or source file counts would require querying deeper into the directory tree.
 
 **Point-in-time validity:** All signals reflect the repository state at the time of
-the specific SWH archival visit in 2018 or 2019. The 2021-03-23 SWH export date
-refers to when Software Heritage published the dataset, not when the repository
-snapshots were taken. Features are anchored to the observation date by following
-the dated visit → snapshot → revision → directory chain. Features such as
-`has_dependabot` and `has_github_actions` will correctly be absent for most
-2018–2019 observations because those tools were not yet adopted during that period.
+the specific SWH archival visit. The 2025-10-08 SWH export date refers to when
+Software Heritage published the dataset, not when the repository snapshots were
+taken. Features are anchored to the observation date by following the dated
+visit → snapshot → revision → directory chain. The temporal variation in governance
+features (e.g., `has_dependabot` absent in 2018, common in 2023) is expected and
+correct behavior, not a data quality issue.
 
 **Sampling:** SWH archives are not exhaustive. The archive may have missed some
 commits, branches, or repositories depending on when SWH crawled them. The
-`visit_date` field indicates when SWH captured the snapshot.
+`visit_date` field indicates when SWH captured the snapshot. Coverage gaps in any
+given year should be distinguished from true project inactivity using the
+`gharchive_present` field from the GH Archive pipeline.
 
 ---
 
@@ -401,10 +434,12 @@ commits, branches, or repositories depending on when SWH crawled them. The
 | Step | One-time or recurring | Approx. cost |
 |------|-----------------------|--------------|
 | Step 1 — register tables | One-time | $0.00 |
-| Step 2 — extract subset (visits + snapshot_branch + directory_entry) | One-time | ~$32.64 |
-| Step 3 — extract revision join table | One-time | ~$0.50 |
-| Step 4 — extract revision metadata | One-time | ~$0.50 |
-| Step 5 — run collector (all ~1,088 plugins) | Recurring | ~$0.01 per full run |
+| Step 2 — extract visits | One-time | ~$0.75 |
+| Step 2 — extract snapshot_branch | One-time | ~$2.00 |
+| Step 2 — extract directory_entry | One-time | ~$150 |
+| Step 3 — extract revision join table | One-time | ~$1–2 |
+| Step 4 — extract revision metadata | One-time | ~$1–2 |
+| Step 5 — run collector (all plugins) | Recurring | ~$0.01 per full run |
 
 After the one-time extraction, the full collector run against all plugins
 costs approximately one cent in Athena scan fees.
