@@ -12,10 +12,9 @@ jenkins_plugin_urls     A tiny reference table of the 2053 plugin URLs.
                         Used as a join key in subsequent steps.
 
 jenkins_visits          One row per (plugin, month) for 2018-01-01 to
-                        2019-12-31 (the dataset snapshot date), keeping only
-                        the most recent visit per calendar month so you get
-                        ~12-15 data points per plugin rather than every
-                        individual visit.
+                        2025-10-01, keeping only the most recent visit per
+                        calendar month so you get ~12 data points per plugin
+                        per year rather than every individual visit.
 
 jenkins_snapshot_branch snapshot_branch rows for only the snapshots that
                         appear in jenkins_visits.
@@ -23,18 +22,19 @@ jenkins_snapshot_branch snapshot_branch rows for only the snapshots that
 jenkins_directory_entry directory_entry rows for only the root directories
                         reachable from jenkins_snapshot_branch via revision.
 
-Estimated output sizes (very rough)
-------------------------------------
-jenkins_visits          ~50 MB   (2053 plugins × ~13 months × small row)
-jenkins_snapshot_branch ~2 GB    (one snapshot_branch scan filtered by join)
-jenkins_directory_entry ~5-10 GB (one directory_entry scan filtered by join)
+Estimated output sizes (very rough, 2025-10-08 dataset)
+---------------------------------------------------------
+jenkins_visits          ~200 MB  (2053 plugins x ~90 months x small row)
+jenkins_snapshot_branch ~10 GB   (snapshot_branch scan filtered by join)
+jenkins_directory_entry ~50 GB   (directory_entry scan filtered by join)
 
-Estimated Athena scan costs (one-time)
-----------------------------------------
-Step 1 (visits)          ~12 GB   (full origin_visit_status scan)
-Step 2 (snapshot_branch) ~93 GB   (full snapshot_branch scan)
-Step 3 (directory_entry) ~6.5 TB  (full directory_entry scan — unavoidable
-                                    without partitioning, but only done once)
+Estimated Athena scan costs (one-time, 2025-10-08 dataset)
+------------------------------------------------------------
+Step 1 (visits)          ~150 GB  (full origin_visit_status scan)
+Step 2 (snapshot_branch) ~400 GB  (full snapshot_branch scan)
+Step 3 (directory_entry) ~30 TB   (full directory_entry scan -- unavoidable
+                                    without partitioning, but only done once,
+                                    estimated cost ~$150 at $5/TB)
 
 After this runs, all future collector queries scan only your small extracted
 tables — effectively free compared to hitting the public dataset repeatedly.
@@ -227,13 +227,16 @@ def _sql_create_jenkins_visits(
 ) -> str:
     """
     Extract one visit per plugin per calendar month for 2018-01-01 to
-    2019-12-31 (the dataset snapshot date).
+    2025-10-01 (the dataset snapshot date).
 
     ROW_NUMBER() picks the latest visit within each (plugin, year, month)
-    window, giving ~12-15 data points per plugin rather than every visit.
+    window, giving ~12 data points per plugin per year rather than every visit.
 
-    Scans: ~12 GB (full origin_visit_status).
-    Output: ~50 MB.
+    Scans: ~150 GB (full origin_visit_status scan against 2025-10-08 dataset).
+    Output: ~200 MB.
+
+    Note: in the 2025-10-08 SWH schema the snapshot column is named "snapshot"
+    (not "snapshot_id" as in the 2021-03-23 schema).
     """
     return f"""
 CREATE TABLE "{dest_database}"."jenkins_visits"
@@ -248,7 +251,7 @@ WITH ranked AS (
         ovs.origin,
         ovs.visit,
         ovs.date        AS visit_date,
-        ovs.snapshot_id,
+        ovs.snapshot    AS snapshot_id,
         ROW_NUMBER() OVER (
             PARTITION BY ovs.origin,
                          year(ovs.date),
@@ -260,7 +263,7 @@ WITH ranked AS (
         ON ovs.origin = pu.url
     WHERE ovs.date     >= TIMESTAMP '2018-01-01 00:00:00'
       AND ovs.date < TIMESTAMP '2025-10-01 00:00:00'
-      AND ovs.snapshot_id IS NOT NULL
+      AND ovs.snapshot IS NOT NULL
 )
 SELECT origin, visit, visit_date, snapshot_id
 FROM ranked
@@ -278,8 +281,8 @@ def _sql_create_jenkins_snapshot_branch(
     Extract snapshot_branch rows for only the snapshots in jenkins_visits,
     keeping only revision-type targets (the ones the collector needs).
 
-    Scans: ~93 GB (full snapshot_branch scan with join filter).
-    Output: ~2 GB.
+    Scans: ~400 GB (full snapshot_branch scan against 2025-10-08 dataset).
+    Output: ~10 GB.
     """
     return f"""
 CREATE TABLE "{dest_database}"."jenkins_snapshot_branch"
@@ -308,11 +311,11 @@ def _sql_create_jenkins_directory_entry(
     Extract directory_entry rows for the root directories reachable from
     jenkins_snapshot_branch via the revision table.
 
-    This is the expensive step — it scans the full ~6.5 TB directory_entry
+    This is the expensive step — it scans the full ~30 TB directory_entry
     table once.  After this it never needs to happen again.
 
-    Scans: ~6.5 TB (unavoidable without pre-partitioning).
-    Output: ~5-10 GB.
+    Scans: ~30 TB (unavoidable without pre-partitioning, 2025-10-08 dataset).
+    Output: ~50 GB.  Estimated cost: ~$150 at standard Athena pricing ($5/TB).
     """
     return f"""
 CREATE TABLE "{dest_database}"."jenkins_directory_entry"
@@ -366,11 +369,11 @@ STEP_META = {
     "directory_entry": {
         "table": "jenkins_directory_entry",
         "subdir": "directory_entry",
-        "label": "directory_entry (scans ~6.5 TB — takes 1-3 hours)",
+        "label": "directory_entry (scans ~30 TB — takes 3-6 hours)",
         "warn": (
-            "WARNING: This step scans the full 6.5 TB directory_entry table.\n"
-            "It runs once and is never repeated.  Estimated cost: ~$32 at\n"
-            "standard Athena pricing ($5/TB).  Estimated time: 1-3 hours.\n"
+            "WARNING: This step scans the full ~30 TB directory_entry table.\n"
+            "It runs once and is never repeated.  Estimated cost: ~$150 at\n"
+            "standard Athena pricing ($5/TB).  Estimated time: 3-6 hours.\n"
             "After completion all future queries hit only your small extracted\n"
             "tables and cost effectively nothing."
         ),

@@ -8,6 +8,18 @@ from typing import Final
 import boto3  # pyright: ignore[reportMissingImports]
 from dotenv import load_dotenv  # pyright: ignore[reportMissingImports]
 
+# Schema matches swh-export relational.py as of the 2025-10-08 dataset release.
+# Key differences from the 2021-03-23 schema:
+#   - origin:              added "id" column
+#   - origin_visit_status: "snapshot_id" renamed to "snapshot"; column order changed
+#   - release:             author/name/message reordered; new date_offset,
+#                          date_raw_offset_bytes, raw_manifest columns
+#   - revision:            author/committer changed from string to binary;
+#                          new date_raw_offset_bytes, committer_date_raw_offset_bytes,
+#                          type, and raw_manifest columns added
+#   - content:             removed ctime; added data column
+#   - skipped_content:     removed ctime and origin columns
+#   - directory:           added raw_manifest column
 TABLES: Final[dict[str, list[tuple[str, str]]]] = {
     "content": [
         ("sha1", "string"),
@@ -15,8 +27,8 @@ TABLES: Final[dict[str, list[tuple[str, str]]]] = {
         ("sha256", "string"),
         ("blake2s256", "string"),
         ("length", "bigint"),
-        ("ctime", "timestamp"),
         ("status", "string"),
+        ("data", "binary"),
     ],
     "directory": [
         ("id", "string"),
@@ -30,6 +42,7 @@ TABLES: Final[dict[str, list[tuple[str, str]]]] = {
         ("perms", "int"),
     ],
     "origin": [
+        ("id", "string"),
         ("url", "string"),
     ],
     "origin_visit": [
@@ -42,28 +55,36 @@ TABLES: Final[dict[str, list[tuple[str, str]]]] = {
         ("origin", "string"),
         ("visit", "bigint"),
         ("date", "timestamp"),
-        ("type", "string"),
-        ("snapshot_id", "string"),
         ("status", "string"),
+        ("snapshot", "string"),  # was "snapshot_id" in 2021 schema
+        ("type", "string"),
     ],
     "release": [
         ("id", "string"),
-        ("target", "string"),
-        ("date", "timestamp"),
-        ("author", "string"),
         ("name", "binary"),
         ("message", "binary"),
+        ("target", "string"),
+        ("target_type", "string"),
+        ("author", "binary"),
+        ("date", "timestamp"),
+        ("date_offset", "smallint"),
+        ("date_raw_offset_bytes", "binary"),
+        ("raw_manifest", "binary"),
     ],
     "revision": [
         ("id", "string"),
         ("message", "binary"),
-        ("author", "string"),
+        ("author", "binary"),
         ("date", "timestamp"),
         ("date_offset", "smallint"),
-        ("committer", "string"),
+        ("date_raw_offset_bytes", "binary"),
+        ("committer", "binary"),
         ("committer_date", "timestamp"),
         ("committer_offset", "smallint"),
+        ("committer_date_raw_offset_bytes", "binary"),
         ("directory", "string"),
+        ("type", "string"),
+        ("raw_manifest", "binary"),
     ],
     "revision_history": [
         ("id", "string"),
@@ -76,10 +97,8 @@ TABLES: Final[dict[str, list[tuple[str, str]]]] = {
         ("sha256", "string"),
         ("blake2s256", "string"),
         ("length", "bigint"),
-        ("ctime", "timestamp"),
         ("status", "string"),
         ("reason", "string"),
-        ("origin", "string"),
     ],
     "snapshot": [
         ("id", "string"),
