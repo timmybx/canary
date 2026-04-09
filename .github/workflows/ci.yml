@@ -35,8 +35,10 @@ jobs:
 
       - name: Install dependencies (pinned)
         run: |
-          # Uses a pinned, hashed lockfile. Generate it with:
+          # Uses pinned, hashed lockfiles. Generate them with:
+          #   python -m piptools compile --generate-hashes -o requirements.txt pyproject.toml
           #   python -m piptools compile --generate-hashes -o requirements-dev.txt requirements-dev.in
+          python -m pip install --require-hashes -r requirements.txt
           python -m pip install --require-hashes -r requirements-dev.txt
 
       - name: Ruff (lint)
