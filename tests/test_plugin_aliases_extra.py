@@ -14,7 +14,6 @@ from canary.plugin_aliases import (
     load_plugin_alias_map,
 )
 
-
 # ---------------------------------------------------------------------------
 # _normalize_plugin_id
 # ---------------------------------------------------------------------------
@@ -201,9 +200,7 @@ def test_load_plugin_alias_map_reads_snapshot_files(tmp_path: Path):
         "plugin_id": "canonical-plugin",
         "aliases": ["snap-alias"],
     }
-    (plugins_dir / "canonical-plugin.snapshot.json").write_text(
-        json.dumps(snap), encoding="utf-8"
-    )
+    (plugins_dir / "canonical-plugin.snapshot.json").write_text(json.dumps(snap), encoding="utf-8")
     result = load_plugin_alias_map(data_dir=tmp_path)
     assert result.get("snap-alias") == "canonical-plugin"
 
@@ -217,9 +214,7 @@ def test_load_plugin_alias_map_snapshot_with_plugin_api_aliases(tmp_path: Path):
             "previousNames": ["api-former-name"],
         },
     }
-    (plugins_dir / "canonical-plugin.snapshot.json").write_text(
-        json.dumps(snap), encoding="utf-8"
-    )
+    (plugins_dir / "canonical-plugin.snapshot.json").write_text(json.dumps(snap), encoding="utf-8")
     result = load_plugin_alias_map(data_dir=tmp_path)
     assert result.get("api-former-name") == "canonical-plugin"
 
@@ -238,9 +233,11 @@ def test_load_plugin_alias_map_registry_path_skips_malformed_lines(tmp_path: Pat
     registry_dir.mkdir(parents=True)
     registry_path = registry_dir / "plugins.jsonl"
     content = (
-        json.dumps({"plugin_id": "good-plugin", "aliases": ["good-alias"]}) + "\n"
+        json.dumps({"plugin_id": "good-plugin", "aliases": ["good-alias"]})
+        + "\n"
         + "not json {{\n"
-        + json.dumps({"plugin_id": "another-plugin", "aliases": ["another-alias"]}) + "\n"
+        + json.dumps({"plugin_id": "another-plugin", "aliases": ["another-alias"]})
+        + "\n"
     )
     registry_path.write_text(content, encoding="utf-8")
     result = load_plugin_alias_map(registry_path=registry_path, data_dir=tmp_path)
@@ -255,8 +252,6 @@ def test_load_plugin_alias_map_snapshot_derives_id_from_filename(tmp_path: Path)
     snap = {
         "aliases": ["snap-filename-alias"],
     }
-    (plugins_dir / "derived-plugin.snapshot.json").write_text(
-        json.dumps(snap), encoding="utf-8"
-    )
+    (plugins_dir / "derived-plugin.snapshot.json").write_text(json.dumps(snap), encoding="utf-8")
     result = load_plugin_alias_map(data_dir=tmp_path)
     assert result.get("snap-filename-alias") == "derived-plugin"

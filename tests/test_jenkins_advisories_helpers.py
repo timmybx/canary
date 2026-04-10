@@ -21,7 +21,6 @@ from canary.collectors.jenkins_advisories import (
     merge_advisory_records,
 )
 
-
 # ---------------------------------------------------------------------------
 # _cvss_base_score_to_severity_label
 # ---------------------------------------------------------------------------

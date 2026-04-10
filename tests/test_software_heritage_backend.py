@@ -11,7 +11,6 @@ from canary.collectors.software_heritage_backend import (
     default_out_dir_for_backend,
 )
 
-
 # ---------------------------------------------------------------------------
 # default_out_dir_for_backend
 # ---------------------------------------------------------------------------

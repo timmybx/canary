@@ -6,7 +6,6 @@ import pytest
 
 from canary.train.registry import AVAILABLE_MODELS, MODEL_REGISTRY, get_model
 
-
 # ---------------------------------------------------------------------------
 # MODEL_REGISTRY shape
 # ---------------------------------------------------------------------------

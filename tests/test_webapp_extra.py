@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from io import BytesIO
 from pathlib import Path
 
@@ -18,7 +17,6 @@ from canary.webapp import (
     _metric_value,
     _model_output_dir_parts,
     _namespace_for_data_action,
-    _normalize_model_output_dir,
     _optional_str,
     _plugin_known,
     _public_validation_error,
@@ -28,7 +26,6 @@ from canary.webapp import (
     parse_form,
     render_page,
 )
-
 
 # ---------------------------------------------------------------------------
 # _escape
@@ -319,17 +316,13 @@ def test_model_output_dir_parts_dotdot_raises():
 
 
 def test_model_output_dir_parts_valid(monkeypatch):
-    monkeypatch.setattr(
-        webapp, "MODEL_OUTPUTS_ROOT_PARTS", ("data", "processed", "models")
-    )
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT_PARTS", ("data", "processed", "models"))
     result = _model_output_dir_parts("data/processed/models/baseline_6m")
     assert result == ("baseline_6m",)
 
 
 def test_model_output_dir_parts_invalid_chars_raise(monkeypatch):
-    monkeypatch.setattr(
-        webapp, "MODEL_OUTPUTS_ROOT_PARTS", ("data", "processed", "models")
-    )
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT_PARTS", ("data", "processed", "models"))
     with pytest.raises(ValueError):
         _model_output_dir_parts("data/processed/models/../../../etc")
 

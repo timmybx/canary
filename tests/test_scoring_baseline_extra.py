@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -28,7 +28,7 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
 
 
 def _today_str() -> str:
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +221,7 @@ def test_score_plugin_baseline_with_advisories(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
     monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
 
-    today_str = datetime.now(timezone.utc).date().isoformat()
+    today_str = datetime.now(UTC).date().isoformat()
     _write_jsonl(
         tmp_path / "advisories" / "test-plugin.advisories.sample.jsonl",
         [
@@ -333,7 +333,7 @@ def test_score_plugin_baseline_with_dep_advisories(tmp_path: Path, monkeypatch):
     _write_json(tmp_path / "plugins" / "test-plugin.snapshot.json", snap)
 
     # Create advisory for the dependency
-    today_str = datetime.now(timezone.utc).date().isoformat()
+    today_str = datetime.now(UTC).date().isoformat()
     _write_jsonl(
         tmp_path / "advisories" / "risky-dep.advisories.sample.jsonl",
         [
@@ -425,7 +425,7 @@ def test_score_plugin_baseline_recent_release_reduces_score(tmp_path: Path, monk
     monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
 
     # Fresh release
-    fresh_ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "+00:00")
+    fresh_ts = datetime.now(UTC).isoformat().replace("+00:00", "+00:00")
 
     snap = {
         "plugin_id": "active-plugin",
