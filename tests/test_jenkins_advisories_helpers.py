@@ -118,9 +118,11 @@ def test_canonicalize_jenkins_url_normalizes_http_to_https():
 
 
 def test_canonicalize_jenkins_url_normalizes_jenkins_io_to_www():
+    from urllib.parse import urlparse
+
     result = _canonicalize_jenkins_url("https://jenkins.io/security/advisory/2025-01-01/")
     assert result is not None
-    assert "www.jenkins.io" in result
+    assert urlparse(result).netloc == "www.jenkins.io"
 
 
 def test_canonicalize_jenkins_url_keeps_www_unchanged():
@@ -552,7 +554,9 @@ def test_merge_advisory_records_prefers_www_url():
 
     result = merge_advisory_records([rec1, rec2])
     assert len(result) == 1
-    assert "www.jenkins.io" in result[0]["url"]
+    from urllib.parse import urlparse
+
+    assert urlparse(result[0]["url"]).netloc == "www.jenkins.io"
 
 
 def test_merge_advisory_records_active_security_warning_or():
