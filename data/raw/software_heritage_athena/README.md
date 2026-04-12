@@ -54,7 +54,7 @@ Before running any of the steps below you will need:
 
 - **AWS account** with Athena and S3 access
 - **Google Cloud project** with BigQuery enabled (for the GH Archive steps — separate pipeline)
-- **Python 3.11+** with the project dependencies installed (`pip install -r requirements.txt`)
+- **Python 3.12+** with the project dependencies installed (`pip install -r requirements.txt`)
 - The following environment variables set (in a `.env` file or your shell):
 
 ```
