@@ -3,7 +3,7 @@
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Ruff](https://img.shields.io/badge/lint-ruff-2ea44f?logo=ruff)
 ![Dependabot](https://img.shields.io/badge/dependabot-enabled-2ea44f?logo=dependabot)
-![Python](https://img.shields.io/badge/python-3.11-blue?logo=python)
+![Python](https://img.shields.io/badge/python-3.12-blue?logo=python)
 [![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://microsoft.github.io/pyright/)
 [![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 [![ClusterFuzzLite PR fuzzing](https://github.com/timmybx/canary/actions/workflows/cflite_pr.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/cflite_pr.yml)

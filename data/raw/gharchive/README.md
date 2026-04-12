@@ -25,7 +25,7 @@ statistics as features for predicting historical vulnerabilities.
 ## Prerequisites
 
 - **Google Cloud project** with BigQuery enabled and billing configured
-- **Python 3.11+** with project dependencies installed (`pip install -r requirements.txt`)
+- **Python 3.12+** with project dependencies installed (`pip install -r requirements.txt`)
 - The `google-cloud-bigquery` package (`pip install google-cloud-bigquery`)
 - Application Default Credentials configured:
   ```bash

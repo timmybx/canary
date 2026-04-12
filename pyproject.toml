@@ -3,7 +3,7 @@ name = "canary"
 version = "0.1.5"
 description = "CANARY: Component Analytics & Near-term Advisory Risk Yardstick"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
   "boto3>=1.35.0",
   "requests>=2.33.0",
@@ -48,7 +48,7 @@ skip_covered = false
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 cache-dir = "/tmp/.ruff_cache"
 
 [tool.ruff.lint]
