@@ -523,11 +523,13 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
                 swh_index_path = swh_dir / f"{plugin_id}.swh_index.json"
 
             if do_software_heritage:
-                if _nonempty(swh_index_path):
-                    swh_skipped += 1
-                else:
-                    if not args.real:
-                        raise SystemExit("ERROR: enrich software-heritage requires --real")
+                if not args.real:
+                    raise SystemExit("ERROR: enrich software-heritage requires --real")
+
+                # For Athena, do not skip solely because an index file already exists.
+                # The Athena collector can merge existing visit records when overwrite=False,
+                # so we allow it to revisit plugins and augment historical coverage.
+                if swh_backend == "athena":
                     collect_software_heritage(
                         plugin_id=plugin_id,
                         data_dir=str(data_raw),
@@ -545,6 +547,28 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
                         verbose=not bool(args.software_heritage_quiet),
                     )
                     swh_written += 1
+                else:
+                    # Keep the existing skip behavior for the API backend.
+                    if _nonempty(swh_index_path):
+                        swh_skipped += 1
+                    else:
+                        collect_software_heritage(
+                            plugin_id=plugin_id,
+                            data_dir=str(data_raw),
+                            out_dir=str(swh_dir),
+                            backend=swh_backend,
+                            timeout_s=float(args.software_heritage_timeout_s),
+                            overwrite=False,
+                            database=args.software_heritage_athena_database,
+                            output_location=args.software_heritage_athena_output_location,
+                            max_visits=int(args.software_heritage_athena_max_visits),
+                            directory_batch_size=int(
+                                args.software_heritage_athena_directory_batch_size
+                            ),
+                            max_directories=int(args.software_heritage_athena_max_directories),
+                            verbose=not bool(args.software_heritage_quiet),
+                        )
+                        swh_written += 1
 
         except Exception as e:
             errors += 1
