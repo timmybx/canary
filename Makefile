@@ -27,7 +27,7 @@ reqs:
 	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip>=26,<27' && pip-compile --allow-unsafe --generate-hashes -o requirements-build.txt requirements-build.in"
 	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip>=26,<27' && pip-compile --generate-hashes -o requirements-ci.txt requirements-ci.in"
 	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip>=26,<27' && pip-compile --generate-hashes -o requirements.txt pyproject.toml"
-	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip>=26,<27' && pip-compile --generate-hashes -o requirements-dev.txt requirements-dev.in"
+	docker compose run --rm canary sh -lc "python -m pip install --quiet 'pip>=26,<27' && pip-compile --allow-unsafe --generate-hashes -o requirements-dev.txt requirements-dev.in"
 
 all: ruff security pyright reqs test
 

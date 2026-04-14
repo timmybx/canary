@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.6] - 2026-04-13
+### Added
+- Model registry support for model-agnostic training, including CLI selection for logistic, random forest, XGBoost, and LightGBM workflows.
+- Additional Athena visit-record merging helpers and tests for Software Heritage collection behavior.
+- Expanded regression coverage across Jenkins advisory helpers, monthly labels, plugin aliases, scoring helpers, Software Heritage backends, training registry behavior, and webapp paths.
+
+### Changed
+- Upgraded the project baseline from Python 3.11 to Python 3.12 across package metadata, Docker image, CI, documentation, and regenerated requirement lockfiles.
+- Updated Software Heritage Athena tooling for the 2025-10-08 export, refreshed Jenkins extraction/schema scripts, and clarified extraction/repartitioning documentation.
+- Recomputed Software Heritage last-commit day calculations and extended the monthly feature window used by downstream training data.
+- Moved development dependencies out of `pyproject.toml` extras and into `requirements-dev.in`, with CI and Makefile generation paths updated accordingly.
+- Refreshed project naming/citation language around the "Component Analytics" CANARY tagline.
+
+### Fixed
+- Athena Software Heritage collection can now revisit existing indices instead of assuming a one-pass collection state.
+- Dependabot requirement compilation now uses `requirements.txt` as a constraints file to avoid pip-compile conflicts.
+- Container and pre-commit workflows were adjusted by removing unnecessary pre-commit rebuilds and adding `libgomp1` for native ML dependencies.
+- Test modules were tidied for formatting, imports, and UTC-aware datetime usage.
+
+### Security
+- Bumped `cryptography` to `46.0.7`.
+- Updated CodeQL/Scorecard GitHub Action pins and refreshed pre-commit hooks.
+- Updated lint/test tooling pins, including Ruff `0.15.9` and pytest-cov `7.1.0`.
+
 ## [0.1.5] - 2026-04-02
 ### Added
 - Software Heritage Athena backend support for collection and enrich flows, including Athena-specific raw data layout and collector wiring through the CLI/backend layer.
