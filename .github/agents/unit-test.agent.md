@@ -164,7 +164,7 @@ generated code will pass:
 The fastest local check cycle is:
 
 ```bash
-ruff check . --fix && ruff format . && pyright && bandit -r canary -q -s B608 && pytest -ra
+ruff check . --fix && ruff format . && pyright && bandit -r canary -q -s B608 && python -m canary.devtools.pip_audit_wrapper && pytest -ra
 ```
 
 ---
@@ -182,7 +182,9 @@ ruff check . --fix && ruff format . && pyright && bandit -r canary -q -s B608 &&
 - **Do not remove or skip existing tests** — existing tests protect existing behavior.
 - **Do not edit `requirements*.txt` by hand** — they are hash-pinned generated lockfiles.
 - **Do not bypass the URL allowlist** (`_ALLOWED_NETLOCS`) in any collector when writing
-  tests — mock at the `requests.get` level instead.
+  tests — mock the module's network boundary instead (for example,
+  `urllib.request.urlopen` or the collector's internal fetch helper), rather than
+  assuming `requests.get` is used.
 
 ---
 
