@@ -285,8 +285,8 @@ one-time lookups (e.g. alias maps, registry lookups).
 
 ## Pull request checklist
 
-When preparing a PR, ensure all of the following pass locally (these mirror the
-steps in `.github/workflows/ci.yml`):
+When preparing a PR, ensure all of the following pass locally (these follow the
+same order as the checks in `.github/workflows/ci.yml`):
 
 - [ ] `ruff check .` — no lint errors
 - [ ] `ruff format . --check` — no formatting differences
