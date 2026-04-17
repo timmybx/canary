@@ -13,9 +13,15 @@ improve line coverage, and increase branch coverage for changed or existing code
 - **Line Coverage:** 80% or higher (measured globally across the `canary` package)
 - **Branch Coverage:** 80% or higher (measured globally across the `canary` package)
 
-Coverage is collected automatically by pytest via `pyproject.toml`:
+Coverage is enabled automatically whenever you run pytest, because `pyproject.toml` passes
+`--cov` via `addopts`:
 
 ```toml
+# pyproject.toml — pytest-cov is invoked automatically for every pytest run
+[tool.pytest.ini_options]
+addopts = "-ra --cov=canary --cov-report=term-missing"
+
+# coverage.py settings (branch coverage, source)
 [tool.coverage.run]
 branch = true
 source = ["canary"]
@@ -24,8 +30,8 @@ source = ["canary"]
 Run locally with:
 
 ```bash
-pytest -ra                      # shows coverage summary in terminal
-pytest --cov-report=xml         # CI-style XML output
+pytest -ra                      # terminal coverage summary (addopts already includes --cov)
+pytest --cov-report=xml         # CI-style XML output (adds XML on top of term-missing)
 ```
 
 > **Note:** Hitting 80% on every individual module may not always be possible (e.g., modules
@@ -159,12 +165,12 @@ generated code will pass:
 3. `pyright` — no type errors (mode: `basic`)
 4. `bandit -r canary -q -s B608` — no security findings
 5. `python -m canary.devtools.pip_audit_wrapper` — no unresolved vulnerabilities
-6. `pytest -ra` — all tests pass, coverage targets met
+6. `pytest --cov-report=xml` — all tests pass, coverage targets met
 
 The fastest local check cycle is:
 
 ```bash
-ruff check . --fix && ruff format . && pyright && bandit -r canary -q -s B608 && python -m canary.devtools.pip_audit_wrapper && pytest -ra
+ruff check . --fix && ruff format . && pyright && bandit -r canary -q -s B608 && python -m canary.devtools.pip_audit_wrapper && pytest --cov-report=xml
 ```
 
 ---
