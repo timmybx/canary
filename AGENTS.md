@@ -121,7 +121,7 @@ canary build monthly-features --start … --end …   Time-bounded monthly bundl
 canary build monthly-labels  --in-path …           Label monthly bundle for ML
 
 canary score <plugin_id> [--real] [--json]         Score a single plugin
-canary train baseline    --in-path … --out-dir …   Train logistic regression by default (--model supports xgboost/lightgbm)
+canary train baseline    --in-path … --out-dir …   Train logistic regression by default (--model supports random_forest/xgboost/lightgbm)
 ```
 
 Use `--help` on any subcommand for the full flag list.
