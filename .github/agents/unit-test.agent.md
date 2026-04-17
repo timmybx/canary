@@ -139,9 +139,13 @@ with path.open("r", encoding="utf-8") as f:
 
 Tests in the default `pytest` invocation **must be offline and deterministic**.
 
-If you need to scaffold a test that makes a real network call, place it in a file named
-`test_<module>_extra.py` or `test_<module>_real.py` and document clearly at the top of the
-file that it requires live credentials and network access.
+If you need to scaffold a test that makes a real network call, you may follow the existing
+repository naming convention of `test_<module>_extra.py` or `test_<module>_real.py`, but
+be aware that **these suffixes do not automatically exclude the tests from CI** — pytest
+discovers them as normal `test_*.py` files. Any test that requires live credentials or
+network access must be explicitly skipped in CI, either with
+`@pytest.mark.skip(reason="requires live network")` or by adding the file to a pytest
+exclusion configuration. Always document at the top of the file that live access is needed.
 
 ---
 
