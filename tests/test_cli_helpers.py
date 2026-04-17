@@ -175,17 +175,17 @@ def test_cmd_collect_advisories_sample_single_plugin(tmp_path: Path) -> None:
     )
     rc = _cmd_collect_advisories(args)
     assert rc == 0
-    # With a specific plugin the sample returns [] (only matches workflow-cps in bulk)
+    # The sample fixture includes workflow-cps, so single-plugin sample mode writes this file.
     out_file = out_dir / "workflow-cps.advisories.sample.jsonl"
     assert out_file.exists()
 
 
-def test_cmd_collect_advisories_sample_single_plugin_with_data(tmp_path: Path) -> None:
-    """Single-plugin sample mode writes the file and returns 0."""
+def test_cmd_collect_advisories_bulk_sample_mode(tmp_path: Path) -> None:
+    """Bulk sample mode (plugin=None, real=False) writes the combined sample file."""
     out_dir = tmp_path / "advisories"
     args = argparse.Namespace(
         out_dir=str(out_dir),
-        plugin=None,  # bulk
+        plugin=None,
         real=False,
         data_dir=str(tmp_path / "data"),
         registry_path=str(tmp_path / "plugins.jsonl"),
@@ -195,6 +195,10 @@ def test_cmd_collect_advisories_sample_single_plugin_with_data(tmp_path: Path) -
     )
     rc = _cmd_collect_advisories(args)
     assert rc == 0
+    bulk_file = out_dir / "jenkins_advisories.sample.jsonl"
+    assert bulk_file.exists()
+    lines = [ln for ln in bulk_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) >= 1
 
 
 # ---------------------------------------------------------------------------
