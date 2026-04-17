@@ -106,12 +106,12 @@ All six must pass before a PR can be merged.
 ## CLI reference (canary …)
 
 ```
-canary collect registry  [--real | --sample]       Jenkins plugin registry
+canary collect registry  [--real]                  Jenkins plugin registry
 canary collect plugin    --id <id> [--real]         Per-plugin snapshot
 canary collect advisories [--plugin <id>] [--real]  Jenkins advisories
 canary collect github    --plugin <id>              GitHub API enrichment
 canary collect healthscore                          Plugin Health Score bulk
-canary collect gharchive --registry-path …         GH Archive (BigQuery)
+canary collect gharchive --registry-path … --start … --end …  GH Archive (BigQuery)
 canary collect software-heritage --plugin <id>      Software Heritage metadata
 canary collect enrich    [--real] [--only <src>]   Bulk fan-out over registry
 
@@ -121,7 +121,7 @@ canary build monthly-features --start … --end …   Time-bounded monthly bundl
 canary build monthly-labels  --in-path …           Label monthly bundle for ML
 
 canary score <plugin_id> [--real] [--json]         Score a single plugin
-canary train baseline    --in-path … --out-dir …   Train XGBoost/LightGBM model
+canary train baseline    --in-path … --out-dir …   Train logistic regression by default (--model supports random_forest/xgboost/lightgbm)
 ```
 
 Use `--help` on any subcommand for the full flag list.
@@ -137,8 +137,8 @@ data/raw/plugins/<id>.snapshot.json          Jenkins plugin snapshot
 data/raw/advisories/<id>.advisories.real.jsonl
 data/raw/github/<id>.*.json
 data/raw/healthscore/plugins/<id>.healthscore.json
-data/raw/gharchive/windows/<start>_<end>.gharchive.jsonl
-data/raw/gharchive/plugins/<id>.gharchive.jsonl
+data/raw/gharchive/normalized-events/YYYY-MM.gharchive.events.jsonl
+data/raw/gharchive/gharchive_index.json
 data/raw/software_heritage_api/<id>.swh.json
 data/raw/software_heritage_athena/<id>.swh_athena.json
 
@@ -153,7 +153,8 @@ data/processed/models/baseline_6m/           Trained model artefacts
 ```
 
 All bulk data files use **JSONL** (one JSON object per line, UTF-8).  Static
-per-plugin JSON payloads are written with `indent=2, ensure_ascii=False`.
+per-plugin JSON payloads should follow the `indent=2, ensure_ascii=False`
+convention.
 
 ---
 
@@ -175,6 +176,8 @@ in source code.
 | `ATHENA_S3_STAGING_DIR` | `collectors/software_heritage_athena.py` | S3 staging location for Athena query results |
 | `CANARY_WEB_HOST` | `webapp.py` | Web console bind address (default: `127.0.0.1`) |
 | `CANARY_WEB_PORT` | `webapp.py` | Web console port (default: `8000`) |
+| `CANARY_WEB_THREADS` | `webapp.py` | Waitress worker thread count for the web console (default: `8`) |
+| `CANARY_WEB_CONNECTION_LIMIT` | `webapp.py` | Waitress connection limit for the web console (default: `200`) |
 
 The Athena collector also loads a `.env` file via `python-dotenv` at import
 time — you can place these variables there for local runs.
@@ -243,8 +246,10 @@ with path.open("r", encoding="utf-8") as f:
 
 ### Security patterns in collectors
 
-- **URL allowlisting**: every HTTP collector validates `scheme == "https"` and
-  `netloc in _ALLOWED_NETLOCS` before fetching.
+- **URL allowlisting**: most HTTP collectors validate `scheme == "https"` and
+  `netloc in _ALLOWED_NETLOCS` before fetching.  Note: `collectors/healthscore.py`
+  uses a constant URL via `requests.get()` directly without an explicit allowlist
+  check — new collectors should follow the allowlisting pattern.
 - **Path traversal prevention**: untrusted strings are validated against a
   strict regex (`^[A-Za-z0-9][A-Za-z0-9._-]*$`) before being used as file
   name components.  Constructed paths are resolved with `.resolve()` and
@@ -268,8 +273,10 @@ one-time lookups (e.g. alias maps, registry lookups).
 - **All tests that run in the default `pytest` invocation must be offline and
   deterministic.**  They use static fixture files from `tests/fixtures/` or
   mocked data.
-- Files named `*_extra.py` or `*_real.py` may require live APIs or large
-  datasets; they are not run in CI's default `pytest` pass.
+- Files named `*_extra.py` or `*_real.py` are still discovered by pytest's
+  default `test_*.py` rules unless they are explicitly excluded elsewhere.
+  Treat those suffixes as naming conventions only, not as a mechanism that
+  keeps tests out of CI's default `pytest` pass.
 - Use `tests/fixtures/` for any static JSON/JSONL/CSV data needed by a test.
 - Do not remove or skip existing tests unless the behaviour they cover has been
   intentionally deleted.
@@ -278,7 +285,8 @@ one-time lookups (e.g. alias maps, registry lookups).
 
 ## Pull request checklist
 
-When preparing a PR, ensure all of the following pass locally:
+When preparing a PR, ensure all of the following pass locally (these follow the
+same order as the checks in `.github/workflows/ci.yml`):
 
 - [ ] `ruff check .` — no lint errors
 - [ ] `ruff format . --check` — no formatting differences
