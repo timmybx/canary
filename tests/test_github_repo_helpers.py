@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from email.message import Message
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -181,7 +182,7 @@ def test_fetch_json_any_http_error_raises_runtime_error():
         url="https://api.github.com/repos/o/r",
         code=403,
         msg="Forbidden",
-        hdrs=None,
+        hdrs=Message(),
         fp=None,
     )
     with patch("urllib.request.urlopen", side_effect=err):
@@ -465,6 +466,7 @@ def test_fetch_github_codeowners_does_not_overwrite_existing_resolved_path():
     ):
         result = fetch_github_codeowners("owner", "repo")
     # setdefault means pre-existing value is preserved
+    assert result is not None
     assert result["_resolved_path"] == "pre-set"
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -47,10 +48,10 @@ def test_nonempty_oserror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 
     original_stat = Path.stat
 
-    def bad_stat(self: Path, **kwargs: object) -> object:
+    def bad_stat(self: Path, *, follow_symlinks: bool = True) -> os.stat_result:
         if self == p:
             raise OSError("permission denied")
-        return original_stat(self, **kwargs)
+        return original_stat(self, follow_symlinks=follow_symlinks)
 
     monkeypatch.setattr(Path, "stat", bad_stat)
     assert _nonempty(p) is False
