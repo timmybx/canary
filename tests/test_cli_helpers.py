@@ -403,7 +403,7 @@ def test_cmd_train_baseline_returns_zero_and_prints(
 ) -> None:
     fake_metrics = {
         "target_col": "advisory_6m",
-        "model_name": "logistic_regression",
+        "model_name": "logistic",
         "train_row_count": 800,
         "train_positive_count": 40,
         "test_row_count": 200,
@@ -421,14 +421,18 @@ def test_cmd_train_baseline_returns_zero_and_prints(
             test_start_month="2024-01",
             exclude_cols=None,
             include_prefixes=None,
-            model="logistic_regression",
+            model="logistic",
+            split_strategy="time",
+            group_col="plugin_id",
+            test_fraction=0.2,
+            random_seed=42,
         )
         rc = _cmd_train_baseline(args)
 
     assert rc == 0
     captured = capsys.readouterr()
     assert "advisory_6m" in captured.out
-    assert "logistic_regression" in captured.out
+    assert "logistic" in captured.out
     assert "0.82" in captured.out
 
 
@@ -454,6 +458,10 @@ def test_cmd_train_baseline_extra_exclude_and_prefixes(tmp_path: Path) -> None:
             exclude_cols="col_a, col_b",
             include_prefixes="gh_, swh_",
             model="random_forest",
+            split_strategy="group",
+            group_col="plugin_id",
+            test_fraction=0.2,
+            random_seed=42,
         )
         _cmd_train_baseline(args)
 
