@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.7] - 2026-04-29
+### Added
+- Flexible train/test split controls for `canary train baseline`, including `time`, `group`, and `group_time` strategies with configurable grouping, holdout fraction, and seed behavior.
+- Large helper-focused regression suites for CLI parsing, feature-bundle helpers, GH Archive helpers, GitHub repository helpers, and webapp helpers, raising overall coverage from 71% to 77%.
+- Repository guidance for AI coding agents via `AGENTS.md` plus a unit-test agent spec under `.github/agents/`.
+
+### Changed
+- Refreshed runtime dependency floors and regenerated lockfiles for runtime, build, CI, and developer environments, including newer `boto3`, `google-cloud-bigquery`, `requests`, `numpy`, `pandas`, `ruff`, `pre-commit`, `pip`, `packaging`, and `wheel` versions.
+- Updated Dependabot configuration to group pip ecosystem updates and refreshed pinned GitHub Action revisions across CodeQL, Scorecard, Zizmor, and pull-request automation workflows.
+- Refreshed the Docker base image digest and supporting lockfiles so requirement regeneration and container-based workflows stay aligned with current packaging tooling.
+
+### Fixed
+- Restored compatibility between the train-baseline CLI and the backwards-compatible `train_baseline(...)` wrapper by accepting and forwarding the newer split-related keyword arguments.
+- Resolved `make reqs` / lockfile regeneration failures caused by outdated packaging inputs and stale dependency constraints.
+
+### Security
+- Removed the blanket Bandit `B101` skip so assertion usage is checked again during security scans.
+- Bumped `pip` to `26.1` to address `CVE-2026-3219`.
+
 ## [0.1.6] - 2026-04-13
 ### Added
 - Model registry support for model-agnostic training, including CLI selection for logistic, random forest, XGBoost, and LightGBM workflows.
