@@ -458,7 +458,7 @@ def test_cmd_train_baseline_extra_exclude_and_prefixes(tmp_path: Path) -> None:
             exclude_cols="col_a, col_b",
             include_prefixes="gh_, swh_",
             model="random_forest",
-            split_strategy="time",
+            split_strategy="group",
             group_col="plugin_id",
             test_fraction=0.2,
             random_seed=42,
