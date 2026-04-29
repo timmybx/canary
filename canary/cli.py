@@ -68,6 +68,10 @@ def _cmd_train_baseline(args: argparse.Namespace) -> int:
         extra_exclude=extra_exclude,
         include_prefixes=include_prefixes,
         model_name=args.model,
+        split_strategy=args.split_strategy,
+        group_col=args.group_col,
+        test_fraction=args.test_fraction,
+        random_seed=args.random_seed,
     )
 
     print(f"Trained baseline for target {metrics['target_col']}")
@@ -714,6 +718,15 @@ def build_parser() -> argparse.ArgumentParser:
             "(default: logistic)"
         ),
     )
+    train_baseline_parser.add_argument(
+        "--split-strategy",
+        choices=["time", "group", "group_time"],
+        default="time",
+    )
+    train_baseline_parser.add_argument("--group-col", default="plugin_id")
+    train_baseline_parser.add_argument("--test-fraction", type=float, default=0.2)
+    train_baseline_parser.add_argument("--random-seed", type=int, default=42)
+
     train_baseline_parser.set_defaults(func=_cmd_train_baseline)
 
     plugin = collect_sub.add_parser("plugin", help="Collect a plugin snapshot")

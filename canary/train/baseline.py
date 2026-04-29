@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -220,6 +221,67 @@ def _extract_feature_importance(
     return top_positive, top_negative
 
 
+def _stable_plugin_bucket(plugin_id: Any, *, seed: int) -> float:
+    text = str(plugin_id or "")
+    digest = hashlib.sha256(f"{seed}:{text}".encode()).hexdigest()
+    return int(digest[:16], 16) / float(16**16)
+
+
+def _split_rows(
+    rows: list[dict[str, Any]],
+    *,
+    split_strategy: str,
+    test_start_month: str,
+    group_col: str,
+    test_fraction: float,
+    random_seed: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[str]]:
+    if split_strategy == "time":
+        train_rows = [
+            row
+            for row in rows
+            if _month_to_sortable(_parse_month_value(row)) < _month_to_sortable(test_start_month)
+        ]
+        test_rows = [
+            row
+            for row in rows
+            if _month_to_sortable(_parse_month_value(row)) >= _month_to_sortable(test_start_month)
+        ]
+        return train_rows, test_rows, set()
+
+    groups = sorted({str(row.get(group_col) or "") for row in rows if row.get(group_col)})
+    test_groups = {
+        group for group in groups if _stable_plugin_bucket(group, seed=random_seed) < test_fraction
+    }
+
+    if split_strategy == "group":
+        return (
+            [r for r in rows if str(r.get(group_col) or "") not in test_groups],
+            [r for r in rows if str(r.get(group_col) or "") in test_groups],
+            test_groups,
+        )
+
+    if split_strategy == "group_time":
+        return (
+            [
+                r
+                for r in rows
+                if str(r.get(group_col) or "") not in test_groups
+                and _month_to_sortable(_parse_month_value(r)) < _month_to_sortable(test_start_month)
+            ],
+            [
+                r
+                for r in rows
+                if str(r.get(group_col) or "") in test_groups
+                and _month_to_sortable(_parse_month_value(r))
+                >= _month_to_sortable(test_start_month)
+            ],
+            test_groups,
+        )
+
+    raise ValueError(f"Unknown split_strategy: {split_strategy}")
+
+
 # ---------------------------------------------------------------------------
 # Core training function — model-agnostic
 # ---------------------------------------------------------------------------
@@ -235,6 +297,10 @@ def train_model(
     test_start_month: str = "2025-10",
     extra_exclude: set[str] | None = None,
     include_prefixes: tuple[str, ...] | None = None,
+    split_strategy: str = "time",
+    group_col: str = "plugin_id",
+    test_fraction: float = 0.2,
+    random_seed: int = 42,
 ) -> dict[str, Any]:
     """
     Train *estimator* on monthly plugin rows using a time-based split.
@@ -270,16 +336,14 @@ def train_model(
     if not feature_cols:
         raise ValueError("No usable numeric feature columns found.")
 
-    train_rows = [
-        row
-        for row in usable_rows
-        if _month_to_sortable(_parse_month_value(row)) < _month_to_sortable(test_start_month)
-    ]
-    test_rows = [
-        row
-        for row in usable_rows
-        if _month_to_sortable(_parse_month_value(row)) >= _month_to_sortable(test_start_month)
-    ]
+    train_rows, test_rows, test_groups = _split_rows(
+        usable_rows,
+        split_strategy=split_strategy,
+        test_start_month=test_start_month,
+        group_col=group_col,
+        test_fraction=test_fraction,
+        random_seed=random_seed,
+    )
 
     if not train_rows:
         raise ValueError("No training rows found. Adjust test_start_month.")
@@ -323,6 +387,14 @@ def train_model(
             y_pred,
             output_dict=True,
             zero_division=cast(Any, 0),
+        ),
+        "split_strategy": split_strategy,
+        "group_col": group_col,
+        "test_fraction": float(test_fraction),
+        "random_seed": int(random_seed),
+        "test_group_count": int(len(test_groups)),
+        "train_group_count": int(
+            len({str(row.get(group_col) or "") for row in train_rows if row.get(group_col)})
         ),
     }
 
@@ -394,6 +466,10 @@ def train_baseline(
     extra_exclude: set[str] | None = None,
     include_prefixes: tuple[str, ...] | None = None,
     model_name: str = "logistic",
+    split_strategy: str = "time",
+    group_col: str = "plugin_id",
+    test_fraction: float = 0.2,
+    random_seed: int = 42,
 ) -> dict[str, Any]:
     """
     Train a model by name using the CANARY model registry.
@@ -412,4 +488,8 @@ def train_baseline(
         test_start_month=test_start_month,
         extra_exclude=extra_exclude,
         include_prefixes=include_prefixes,
+        split_strategy=split_strategy,
+        group_col=group_col,
+        test_fraction=test_fraction,
+        random_seed=random_seed,
     )
