@@ -422,6 +422,10 @@ def test_cmd_train_baseline_returns_zero_and_prints(
             exclude_cols=None,
             include_prefixes=None,
             model="logistic_regression",
+            split_strategy="time",
+            group_col="plugin_id",
+            test_fraction=0.2,
+            random_seed=42,
         )
         rc = _cmd_train_baseline(args)
 
@@ -454,6 +458,10 @@ def test_cmd_train_baseline_extra_exclude_and_prefixes(tmp_path: Path) -> None:
             exclude_cols="col_a, col_b",
             include_prefixes="gh_, swh_",
             model="random_forest",
+            split_strategy="time",
+            group_col="plugin_id",
+            test_fraction=0.2,
+            random_seed=42,
         )
         _cmd_train_baseline(args)
 
