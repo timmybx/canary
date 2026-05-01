@@ -616,7 +616,7 @@ def test_cmd_collect_github(tmp_path: Path, capsys: pytest.CaptureFixture) -> No
 
 
 def test_cmd_collect_advisories_real_single_plugin(tmp_path: Path) -> None:
-    """Cover real=True single-plugin path (line 101)."""
+    """Real-mode single-plugin path writes a per-plugin advisories file."""
     fake_records = [{"source": "jenkins", "plugin_id": "git"}]
 
     with patch("canary.cli.collect_advisories_real", return_value=fake_records):
@@ -638,7 +638,7 @@ def test_cmd_collect_advisories_real_single_plugin(tmp_path: Path) -> None:
 
 
 def test_cmd_collect_advisories_bulk_max_plugins_limit(tmp_path: Path) -> None:
-    """Cover max_plugins break in bulk real mode (line 140)."""
+    """Bulk real mode respects the max_plugins limit and stops early."""
     reg = tmp_path / "plugins.jsonl"
     _write_registry(reg, [{"plugin_id": "git"}, {"plugin_id": "ant"}, {"plugin_id": "matrix"}])
 
@@ -669,7 +669,7 @@ def test_cmd_collect_advisories_bulk_max_plugins_limit(tmp_path: Path) -> None:
 
 
 def test_cmd_collect_advisories_bulk_no_snapshot_skip(tmp_path: Path) -> None:
-    """Cover no_snapshot += 1 / continue path (lines 146-147)."""
+    """Plugins with no snapshot file are silently skipped in bulk mode."""
     reg = tmp_path / "plugins.jsonl"
     _write_registry(reg, [{"plugin_id": "git"}])
     # No snapshot file — plugin should be skipped
@@ -692,7 +692,7 @@ def test_cmd_collect_advisories_bulk_no_snapshot_skip(tmp_path: Path) -> None:
 
 
 def test_cmd_collect_advisories_bulk_overwrite_false_skips_existing(tmp_path: Path) -> None:
-    """Cover overwrite=False skip path (lines 151-152)."""
+    """Existing per-plugin file is skipped when overwrite=False."""
     reg = tmp_path / "plugins.jsonl"
     _write_registry(reg, [{"plugin_id": "git"}])
 
@@ -724,7 +724,7 @@ def test_cmd_collect_advisories_bulk_overwrite_false_skips_existing(tmp_path: Pa
 
 
 def test_cmd_collect_advisories_bulk_error_handling(tmp_path: Path) -> None:
-    """Cover error path in bulk real mode (lines 160-162)."""
+    """Per-plugin collection errors are caught and the return code becomes 2."""
     reg = tmp_path / "plugins.jsonl"
     _write_registry(reg, [{"plugin_id": "git"}])
 
@@ -756,7 +756,7 @@ def test_cmd_collect_advisories_bulk_error_handling(tmp_path: Path) -> None:
 
 
 def test_cmd_collect_registry_real_with_raw_out(tmp_path: Path) -> None:
-    """Cover real=True path including raw_out writing (lines 272-278, 291)."""
+    """Real-mode registry collection writes plugins.jsonl and an optional raw pages file."""
     fake_registry = [{"plugin_id": "git"}, {"plugin_id": "ant"}]
     fake_raw_pages: list[dict] = [{"page": 1}]
 
@@ -812,7 +812,7 @@ def test_cmd_collect_registry_real_no_raw_out(tmp_path: Path) -> None:
 
 
 def test_cmd_collect_software_heritage_with_out_dir(tmp_path: Path) -> None:
-    """Cover _cmd_collect_software_heritage with explicit out_dir (lines 311-330)."""
+    """Explicit out_dir is passed through to collect_software_heritage."""
     fake_result = {"plugin_id": "git", "revisions": 5}
 
     with patch("canary.cli.collect_software_heritage", return_value=fake_result):
@@ -870,7 +870,7 @@ def test_cmd_collect_software_heritage_default_out_dir(tmp_path: Path) -> None:
 
 
 def test_cmd_collect_gharchive(tmp_path: Path) -> None:
-    """Cover _cmd_collect_gharchive (lines 334-349)."""
+    """All GH Archive arguments are forwarded to collect_gharchive_history_real."""
     fake_result = {"queries": 5, "rows": 100}
 
     with patch("canary.cli.collect_gharchive_history_real", return_value=fake_result) as mock_gh:
@@ -900,7 +900,7 @@ def test_cmd_collect_gharchive(tmp_path: Path) -> None:
 
 
 def test_cmd_build_monthly_feature_bundle(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
-    """Cover _cmd_build_monthly_feature_bundle (lines 370-383)."""
+    """Monthly feature bundle record count is printed after build."""
     fake_records = [{"plugin_id": f"p-{i}"} for i in range(5)]
 
     with patch("canary.cli.build_monthly_feature_bundle", return_value=fake_records):
@@ -958,7 +958,7 @@ def _make_enrich_args(
 
 
 def test_cmd_collect_enrich_missing_registry(tmp_path: Path) -> None:
-    """Missing registry raises SystemExit (line 400)."""
+    """Missing registry file raises SystemExit before any work is done."""
     args = _make_enrich_args(tmp_path)
     # registry file not created, so it doesn't exist
     with pytest.raises(SystemExit):
@@ -966,7 +966,7 @@ def test_cmd_collect_enrich_missing_registry(tmp_path: Path) -> None:
 
 
 def test_cmd_collect_enrich_only_healthscore(tmp_path: Path) -> None:
-    """only='healthscore' path: fetch health scores and return early (lines 444-464)."""
+    """only='healthscore' fetches bulk health scores and returns without per-plugin iteration."""
     reg = tmp_path / "plugins.jsonl"
     _write_registry(reg, [{"plugin_id": "git"}])
 
@@ -981,7 +981,7 @@ def test_cmd_collect_enrich_only_healthscore(tmp_path: Path) -> None:
 
 
 def test_cmd_collect_enrich_healthscore_error(tmp_path: Path) -> None:
-    """Health-score collection error increments errors counter (lines 453-455)."""
+    """Health-score collection error increments the errors counter and returns 2."""
     reg = tmp_path / "plugins.jsonl"
     _write_registry(reg, [{"plugin_id": "git"}])
 
@@ -994,7 +994,7 @@ def test_cmd_collect_enrich_healthscore_error(tmp_path: Path) -> None:
 
 
 def test_cmd_collect_enrich_snapshot_only(tmp_path: Path) -> None:
-    """only='snapshot' writes per-plugin snapshot files (lines 474-487)."""
+    """only='snapshot' collects and writes per-plugin snapshot files."""
     reg = tmp_path / "plugins.jsonl"
     _write_registry(reg, [{"plugin_id": "git"}])
 
@@ -1029,7 +1029,7 @@ def test_cmd_collect_enrich_snapshot_already_exists(tmp_path: Path) -> None:
 
 
 def test_cmd_collect_enrich_max_plugins(tmp_path: Path) -> None:
-    """max_plugins break in enrich loop (line 467-468)."""
+    """Enrich loop stops after max_plugins plugins have been processed."""
     reg = tmp_path / "plugins.jsonl"
     _write_registry(reg, [{"plugin_id": "git"}, {"plugin_id": "ant"}])
 
@@ -1046,7 +1046,7 @@ def test_cmd_collect_enrich_max_plugins(tmp_path: Path) -> None:
 
 
 def test_cmd_collect_enrich_plugin_error(tmp_path: Path) -> None:
-    """Per-plugin error increments errors and returns 2 (lines 577-579)."""
+    """Per-plugin errors are caught, the errors counter is incremented, and return code is 2."""
     reg = tmp_path / "plugins.jsonl"
     _write_registry(reg, [{"plugin_id": "git"}])
 
@@ -1063,7 +1063,7 @@ def test_cmd_collect_enrich_plugin_error(tmp_path: Path) -> None:
 
 
 def test_cmd_build_advisories_events(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
-    """Cover _cmd_build_advisories_events (lines 607-612)."""
+    """Advisory events are built and a confirmation message is printed."""
     with patch("canary.cli.build_advisories_events", return_value=42):
         args = argparse.Namespace(
             data_raw_dir=str(tmp_path / "raw"),
@@ -1082,7 +1082,7 @@ def test_cmd_build_advisories_events(tmp_path: Path, capsys: pytest.CaptureFixtu
 
 
 def test_cmd_score_text_mode(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
-    """Cover _cmd_score text output path (lines 622-626)."""
+    """Text mode prints the plugin name, score, and reason list."""
     fake_result = MagicMock()
     fake_result.plugin = "git"
     fake_result.score = 75
@@ -1100,7 +1100,7 @@ def test_cmd_score_text_mode(tmp_path: Path, capsys: pytest.CaptureFixture) -> N
 
 
 def test_cmd_score_json_mode(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
-    """Cover _cmd_score JSON output path (lines 619-620)."""
+    """JSON mode prints a parseable dict from result.to_dict()."""
     fake_result = MagicMock()
     fake_result.to_dict.return_value = {"plugin": "git", "score": 75, "reasons": []}
 
@@ -1121,7 +1121,7 @@ def test_cmd_score_json_mode(tmp_path: Path, capsys: pytest.CaptureFixture) -> N
 
 
 def test_build_parser_returns_argument_parser() -> None:
-    """Calling build_parser() covers the entire parser setup (lines 631-1173)."""
+    """build_parser() returns a properly configured ArgumentParser."""
     p = build_parser()
     assert isinstance(p, argparse.ArgumentParser)
     assert p.prog == "canary"
@@ -1176,7 +1176,7 @@ def test_build_parser_build_features_subcommand() -> None:
 
 
 def test_main_dispatches_to_func() -> None:
-    """main() parses args and calls args.func, returning its return value (lines 1177-1179)."""
+    """main() builds the parser, parses args, and dispatches to args.func."""
     mock_func = MagicMock(return_value=0)
 
     with patch("canary.cli.build_parser") as mock_bp:
