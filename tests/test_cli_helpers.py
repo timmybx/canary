@@ -814,12 +814,13 @@ def test_cmd_collect_registry_real_no_raw_out(tmp_path: Path) -> None:
 def test_cmd_collect_software_heritage_with_out_dir(tmp_path: Path) -> None:
     """Explicit out_dir is passed through to collect_software_heritage."""
     fake_result = {"plugin_id": "git", "revisions": 5}
+    expected_out_dir = str(tmp_path / "swh")
 
-    with patch("canary.cli.collect_software_heritage", return_value=fake_result):
+    with patch("canary.cli.collect_software_heritage", return_value=fake_result) as mock_swh:
         args = argparse.Namespace(
             plugin="git",
             data_dir=str(tmp_path / "data"),
-            out_dir=str(tmp_path / "swh"),
+            out_dir=expected_out_dir,
             backend="api",
             timeout_s=30.0,
             overwrite=False,
@@ -833,6 +834,20 @@ def test_cmd_collect_software_heritage_with_out_dir(tmp_path: Path) -> None:
         rc = _cmd_collect_software_heritage(args)
 
     assert rc == 0
+    mock_swh.assert_called_once_with(
+        plugin_id="git",
+        data_dir=str(tmp_path / "data"),
+        out_dir=expected_out_dir,
+        backend="api",
+        timeout_s=30.0,
+        overwrite=False,
+        database=None,
+        output_location=None,
+        max_visits=1000,
+        directory_batch_size=50,
+        max_directories=5000,
+        verbose=True,
+    )
 
 
 def test_cmd_collect_software_heritage_default_out_dir(tmp_path: Path) -> None:
@@ -891,7 +906,20 @@ def test_cmd_collect_gharchive(tmp_path: Path) -> None:
         rc = _cmd_collect_gharchive(args)
 
     assert rc == 0
-    mock_gh.assert_called_once()
+    mock_gh.assert_called_once_with(
+        data_dir=str(tmp_path / "data"),
+        registry_path=str(tmp_path / "plugins.jsonl"),
+        out_dir=str(tmp_path / "gharchive"),
+        plugin_id=None,
+        start_yyyymmdd="20230101",
+        end_yyyymmdd="20231231",
+        bucket_days=30,
+        sample_percent=5.0,
+        max_bytes_billed=2_000_000_000,
+        overwrite=False,
+        allow_jenkinsci_fallback=True,
+        dry_run=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1081,7 +1109,7 @@ def test_cmd_build_advisories_events(tmp_path: Path, capsys: pytest.CaptureFixtu
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_score_text_mode(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+def test_cmd_score_text_mode(capsys: pytest.CaptureFixture) -> None:
     """Text mode prints the plugin name, score, and reason list."""
     fake_result = MagicMock()
     fake_result.plugin = "git"
@@ -1099,7 +1127,7 @@ def test_cmd_score_text_mode(tmp_path: Path, capsys: pytest.CaptureFixture) -> N
     assert "Reason A" in captured.out
 
 
-def test_cmd_score_json_mode(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+def test_cmd_score_json_mode(capsys: pytest.CaptureFixture) -> None:
     """JSON mode prints a parseable dict from result.to_dict()."""
     fake_result = MagicMock()
     fake_result.to_dict.return_value = {"plugin": "git", "score": 75, "reasons": []}
