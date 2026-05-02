@@ -12,6 +12,7 @@ dist/
 .env
 compose.override.yaml
 .local
+.cache
 
 # --- Generated data outputs (ignore by default) ---
 data/archive/**

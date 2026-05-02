@@ -103,7 +103,7 @@ class _WaitressServe(Protocol):
 
 def _load_waitress_serve() -> _WaitressServe | None:
     try:
-        from waitress import serve  # pyright: ignore[reportMissingImports]
+        from waitress import serve  # pyright: ignore[reportMissingModuleSource]
     except ImportError:  # pragma: no cover
         return None
     return cast(_WaitressServe, serve)
@@ -276,7 +276,57 @@ code { background:rgba(255,255,255,.05); padding:.15rem .35rem; border-radius:6p
 .matrix-grid td.matrix-cell--fp, .matrix-grid td.matrix-cell--fn { background: rgba(255,216,122,.08); border-color: rgba(255,216,122,.24); }
 .matrix-count { display: block; font-size: 1.5rem; font-weight: 800; color: var(--text); }
 .matrix-label { display: block; margin-top: .25rem; color: var(--muted); font-size: .85rem; }
+.matrix-label.tip { border-bottom: none; text-decoration: underline dotted var(--muted); text-underline-offset: 2px; }
 .matrix-side { min-width: 5.5rem; text-align: left; }
+
+/* ── Tooltip ─────────────────────────────────────────────────── */
+.tip { position:relative; display:inline-block; cursor:help; border-bottom:1px dashed var(--muted); }
+.tip::after {
+  content: attr(data-tip);
+  position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  background: #111c30; color: var(--text); border: 1px solid var(--line);
+  border-radius: 10px; padding: .55rem .75rem; font-size: .82rem; font-weight: 400;
+  white-space: normal; width: 240px; z-index: 99; pointer-events: none;
+  opacity: 0; transition: opacity .15s; line-height: 1.5;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+.tip:hover::after { opacity: 1; }
+
+/* ── Model badge ─────────────────────────────────────────────── */
+.model-badge {
+  display:inline-flex; align-items:center; gap:.45rem;
+  padding:.3rem .8rem; border-radius:999px; font-size:.82rem; font-weight:700;
+  background:rgba(111,177,255,.13); border:1px solid rgba(111,177,255,.3); color:var(--accent2);
+}
+.model-badge--xgb { background:rgba(159,208,255,.1); border-color:rgba(159,208,255,.28); color:#b8e4ff; }
+.model-badge--lgb { background:rgba(141,240,188,.1); border-color:rgba(141,240,188,.28); color:var(--good); }
+
+/* ── Base rate bar ───────────────────────────────────────────── */
+.baserate-row { display:flex; align-items:center; gap:.75rem; margin-top:.5rem; flex-wrap:wrap; }
+.baserate-label { font-size:.85rem; color:var(--muted); white-space:nowrap; }
+.baserate-track { flex:1; min-width:120px; height:8px; background:rgba(255,255,255,.08); border-radius:99px; overflow:hidden; }
+.baserate-fill { height:100%; border-radius:99px; background: linear-gradient(90deg, var(--accent), #4d95e6); }
+.baserate-val { font-size:.85rem; font-weight:700; color:var(--accent2); white-space:nowrap; }
+
+/* ── Ranking metrics row ─────────────────────────────────────── */
+.ranking-row { display:flex; gap:.6rem; flex-wrap:wrap; margin-top:.2rem; }
+.rank-cell {
+  flex:1; min-width:110px; background:var(--panel3); border:1px solid var(--line);
+  border-radius:14px; padding:.75rem .9rem; text-align:center;
+}
+.rank-cell__k { font-size:.8rem; color:var(--muted); font-weight:600; }
+.rank-cell__val { font-size:1.3rem; font-weight:800; margin-top:.2rem; }
+.rank-cell__lift { font-size:.78rem; color:var(--muted); margin-top:.15rem; }
+.rank-cell__val--good { color:var(--good); }
+.rank-cell__val--warn { color:var(--warn); }
+.rank-cell__val--muted { color:var(--muted); }
+
+/* ── Class report panel ──────────────────────────────────────── */
+.cls-table { width:100%; border-collapse:separate; border-spacing:.35rem; margin-top:.5rem; font-size:.88rem; }
+.cls-table th { color:var(--muted); font-weight:600; text-align:right; padding:.3rem .5rem; }
+.cls-table th:first-child { text-align:left; }
+.cls-table td { background:#0b1322; border:1px solid rgba(255,255,255,.06); border-radius:8px; padding:.4rem .6rem; text-align:right; }
+.cls-table td:first-child { text-align:left; font-weight:600; color:var(--accent2); }
 """
 
 
@@ -1107,13 +1157,38 @@ def _metric_value(value: Any, *, digits: int = 3) -> str:
     return str(value)
 
 
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _render_feature_columns_panel(feature_columns: Any) -> str:
     if not isinstance(feature_columns, list):
         return ""
     items = [item for item in feature_columns if isinstance(item, str) and item.strip()]
     if not items:
         return ""
-    list_html = "".join(f"<li><code>{_escape(item)}</code></li>" for item in items)
+
+    def _feature_li(feat: str) -> str:
+        tip = _FEATURE_TIPS.get(feat, "")
+        if tip:
+            return (
+                f'<li><span class="tip" data-tip="{_escape(tip)}">'
+                f"<code>{_escape(feat)}</code>"
+                f"</span></li>"
+            )
+        return f"<li><code>{_escape(feat)}</code></li>"
+
+    list_html = "".join(_feature_li(item) for item in items)
     return (
         '<div class="feature-list-wrap">'
         "<h4>All feature columns</h4>"
@@ -1122,12 +1197,901 @@ def _render_feature_columns_panel(feature_columns: Any) -> str:
     )
 
 
+_METRIC_TIPS: dict[str, str] = {
+    "ROC AUC": (
+        "Area Under the ROC Curve. Measures how well the model ranks positive cases above negative ones. "
+        "0.5 = no better than random; 1.0 = perfect separation. "
+        "When the positive class is rare, the Precision-Recall curve (Average Precision) is generally more informative."
+    ),
+    "Average Precision": (
+        "Area under the Precision-Recall curve, summarising model quality across all classification thresholds. "
+        "Preferred over ROC AUC when positive examples are a small fraction of the dataset, "
+        "because it focuses on the model's ability to identify true positives without being inflated by the large number of true negatives."
+    ),
+    "Precision@K": (
+        "Of the top K components ranked by predicted risk score, what fraction were actually labeled positive "
+        "(i.e., received an advisory within the prediction horizon)? "
+        "Directly measures triage utility: if a security team can only review K components per cycle, "
+        "Precision@K tells them how often that review effort will be well-placed."
+    ),
+    "Base rate": (
+        "The fraction of observations in the test set that are labeled positive (i.e., an advisory occurred "
+        "within the prediction horizon). This is the baseline: a model that randomly flags components "
+        "would achieve this precision by chance. Precision@K values should be interpreted relative to the base rate."
+    ),
+    "Recall (positive)": (
+        "Of all components that actually received an advisory during the test window, "
+        "what fraction did the model flag as high-risk? "
+        "High recall means fewer missed advisories; lower recall means more vulnerable components go undetected."
+    ),
+    "Precision (positive)": (
+        "Of all components the model predicted as high-risk, what fraction actually received an advisory? "
+        "High precision means fewer false alarms; lower precision means more wasted review effort."
+    ),
+    "F1 (positive)": (
+        "The harmonic mean of precision and recall for the positive class. "
+        "Balances the trade-off between catching true advisories and avoiding false alarms. "
+        "Can be misleading when classes are heavily imbalanced — "
+        "a model that rarely predicts positive may have misleadingly high precision."
+    ),
+    "Support": (
+        "The number of actual observations in this class within the test set. "
+        "For the positive class this is the count of plugin-month records that received an advisory; "
+        "for the negative class it is the count that did not. "
+        "Support is fixed by the data — it does not depend on model predictions."
+    ),
+    "Positive coefficient": (
+        "This feature's weight in the logistic regression model. "
+        "A positive coefficient means the model associates higher values of this feature "
+        "with a higher predicted probability of advisory occurrence. "
+        "Magnitude indicates relative influence within the model."
+    ),
+    "Negative coefficient": (
+        "This feature's weight in the logistic regression model. "
+        "A negative coefficient means the model associates higher values of this feature "
+        "with a lower predicted probability of advisory occurrence. "
+        "Direction and magnitude should be interpreted alongside other features — "
+        "correlated features can shift each other's coefficients."
+    ),
+    "XGBoost importance": (
+        "Gain-based feature importance from the XGBoost model. "
+        "Measures the average improvement in the loss function brought by splits on this feature, "
+        "weighted by the number of observations affected. "
+        "Higher importance means the feature contributed more to the model's splitting decisions. "
+        "Unlike logistic coefficients, this does not indicate direction (higher or lower risk)."
+    ),
+    "Train rows": (
+        "Total number of plugin-month records used to train the model. "
+        "Each row represents one plugin observed in one calendar month. "
+        "Rows from months before the test start date are used for training."
+    ),
+    "Test rows": (
+        "Total number of plugin-month records in the held-out test set. "
+        "These are records from months at or after the test start date "
+        "and were not seen by the model during training. "
+        "All evaluation metrics are computed on this set."
+    ),
+    "True negative": (
+        "The model predicted 'not vulnerable' and the component was indeed not associated "
+        "with an advisory during the prediction horizon. A correct negative prediction."
+    ),
+    "False positive": (
+        "The model predicted 'vulnerable' but no advisory was published for this component "
+        "during the prediction horizon. Also called a false alarm — "
+        "a security team acting on this would review a component that turned out to be fine."
+    ),
+    "False negative": (
+        "The model predicted 'not vulnerable' but an advisory was actually published "
+        "during the prediction horizon. A missed detection — "
+        "the riskiest type of error for a proactive risk-scoring use case."
+    ),
+    "True positive": (
+        "The model predicted 'vulnerable' and an advisory was indeed published "
+        "for this component during the prediction horizon. A correct positive prediction — "
+        "the model successfully flagged a component that warranted attention."
+    ),
+}
+
+_MODEL_LABELS: dict[str, tuple[str, str]] = {
+    "logistic": ("Logistic Regression", ""),
+    "xgboost": ("XGBoost", "model-badge--xgb"),
+    "lightgbm": ("LightGBM", "model-badge--lgb"),
+}
+
+# Feature descriptions: what the feature measures and why it was collected,
+# based on the literature motivating its inclusion. No results-based judgements.
+_FEATURE_TIPS: dict[str, str] = {
+    # ── Advisory history ────────────────────────────────────────────────────
+    "advisories_last_365d": (
+        "Count of Jenkins security advisories published for this plugin in the 365 days prior to the observation date. "
+        "Included because recent advisory history is a direct measure of past security exposure, "
+        "which the vulnerability recidivism literature (e.g. Ozment & Schechter, 2006) links to future risk."
+    ),
+    "advisories_present_any": (
+        "Binary indicator: has this plugin ever appeared in a Jenkins security advisory before the observation date? "
+        "Included to capture whether a plugin has any prior security disclosure history at all, "
+        "independent of frequency."
+    ),
+    "advisory_count_to_date": (
+        "Cumulative count of Jenkins security advisories for this plugin up to the observation date. "
+        "Included because prior advisory frequency is a standard predictor in vulnerability recidivism research "
+        "(Ozment & Schechter, 2006; Frei et al., 2010)."
+    ),
+    "advisory_cve_count_to_date": (
+        "Count of CVE identifiers associated with this plugin's advisories up to the observation date. "
+        "Included to distinguish advisories that resulted in formal CVE assignments, "
+        "which may indicate more severe or externally verified vulnerabilities."
+    ),
+    "advisory_cvss_ge_7_count_to_date": (
+        "Count of advisories with a CVSS base score of 7.0 or higher up to the observation date. "
+        "Included to capture exposure to high-severity vulnerabilities, "
+        "following CVSS severity thresholds used in NVD classification."
+    ),
+    "advisory_days_since_first_to_date": (
+        "Days between the plugin's first ever Jenkins security advisory and the observation date. "
+        "Included as a proxy for how long a plugin has been in the advisory-publication ecosystem; "
+        "longer exposure windows provide more historical signal."
+    ),
+    "advisory_days_since_latest_to_date": (
+        "Days since the most recent Jenkins security advisory for this plugin, as of the observation date. "
+        "Included to capture recency of security activity; "
+        "recent advisories may indicate ongoing maintenance attention to security issues."
+    ),
+    "advisory_max_cvss_to_date": (
+        "Highest CVSS base score observed across all advisories for this plugin up to the observation date. "
+        "Included because maximum severity may reflect the attack surface or code complexity "
+        "that could predispose a plugin to future vulnerabilities."
+    ),
+    "advisory_mean_cvss_to_date": (
+        "Mean CVSS base score across all advisories for this plugin up to the observation date. "
+        "Included to characterise the typical severity of past vulnerabilities, "
+        "complementing the maximum severity measure."
+    ),
+    "advisory_span_days_to_date": (
+        "Number of days between the first and most recent advisory for this plugin, up to the observation date. "
+        "Included to measure how long a plugin has had an ongoing security disclosure history; "
+        "a longer span may indicate sustained vulnerability introduction over time."
+    ),
+    # ── GH Archive: activity volume ─────────────────────────────────────────
+    "gharchive_events_total": (
+        "Total GitHub event count for this repository in the current observation month, derived from GH Archive. "
+        "Included as a broad measure of project activity level, motivated by MSR research "
+        "linking activity signals to software health (Gousios et al., 2014)."
+    ),
+    "gharchive_events_total_trailing_3m": (
+        "Total GitHub events in the three months prior to the observation month. "
+        "Included to capture short-term activity trends that may not be visible in single-month counts."
+    ),
+    "gharchive_events_total_trailing_6m": (
+        "Total GitHub events in the six months prior to the observation month. "
+        "Included alongside the 3-month window to distinguish sustained activity from recent bursts."
+    ),
+    "gharchive_human_events": (
+        "GitHub events attributed to human (non-bot) actors in the current observation month. "
+        "Included to separate genuine developer activity from automated processes, "
+        "following Jordan & Chen (2025) on developer telemetry."
+    ),
+    "gharchive_human_events_trailing_3m": (
+        "Human-attributed GitHub events in the three months prior to the observation month."
+    ),
+    "gharchive_human_events_trailing_6m": (
+        "Human-attributed GitHub events in the six months prior to the observation month."
+    ),
+    "gharchive_bot_events": (
+        "GitHub events attributed to bots in the current observation month. "
+        "Included to measure automation activity such as dependency updates and CI, "
+        "which Alfadel et al. (2023) link to reduced vulnerability exposure windows."
+    ),
+    "gharchive_bot_events_trailing_3m": (
+        "Bot-attributed GitHub events in the three months prior to the observation month."
+    ),
+    "gharchive_bot_events_trailing_6m": (
+        "Bot-attributed GitHub events in the six months prior to the observation month."
+    ),
+    "gharchive_bot_event_ratio_3m": (
+        "Fraction of recent events attributed to bots over the trailing 3 months. "
+        "Included to characterise how much of a project's activity is automated vs. human-driven."
+    ),
+    # ── GH Archive: staleness / recency ─────────────────────────────────────
+    "gharchive_days_active": (
+        "Number of distinct days with any GitHub activity in the current observation month. "
+        "Included as a regularity signal — evenly distributed activity may indicate consistent maintenance."
+    ),
+    "gharchive_days_active_trailing_3m": ("Distinct active days over the trailing 3-month window."),
+    "gharchive_days_active_trailing_6m": ("Distinct active days over the trailing 6-month window."),
+    "gharchive_active_month_ratio_3m": (
+        "Fraction of the past 3 months in which any GitHub activity was observed. "
+        "Included as a maintenance regularity proxy — gaps may indicate reduced oversight."
+    ),
+    "gharchive_active_month_ratio_6m": (
+        "Fraction of the past 6 months in which any GitHub activity was observed. "
+        "Included alongside the 3-month window to capture longer-term maintenance patterns."
+    ),
+    "gharchive_activity_burstiness_6m": (
+        "Ratio of peak-month activity to average monthly activity over the past 6 months. "
+        "Included to detect sprint-then-stall development patterns, "
+        "which may indicate irregular maintenance (Prana et al., 2021)."
+    ),
+    "gharchive_months_since_any_activity": (
+        "Months elapsed since any GitHub event was observed for this repository. "
+        "Included as a staleness indicator; prolonged inactivity may signal project abandonment "
+        "(Panter & Eisty, 2026; Xu et al., 2025)."
+    ),
+    "gharchive_months_since_push": (
+        "Months since the last push event. "
+        "Included because push frequency is a core maintenance signal; "
+        "infrequent pushes are cited as a risk indicator in Prana et al. (2021)."
+    ),
+    "gharchive_months_since_release": (
+        "Months since the last GitHub release event. "
+        "Included because release cadence is linked to patch delivery timeliness, "
+        "a key factor in vulnerability remediation research (Alexopoulos et al., 2022)."
+    ),
+    "gharchive_months_since_release_tag": (
+        "Months since the last tag-create event associated with a release. "
+        "Included as a complementary release recency signal using tag-based versioning."
+    ),
+    "gharchive_months_since_issue": (
+        "Months since the last issue-related event. "
+        "Included to capture responsiveness to user-reported problems."
+    ),
+    "gharchive_months_since_pr": (
+        "Months since the last pull request event. "
+        "Included as a proxy for how recently the project has undergone code review activity."
+    ),
+    "gharchive_source_window_count": (
+        "Number of calendar months for which GH Archive data is available for this repository. "
+        "Included to account for data coverage — repositories with sparse archival may appear inactive."
+    ),
+    "gharchive_sample_percent": (
+        "Estimated fraction of GH Archive data available for this repository and window. "
+        "Included as a data quality indicator; low values may indicate incomplete event coverage."
+    ),
+    "gharchive_present": (
+        "Binary indicator: was any GH Archive data found for this repository? "
+        "Included to distinguish repositories with no archival coverage from those with measured zero activity."
+    ),
+    # ── GH Archive: contributors / actors ───────────────────────────────────
+    "gharchive_unique_actors": (
+        "Distinct GitHub actor identities (human and bot) observed in the current observation month. "
+        "Included as a contributor breadth measure; "
+        "contributor diversity is linked to both software quality and defect introduction (Meneely et al., 2014)."
+    ),
+    "gharchive_unique_actors_trailing_3m": (
+        "Distinct GitHub actors over the trailing 3-month window."
+    ),
+    "gharchive_unique_actors_trailing_6m": (
+        "Distinct GitHub actors over the trailing 6-month window."
+    ),
+    "gharchive_unique_human_actors": (
+        "Distinct human (non-bot) GitHub actors in the current observation month. "
+        "Included to measure genuine developer participation separate from automation."
+    ),
+    "gharchive_unique_human_actors_trailing_3m": (
+        "Distinct human GitHub actors over the trailing 3-month window."
+    ),
+    "gharchive_unique_human_actors_trailing_6m": (
+        "Distinct human GitHub actors over the trailing 6-month window. "
+        "Included because sustained contributor diversity over a longer window "
+        "may reflect a project's ongoing community engagement."
+    ),
+    "gharchive_actors_per_active_day_3m": (
+        "Average number of distinct actors per active day over the trailing 3 months. "
+        "Included as a density measure — high values may indicate concentrated burst activity."
+    ),
+    "gharchive_actors_per_active_day_6m": (
+        "Average number of distinct actors per active day over the trailing 6 months."
+    ),
+    "gharchive_owner_push_fraction": (
+        "Fraction of push events attributed to the most active single human pusher. "
+        "Included as a key-person risk (bus factor) indicator; "
+        "high concentration is linked to project fragility (Yamashita et al., 2015)."
+    ),
+    "gharchive_events_per_active_month_6m": (
+        "Average events per active month over the trailing 6-month window. "
+        "Included to normalise total activity by the number of active months, "
+        "distinguishing sustained activity from single-month bursts."
+    ),
+    # ── GH Archive: pull requests ────────────────────────────────────────────
+    "gharchive_pull_request_events": (
+        "Pull request events in the current observation month. "
+        "Included as a measure of code review workflow activity; "
+        "PR-based development is associated with higher code review discipline (Thompson, 2017)."
+    ),
+    "gharchive_pull_request_events_trailing_3m": (
+        "Pull request events over the trailing 3-month window."
+    ),
+    "gharchive_pull_request_events_trailing_6m": (
+        "Pull request events over the trailing 6-month window."
+    ),
+    "gharchive_pull_request_events_trailing_3m_delta_prev_3m": (
+        "Change in PR event volume between the most recent 3-month window and the prior 3-month window. "
+        "Included to detect trends in review activity — rising or falling PR rates may signal process changes."
+    ),
+    "gharchive_pull_request_closed_events": (
+        "Pull requests closed in the current observation month. "
+        "Included as a throughput indicator for the code review and integration process."
+    ),
+    "gharchive_pull_request_closed_events_trailing_3m": (
+        "Pull requests closed over the trailing 3-month window."
+    ),
+    "gharchive_pull_request_closed_events_trailing_6m": (
+        "Pull requests closed over the trailing 6-month window."
+    ),
+    "gharchive_pull_request_merged_events": (
+        "Pull requests merged in the current observation month. "
+        "Included to measure accepted code integration, distinct from closed-without-merge."
+    ),
+    "gharchive_pull_request_merged_events_trailing_3m": (
+        "Pull requests merged over the trailing 3-month window."
+    ),
+    "gharchive_pull_request_merged_events_trailing_6m": (
+        "Pull requests merged over the trailing 6-month window."
+    ),
+    "gharchive_pull_request_review_events": (
+        "PR review events in the current observation month. "
+        "Included as a direct measure of code review activity; "
+        "review intensity is linked to defect and vulnerability outcomes (Meneely et al., 2014)."
+    ),
+    "gharchive_pull_request_review_events_trailing_3m": (
+        "PR review events over the trailing 3-month window."
+    ),
+    "gharchive_pull_request_review_events_trailing_6m": (
+        "PR review events over the trailing 6-month window."
+    ),
+    "gharchive_pr_close_rate_3m": (
+        "Fraction of opened pull requests that were closed over the trailing 3 months. "
+        "Included as a triage efficiency indicator."
+    ),
+    "gharchive_pr_close_rate_6m": (
+        "Fraction of opened pull requests that were closed over the trailing 6 months."
+    ),
+    "gharchive_merge_rate_3m": (
+        "Fraction of closed pull requests that were merged over the trailing 3 months. "
+        "Included to distinguish accepted code changes from rejected or abandoned PRs."
+    ),
+    "gharchive_merge_rate_6m": (
+        "Fraction of closed pull requests that were merged over the trailing 6 months."
+    ),
+    "gharchive_pr_review_intensity_3m": (
+        "Average review events per pull request over the trailing 3 months. "
+        "Included as a proxy for depth of code scrutiny per change."
+    ),
+    "gharchive_pr_review_intensity_6m": (
+        "Average review events per pull request over the trailing 6 months."
+    ),
+    "gharchive_prs_per_push_3m": (
+        "Ratio of PR events to push events over the trailing 3 months. "
+        "Included to characterise how much of the project's code flow is review-gated vs. direct."
+    ),
+    "gharchive_prs_per_push_6m": ("Ratio of PR events to push events over the trailing 6 months."),
+    "gharchive_pr_merge_time_p50_hours": (
+        "Median time in hours from PR open to merge. "
+        "Included because review latency is linked to code integration quality (Zhang et al., 2021)."
+    ),
+    "gharchive_pr_merge_time_p90_hours": (
+        "90th-percentile time from PR open to merge. "
+        "Included to capture the slow tail of the review process — long delays may indicate bottlenecks."
+    ),
+    # ── GH Archive: pushes ───────────────────────────────────────────────────
+    "gharchive_push_events": (
+        "Push events in the current observation month. "
+        "Included as a measure of code change volume; "
+        "code churn is one of the earliest proposed vulnerability predictors (Shin et al., 2011)."
+    ),
+    "gharchive_push_events_trailing_3m": ("Push events over the trailing 3-month window."),
+    "gharchive_push_events_trailing_6m": ("Push events over the trailing 6-month window."),
+    "gharchive_push_events_trailing_3m_delta_prev_3m": (
+        "Change in push event volume between the most recent 3-month window and the prior 3-month window. "
+        "Included to detect acceleration or deceleration in code change activity."
+    ),
+    # ── GH Archive: issues ───────────────────────────────────────────────────
+    "gharchive_issues_events": (
+        "Issue-related events in the current observation month. "
+        "Included as a measure of community engagement and bug/feature intake."
+    ),
+    "gharchive_issues_events_trailing_3m": ("Issue events over the trailing 3-month window."),
+    "gharchive_issues_events_trailing_6m": ("Issue events over the trailing 6-month window."),
+    "gharchive_issues_closed_events": (
+        "Issues closed in the current observation month. "
+        "Included as a responsiveness indicator — how quickly reported problems are addressed."
+    ),
+    "gharchive_issues_closed_events_trailing_3m": (
+        "Issues closed over the trailing 3-month window."
+    ),
+    "gharchive_issues_closed_events_trailing_6m": (
+        "Issues closed over the trailing 6-month window."
+    ),
+    "gharchive_issue_close_rate_3m": (
+        "Fraction of issues closed relative to opened over the trailing 3 months. "
+        "Included as a maintainer responsiveness measure."
+    ),
+    "gharchive_issue_close_rate_6m": (
+        "Fraction of issues closed relative to opened over the trailing 6 months."
+    ),
+    "gharchive_issue_close_time_p50_hours": (
+        "Median time from issue open to close. "
+        "Included because issue resolution latency reflects maintainer responsiveness."
+    ),
+    "gharchive_issue_close_time_p90_hours": (
+        "90th-percentile issue resolution time. "
+        "Included to capture slow-tail responsiveness — some issues may remain open very long."
+    ),
+    # ── GH Archive: releases / tags ─────────────────────────────────────────
+    "gharchive_release_events": (
+        "GitHub release publication events in the current observation month. "
+        "Included because release cadence is linked to patch delivery (Alexopoulos et al., 2022)."
+    ),
+    "gharchive_release_events_trailing_3m": ("Release events over the trailing 3-month window."),
+    "gharchive_release_events_trailing_6m": ("Release events over the trailing 6-month window."),
+    "gharchive_release_events_trailing_3m_delta_prev_3m": (
+        "Change in release event volume between the most recent and prior 3-month windows."
+    ),
+    "gharchive_releases_per_active_month_6m": (
+        "Average release events per active month over the trailing 6 months. "
+        "Included to normalise release frequency by actual activity, not calendar time."
+    ),
+    "gharchive_tag_create_events": (
+        "Tag-create events in the current observation month. "
+        "Included as a complementary versioning signal to formal GitHub releases."
+    ),
+    "gharchive_tag_create_events_trailing_3m": (
+        "Tag-create events over the trailing 3-month window."
+    ),
+    "gharchive_tag_create_events_trailing_6m": (
+        "Tag-create events over the trailing 6-month window."
+    ),
+    # ── GH Archive: branches ─────────────────────────────────────────────────
+    "gharchive_branch_create_events": (
+        "Branch creation events in the current observation month. "
+        "Included as an indicator of parallel development activity."
+    ),
+    "gharchive_branch_create_events_trailing_3m": (
+        "Branch creation events over the trailing 3-month window."
+    ),
+    "gharchive_branch_create_events_trailing_6m": (
+        "Branch creation events over the trailing 6-month window."
+    ),
+    # ── GH Archive: forks / stars ────────────────────────────────────────────
+    "gharchive_fork_events": (
+        "Fork events in the current observation month. "
+        "Included as a proxy for downstream adoption; "
+        "widely-forked projects may have larger exposure surfaces."
+    ),
+    "gharchive_fork_events_trailing_3m": ("Fork events over the trailing 3-month window."),
+    "gharchive_fork_events_trailing_6m": ("Fork events over the trailing 6-month window."),
+    "gharchive_forks_trailing_6m": ("Cumulative fork count over the trailing 6-month window."),
+    "gharchive_watch_events": (
+        "Watch/star events in the current observation month. "
+        "Included as a community interest proxy; Siavvas et al. (2018) examined popularity as a risk signal."
+    ),
+    "gharchive_watch_events_trailing_3m": ("Watch/star events over the trailing 3-month window."),
+    "gharchive_watch_events_trailing_6m": ("Watch/star events over the trailing 6-month window."),
+    "gharchive_watch_events_trailing_3m_delta_prev_3m": (
+        "Change in watch/star events between the most recent and prior 3-month windows."
+    ),
+    "gharchive_stars_trailing_6m": (
+        "Cumulative star count over the trailing 6-month window. "
+        "Included as a popularity measure complementing watch events."
+    ),
+    # ── GH Archive: security / dependency keywords ───────────────────────────
+    "gharchive_security_keyword_events": (
+        "PR and issue events containing security-related keywords in the current observation month. "
+        "Included because security-related textual cues in development artifacts "
+        "can precede formal vulnerability disclosure (Goldman & Kadkoda, 2023)."
+    ),
+    "gharchive_security_keyword_events_trailing_3m": (
+        "Security-keyword events over the trailing 3-month window."
+    ),
+    "gharchive_security_keyword_events_trailing_6m": (
+        "Security-keyword events over the trailing 6-month window."
+    ),
+    "gharchive_security_keyword_events_trailing_3m_delta_prev_3m": (
+        "Change in security-keyword event volume between the most recent and prior 3-month windows."
+    ),
+    "gharchive_security_keyword_rate_3m": (
+        "Security-keyword events as a fraction of total PR and issue events over the trailing 3 months. "
+        "Included to normalise security discussion by overall activity level."
+    ),
+    "gharchive_months_since_security_keyword": (
+        "Months elapsed since the last security-keyword PR or issue event. "
+        "Included to capture recency of visible security-related discussion."
+    ),
+    "gharchive_hotfix_keyword_events": (
+        "PR and issue events containing hotfix-related keywords in the current observation month. "
+        "Included to detect emergency patch activity, which may signal unplanned security responses."
+    ),
+    "gharchive_hotfix_keyword_events_trailing_3m": (
+        "Hotfix-keyword events over the trailing 3-month window."
+    ),
+    "gharchive_hotfix_keyword_events_trailing_6m": (
+        "Hotfix-keyword events over the trailing 6-month window."
+    ),
+    "gharchive_dependency_bump_events": (
+        "PR and issue events related to dependency version updates in the current observation month. "
+        "Included because proactive dependency management is linked to reduced vulnerability exposure "
+        "(Alfadel et al., 2023; Prana et al., 2021)."
+    ),
+    "gharchive_dependency_bump_events_trailing_3m": (
+        "Dependency update events over the trailing 3-month window."
+    ),
+    "gharchive_dependency_bump_events_trailing_6m": (
+        "Dependency update events over the trailing 6-month window."
+    ),
+    # ── Software Heritage: repository structure / governance ─────────────────
+    "swh_origin_found": (
+        "Whether a Software Heritage origin record was found for this repository. "
+        "Included to distinguish repositories with archival coverage from those without, "
+        "since missing records may indicate an unrecognised or very new repository."
+    ),
+    "swh_has_snapshot_to_date": (
+        "Whether at least one Software Heritage snapshot exists for this repository "
+        "as of the observation date. "
+        "Included to confirm that archival coverage is present for the historical window being studied."
+    ),
+    "swh_present_any": (
+        "Whether any Software Heritage data was retrieved for this repository. "
+        "Included as a data availability flag; absence may indicate the repository was not crawled."
+    ),
+    "swh_visit_count_to_date": (
+        "Number of Software Heritage archival visits recorded for this repository up to the observation date. "
+        "Included as a proxy for how frequently the archive has crawled this project."
+    ),
+    "swh_visits_last_365d": (
+        "Number of Software Heritage visits in the 365 days prior to the observation date. "
+        "Included to capture recent archival activity."
+    ),
+    "swh_visits_this_month": (
+        "Software Heritage visits recorded in the observation month. "
+        "Included as a recency indicator of archival coverage."
+    ),
+    "swh_archive_age_days_to_date": (
+        "Days since the first Software Heritage visit, up to the observation date. "
+        "Included as a proxy for how long this repository has been publicly visible and archived."
+    ),
+    "swh_top_level_entry_count": (
+        "Number of entries (files and directories) at the root of the archived repository. "
+        "Included as a rough proxy for project structure complexity."
+    ),
+    "swh_has_readme": (
+        "Whether a README file is present in the archived repository root. "
+        "Included because basic documentation presence is an indicator of project maturity "
+        "and contributor onboarding (Ayala et al., 2025)."
+    ),
+    "swh_has_security_md": (
+        "Whether a SECURITY.md file is present, indicating a formal security disclosure policy. "
+        "Included because security contact visibility is a recommended OSS security practice "
+        "(OpenSSF Scorecard; Zahan et al., 2023)."
+    ),
+    "swh_has_contributing_md": (
+        "Whether a CONTRIBUTING.md file is present, documenting contribution guidelines. "
+        "Included as an indicator of governance maturity and contributor onboarding process."
+    ),
+    "swh_has_changelog": (
+        "Whether a changelog file is present. "
+        "Included because explicit change tracking is associated with release discipline "
+        "and transparency in software projects."
+    ),
+    "swh_has_dot_github": (
+        "Whether a .github/ directory is present, typically containing issue templates, "
+        "PR templates, or workflow configurations. "
+        "Included as an indicator of GitHub-native project governance tooling adoption."
+    ),
+    "swh_has_github_actions": (
+        "Whether GitHub Actions workflow configuration is present. "
+        "Included because CI/CD adoption is a security best practice measured by frameworks "
+        "such as OpenSSF Scorecard (Zahan et al., 2023)."
+    ),
+    "swh_has_dependabot": (
+        "Whether Dependabot configuration is present, enabling automated dependency update PRs. "
+        "Included because automated dependency management is linked to shorter vulnerability "
+        "exposure windows (Alfadel et al., 2023)."
+    ),
+    "swh_has_jenkinsfile": (
+        "Whether a Jenkinsfile is present, indicating CI pipeline configuration via Jenkins. "
+        "Included because build pipeline definition is a proxy for build reproducibility and automation maturity."
+    ),
+    "swh_has_travis_yml": (
+        "Whether a Travis CI configuration file is present. "
+        "Included as an indicator of CI adoption; predates GitHub Actions and common in older OSS projects."
+    ),
+    "swh_has_pom_xml": (
+        "Whether a Maven pom.xml build file is present. "
+        "Included because Maven is the standard build system for Jenkins plugins; "
+        "presence indicates adherence to ecosystem conventions."
+    ),
+    "swh_has_build_gradle": (
+        "Whether a Gradle build file is present. "
+        "Included as an alternative build tooling indicator; "
+        "some Jenkins plugins use Gradle instead of or alongside Maven."
+    ),
+    "swh_has_mvn_wrapper": (
+        "Whether a Maven wrapper (mvnw) is present. "
+        "Included as a proxy for build reproducibility — "
+        "the wrapper pins the Maven version used to build the project."
+    ),
+    "swh_has_dockerfile": (
+        "Whether a Dockerfile is present. "
+        "Included as a proxy for containerisation and reproducible environment practices."
+    ),
+    "swh_has_tests_directory": (
+        "Whether a test directory is present in the archived repository. "
+        "Included because the presence of automated tests is associated with software quality "
+        "and defect detection (Bassi & Singh, 2025)."
+    ),
+    "swh_has_sonar_config": (
+        "Whether a SonarQube/SonarCloud configuration file is present. "
+        "Included as a proxy for static analysis tooling adoption, "
+        "which is associated with proactive quality and security checking."
+    ),
+    "swh_has_snyk_config": (
+        "Whether a Snyk configuration file is present, indicating dependency vulnerability scanning. "
+        "Included because dependency scanning tools are part of recommended supply-chain security practices."
+    ),
+    # ── Software Heritage: commit-level signals ───────────────────────────────
+    "swh_commit_count": (
+        "Total number of commits visible in the archived repository snapshot. "
+        "Included as a proxy for project maturity and accumulated change history."
+    ),
+    "swh_days_since_last_commit": (
+        "Days between the most recent commit in the archived snapshot and the archive visit date. "
+        "Included because commit staleness is a primary maintenance health signal "
+        "(Panter & Eisty, 2026)."
+    ),
+    "swh_author_committer_lag_p50_hours": (
+        "Median time in hours between the commit author date and the committer date across all commits. "
+        "Included as a proxy for the review or integration lag in the development pipeline; "
+        "a gap may indicate that commits pass through a separate integration step (Zhang et al., 2021)."
+    ),
+    "swh_author_committer_lag_p90_hours": (
+        "90th-percentile author-to-committer lag across commits. "
+        "Included to capture the slow tail of the integration pipeline."
+    ),
+    "swh_author_committer_mismatch_rate": (
+        "Fraction of commits where the author and committer identities differ. "
+        "Included as a heuristic indicator of a review or merge workflow where "
+        "someone other than the original author integrates the change."
+    ),
+    "swh_timezone_diversity": (
+        "Number of distinct UTC offset values observed across commit authors. "
+        "Included as a proxy for geographic distribution of contributors; "
+        "distributed teams may have different coordination dynamics (Claes et al., 2018)."
+    ),
+    "swh_weekend_commit_fraction": (
+        "Fraction of commits authored on weekends. "
+        "Included because work timing patterns may reflect volunteer vs. institutional development dynamics; "
+        "Claes et al. (2018) and Eyolfson et al. (2011) examine timing as a process signal."
+    ),
+    "swh_late_night_commit_fraction": (
+        "Fraction of commits authored during late-night hours. "
+        "Included as an exploratory process signal; "
+        "Eyolfson et al. (2011) found timing patterns correlated with commit bugginess in some contexts."
+    ),
+    "swh_merge_commit_fraction": (
+        "Fraction of commits that are merge commits. "
+        "Included as a proxy for PR-based or branch-based integration workflows."
+    ),
+    "swh_conventional_commit_fraction": (
+        "Fraction of commit messages following the Conventional Commits specification. "
+        "Included as a commit discipline indicator; "
+        "structured commit messages are associated with changelog quality and release tooling adoption."
+    ),
+    "swh_issue_reference_rate": (
+        "Fraction of commit messages containing an issue number reference (e.g., #123). "
+        "Included as a traceability signal — linking commits to issues indicates structured change management "
+        "(Li & Ahmed, 2023)."
+    ),
+    "swh_empty_message_rate": (
+        "Fraction of commits with empty or near-empty commit messages. "
+        "Included because low commit message quality is associated with reduced traceability "
+        "and weaker peer review practices (Li & Ahmed, 2023)."
+    ),
+    "swh_security_fix_commit_count": (
+        "Count of commits whose messages contain security-fix-related keywords (e.g., 'CVE', 'security fix', 'patch'). "
+        "Included because security-fix language in commit history may indicate prior vulnerability remediation activity "
+        "(Goldman & Kadkoda, 2023; Sabetta & Bezzi, 2018)."
+    ),
+    # ── Window / temporal ────────────────────────────────────────────────────
+    "window_index": (
+        "Sequential integer index of the observation month across the full dataset timeline. "
+        "Included to allow the model to account for temporal trends across the observation period."
+    ),
+    "window_month": (
+        "Calendar month number (1–12) of the observation window. "
+        "Included to capture potential seasonal patterns in advisory publication or repository activity."
+    ),
+    "window_year": (
+        "Calendar year of the observation window. "
+        "Included to allow the model to account for year-over-year trends in the Jenkins ecosystem."
+    ),
+}
+
+
+def _tip(label: str, tip_key: str | None = None) -> str:
+    """Wrap a label in a tooltip span if a tip exists for it."""
+    tip = _METRIC_TIPS.get(tip_key or label, "")
+    if not tip:
+        return _escape(label)
+    return f'<span class="tip" data-tip="{_escape(tip)}">{_escape(label)}</span>'
+
+
+def _render_model_badge(model_name: str | None) -> str:
+    if not model_name:
+        return ""
+    label, extra_class = _MODEL_LABELS.get(model_name.lower(), (model_name.upper(), ""))
+    return f'<span class="model-badge {extra_class}">{_escape(label)}</span>'
+
+
+def _render_base_rate_bar(test_positive: int | None, test_total: int | None) -> str:
+    if not test_positive or not test_total:
+        return ""
+    rate = test_positive / test_total
+    pct = rate * 100
+    fill_pct = min(pct * 8, 100)  # scale up so ~2% is visible
+    return (
+        '<div class="baserate-row">'
+        f'<span class="baserate-label">{_tip("Base rate", "Base rate")} (test set)</span>'
+        '<div class="baserate-track">'
+        f'<div class="baserate-fill" style="width:{fill_pct:.1f}%"></div>'
+        "</div>"
+        f'<span class="baserate-val">{pct:.2f}% ({test_positive:,} of {test_total:,})</span>'
+        "</div>"
+    )
+
+
+def _render_ranking_row(ranking: dict[str, Any], base_rate: float) -> str:
+    ks = [10, 25, 50, 100]
+    cells = []
+    for k in ks:
+        val = _float_or_none(ranking.get(f"precision_at_{k}"))
+        if val is None:
+            continue
+        lift = (val / base_rate) if base_rate > 0 else 0
+        if val >= 0.5:
+            cls = "rank-cell__val--good"
+        elif val > base_rate * 2:
+            cls = "rank-cell__val--warn"
+        else:
+            cls = "rank-cell__val--muted"
+        lift_str = f"{lift:.1f}× base rate" if lift >= 1 else "≤ base rate"
+        cells.append(
+            f'<div class="rank-cell">'
+            f'<div class="rank-cell__k">{_tip("Precision@K", "Precision@K")} @ {k}</div>'
+            f'<div class="rank-cell__val {cls}">{val:.0%}</div>'
+            f'<div class="rank-cell__lift">{lift_str}</div>'
+            "</div>"
+        )
+    if not cells:
+        return ""
+    return (
+        "<div>"
+        '<h4 style="margin-bottom:.5rem">Ranking precision (top-K)</h4>'
+        f'<div class="ranking-row">{"".join(cells)}</div>'
+        '<p style="font-size:.82rem;color:var(--muted);margin-top:.5rem">'
+        "Of the top K plugins ranked by predicted risk, what fraction received an advisory in the test window?"
+        "</p>"
+        "</div>"
+    )
+
+
+def _render_class_report(report: dict[str, Any] | None, is_xgb: bool) -> str:
+    if not report:
+        return ""
+    pos_raw = report.get("1")
+    neg_raw = report.get("0")
+    pos: dict[str, Any] = cast("dict[str, Any]", pos_raw) if isinstance(pos_raw, dict) else {}
+    neg: dict[str, Any] = cast("dict[str, Any]", neg_raw) if isinstance(neg_raw, dict) else {}
+
+    def fmt(v: Any) -> str:
+        value = _float_or_none(v)
+        if value is None:
+            return "—"
+        return f"{value:.3f}"
+
+    def fmt_support(v: Any) -> str:
+        value = _int_or_none(v)
+        if value is None:
+            return "—"
+        return f"{value:,}"
+
+    rows = [
+        (
+            "Not vulnerable (0)",
+            neg.get("precision"),
+            neg.get("recall"),
+            neg.get("f1-score"),
+            neg.get("support"),
+        ),
+        (
+            "Vulnerable (1)",
+            pos.get("precision"),
+            pos.get("recall"),
+            pos.get("f1-score"),
+            pos.get("support"),
+        ),
+    ]
+    tbody = "".join(
+        f"<tr>"
+        f"<td>{_escape(str(label))}</td>"
+        f"<td>{fmt(p)}</td>"
+        f"<td>{fmt(r)}</td>"
+        f"<td>{fmt(f1)}</td>"
+        f"<td>{fmt_support(sup)}</td>"
+        "</tr>"
+        for label, p, r, f1, sup in rows
+    )
+    note = (
+        '<p style="font-size:.82rem;color:var(--muted);margin-top:.5rem">'
+        "Focus on the <strong>Vulnerable (1)</strong> row — the negative class metrics look good because the model mostly predicts 'not vulnerable' by default."
+        "</p>"
+    )
+    return (
+        f'<div class="panel"><h4>Per-class classification report</h4>'
+        f'<table class="cls-table">'
+        f"<thead><tr>"
+        f"<th>Class</th>"
+        f"<th>{_tip('Precision', 'Precision (positive)')}</th>"
+        f"<th>{_tip('Recall', 'Recall (positive)')}</th>"
+        f"<th>{_tip('F1', 'F1 (positive)')}</th>"
+        f"<th>{_tip('Support', 'Support')}</th>"
+        f"</tr></thead>"
+        f"<tbody>{tbody}</tbody>"
+        f"</table>"
+        f"{note}"
+        f"</div>"
+    )
+
+
+def _render_feature_item(item: dict[str, Any], is_xgb: bool) -> str:
+    feat = str(item.get("feature") or "")
+    feat_tip = _FEATURE_TIPS.get(feat, "")
+    feat_display = (
+        f'<span class="tip" data-tip="{_escape(feat_tip)}"><code>{_escape(feat)}</code></span>'
+        if feat_tip
+        else f"<code>{_escape(feat)}</code>"
+    )
+    if is_xgb:
+        val = _float_or_none(item.get("importance"))
+        val_str = f"{val:.4f}" if val is not None else "—"
+        tip_key = "XGBoost importance"
+    else:
+        val = _float_or_none(item.get("coefficient"))
+        val_str = f"{val:+.3f}" if val is not None else "—"
+        tip_key = "Positive coefficient" if val is None or val >= 0 else "Negative coefficient"
+    return (
+        f"<li>{feat_display} "
+        f'<span class="tip" data-tip="{_escape(_METRIC_TIPS.get(tip_key, ""))}">'
+        f"({val_str})"
+        f"</span></li>"
+    )
+
+
 def _render_ml_metrics(metrics: dict[str, Any] | None) -> str:
     if not metrics:
         return '<p class="muted">Train a baseline or load metrics from an existing model run to surface results here.</p>'
-    ranking = metrics.get("ranking_metrics") or {}
-    positive = metrics.get("top_positive_features") or []
-    negative = metrics.get("top_negative_features") or []
+
+    raw_ranking = metrics.get("ranking_metrics")
+    ranking = raw_ranking if isinstance(raw_ranking, dict) else {}
+    raw_positive = metrics.get("top_positive_features")
+    positive = (
+        [item for item in raw_positive if isinstance(item, dict)]
+        if isinstance(raw_positive, list)
+        else []
+    )
+    raw_negative = metrics.get("top_negative_features")
+    negative = (
+        [item for item in raw_negative if isinstance(item, dict)]
+        if isinstance(raw_negative, list)
+        else []
+    )
+    model_name = str(metrics.get("model_name") or "")
+    is_xgb = model_name.lower() in {"xgboost", "lightgbm"}
+    test_positive = _int_or_none(metrics.get("test_positive_count"))
+    test_total = _int_or_none(metrics.get("test_row_count"))
+    train_positive = _int_or_none(metrics.get("train_positive_count"))
+    train_total = _int_or_none(metrics.get("train_row_count"))
+    base_rate = (test_positive / test_total) if test_positive and test_total else 0.0
+
     feature_panel = _render_feature_columns_panel(metrics.get("feature_columns"))
     features_metric = (
         '<details class="metric metric--details">'
@@ -1141,35 +2105,90 @@ def _render_ml_metrics(metrics: dict[str, Any] | None) -> str:
         if feature_panel
         else f'<div class="metric"><span class="metric__label">Features</span><span class="metric__value">{_metric_value(metrics.get("feature_count"), digits=0)}</span></div>'
     )
+
+    # Positive / negative feature lists with per-feature tooltips
+    pos_label = "Top features (by importance)" if is_xgb else "Top positive features"
     positive_items = (
-        "".join(
-            f"<li><code>{_escape(item.get('feature'))}</code> ({_metric_value(item.get('coefficient'), digits=3)})</li>"
-            for item in positive[:8]
-        )
-        or "<li>No positive coefficients found.</li>"
+        "".join(_render_feature_item(item, is_xgb) for item in positive[:10])
+        or "<li>No features found.</li>"
     )
     negative_items = (
-        "".join(
-            f"<li><code>{_escape(item.get('feature'))}</code> ({_metric_value(item.get('coefficient'), digits=3)})</li>"
-            for item in negative[:8]
-        )
+        "".join(_render_feature_item(item, is_xgb) for item in negative[:10])
         or "<li>No negative coefficients found.</li>"
     )
+
+    # Train/test class balance note
+    train_pct = (
+        f"{train_positive / train_total * 100:.2f}%" if train_positive and train_total else "—"
+    )
+    test_pct = f"{base_rate * 100:.2f}%" if test_positive and test_total else "—"
+    balance_note = (
+        f'<p class="small muted" style="margin-top:.35rem">'
+        f"Train positives: {train_positive:,} / {train_total:,} ({train_pct}) &nbsp;·&nbsp; "
+        f"Test positives: {test_positive:,} / {test_total:,} ({test_pct})"
+        f"</p>"
+        if train_positive and train_total and test_positive and test_total
+        else ""
+    )
+
+    target_label = (
+        (metrics.get("target_col") or "")
+        .replace("label_advisory_within_", "")
+        .replace("m", " month")
+    )
+    test_month = metrics.get("test_start_month") or ""
+
+    header_meta = (
+        '<div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin-bottom:.9rem">'
+        f"{_render_model_badge(model_name)}"
+        + (
+            f'<span class="small muted">Target: advisory within <strong>{_escape(target_label)}</strong></span>'
+            if target_label
+            else ""
+        )
+        + (
+            f'<span class="small muted">Test from: <strong>{_escape(test_month)}</strong></span>'
+            if test_month
+            else ""
+        )
+        + "</div>"
+    )
+
     return (
         '<div class="result-stack">'
+        f"{header_meta}"
+        # Core metric tiles
         '<div class="metrics-row">'
-        f'<div class="metric"><span class="metric__label">ROC AUC</span><span class="metric__value metric__value--good">{_metric_value(metrics.get("roc_auc"))}</span></div>'
-        f'<div class="metric"><span class="metric__label">Average Precision</span><span class="metric__value metric__value--good">{_metric_value(metrics.get("average_precision"))}</span></div>'
-        f'<div class="metric"><span class="metric__label">Train rows</span><span class="metric__value">{_metric_value(metrics.get("train_row_count"), digits=0)}</span></div>'
-        f'<div class="metric"><span class="metric__label">Test rows</span><span class="metric__value">{_metric_value(metrics.get("test_row_count"), digits=0)}</span></div>'
+        f'<div class="metric"><span class="metric__label">{_tip("ROC AUC")}</span><span class="metric__value metric__value--good">{_metric_value(metrics.get("roc_auc"))}</span></div>'
+        f'<div class="metric"><span class="metric__label">{_tip("Average Precision")}</span><span class="metric__value metric__value--good">{_metric_value(metrics.get("average_precision"))}</span></div>'
+        f'<div class="metric"><span class="metric__label">{_tip("Train rows", "Train rows")}</span><span class="metric__value">{_metric_value(metrics.get("train_row_count"), digits=0)}</span></div>'
+        f'<div class="metric"><span class="metric__label">{_tip("Test rows", "Test rows")}</span><span class="metric__value">{_metric_value(metrics.get("test_row_count"), digits=0)}</span></div>'
         f"{features_metric}"
-        f'<div class="metric"><span class="metric__label">Precision@10</span><span class="metric__value metric__value--warn">{_metric_value(ranking.get("precision_at_10"))}</span></div>'
         "</div>"
+        f"{balance_note}"
+        f"{_render_base_rate_bar(test_positive, test_total)}"
+        # Ranking precision
+        f'<div class="panel">{_render_ranking_row(ranking, base_rate)}</div>'
+        # Feature importance columns — always two columns
         '<div class="grid--two">'
-        f'<div class="panel"><h4>Top positive features</h4><ul class="bullet-list">{positive_items}</ul></div>'
-        f'<div class="panel"><h4>Top negative features</h4><ul class="bullet-list">{negative_items}</ul></div>'
-        "</div>"
-        f'<div class="panel"><h4>Confusion matrix</h4>{_render_confusion_matrix(metrics.get("confusion_matrix"))}</div>'
+        f'<div class="panel"><h4>{_escape(pos_label)}</h4><ul class="bullet-list">{positive_items}</ul></div>'
+        + (
+            f'<div class="panel"><h4>Top negative features</h4>'
+            f'<p class="small muted" style="margin-bottom:.5rem">Features whose higher values the model associates with <em>lower</em> predicted risk. '
+            f"For logistic regression, the direction reflects the signed coefficient. "
+            f"Correlated features can shift each other's signs — interpret alongside the positive list.</p>"
+            f'<ul class="bullet-list">{negative_items}</ul></div>'
+            if not is_xgb
+            else f'<div class="panel"><h4>Feature importance</h4>'
+            f'<p class="small muted" style="margin-bottom:.5rem">Gain-based importance does not indicate direction. '
+            f"Higher values mean more contribution to model splits, not whether the feature raises or lowers predicted risk.</p>"
+            f'<ul class="bullet-list">{positive_items}</ul></div>'
+        )
+        + "</div>"
+        # Classification report
+        + _render_class_report(metrics.get("classification_report"), is_xgb)
+        # Confusion matrix
+        + f'<div class="panel"><h4>Confusion matrix</h4>{_render_confusion_matrix(metrics.get("confusion_matrix"))}</div>'
         "</div>"
     )
 
@@ -1196,8 +2215,8 @@ def _render_confusion_matrix(confusion: Any) -> str:
         '<tr><th class="corner">Actual vs Predicted</th><th>Negative</th><th>Positive</th></tr>'
         "</thead>"
         "<tbody>"
-        f'<tr><th class="matrix-side">Negative</th><td class="matrix-cell--tn"><span class="matrix-count">{tn}</span><span class="matrix-label">True negative</span></td><td class="matrix-cell--fp"><span class="matrix-count">{fp}</span><span class="matrix-label">False positive</span></td></tr>'
-        f'<tr><th class="matrix-side">Positive</th><td class="matrix-cell--fn"><span class="matrix-count">{fn}</span><span class="matrix-label">False negative</span></td><td class="matrix-cell--tp"><span class="matrix-count">{tp}</span><span class="matrix-label">True positive</span></td></tr>'
+        f'<tr><th class="matrix-side">Negative</th><td class="matrix-cell--tn"><span class="matrix-count">{tn}</span><span class="matrix-label tip" data-tip="{_escape(_METRIC_TIPS["True negative"])}">True negative</span></td><td class="matrix-cell--fp"><span class="matrix-count">{fp}</span><span class="matrix-label tip" data-tip="{_escape(_METRIC_TIPS["False positive"])}">False positive</span></td></tr>'
+        f'<tr><th class="matrix-side">Positive</th><td class="matrix-cell--fn"><span class="matrix-count">{fn}</span><span class="matrix-label tip" data-tip="{_escape(_METRIC_TIPS["False negative"])}">False negative</span></td><td class="matrix-cell--tp"><span class="matrix-count">{tp}</span><span class="matrix-label tip" data-tip="{_escape(_METRIC_TIPS["True positive"])}">True positive</span></td></tr>'
         "</tbody>"
         "</table>"
         "</div>"

@@ -9,12 +9,29 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import boto3  # pyright: ignore[reportMissingImports]
-from botocore.exceptions import (  # pyright: ignore[reportMissingImports]
-    BotoCoreError,
-    ClientError,
-)
 from dotenv import load_dotenv  # pyright: ignore[reportMissingImports]
+
+
+def _require_boto3():  # pragma: no cover
+    """Lazily import boto3/botocore so the web UI starts without AWS deps.
+
+    boto3 and botocore are only needed when the Athena collection backend is
+    actually invoked.  Importing them at module level caused ``ModuleNotFoundError``
+    in environments (e.g. the Docker web container) where they are not installed.
+    """
+    try:
+        import boto3  # pyright: ignore[reportMissingImports]
+        from botocore.exceptions import (  # pyright: ignore[reportMissingImports]
+            BotoCoreError,
+            ClientError,
+        )
+    except ImportError as exc:
+        raise ImportError(
+            "boto3 and botocore are required for the Athena backend. "
+            "Install them with: pip install boto3"
+        ) from exc
+    return boto3, BotoCoreError, ClientError
+
 
 # Load .env once at import time rather than inside the hot collection path
 load_dotenv()
@@ -76,6 +93,7 @@ _ATHENA_CLIENT_CACHE: dict[str, Any] = {}
 
 def _get_athena_client():
     """Return a cached Athena client for the configured region."""
+    boto3, _, _ = _require_boto3()
     region = os.getenv("AWS_REGION", DEFAULT_REGION)
     if region not in _ATHENA_CLIENT_CACHE:
         _ATHENA_CLIENT_CACHE[region] = boto3.client(
@@ -1184,7 +1202,10 @@ def main() -> int:
             max_directories=args.max_directories,
             verbose=not args.quiet,
         )
-    except (ValueError, RuntimeError, BotoCoreError, ClientError) as exc:
+    except (ValueError, RuntimeError) as exc:
+        print(f"[ERROR] {exc}")
+        return 1
+    except Exception as exc:  # noqa: BLE001 — catch BotoCoreError/ClientError by base class
         print(f"[ERROR] {exc}")
         return 1
 
