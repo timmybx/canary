@@ -291,7 +291,7 @@ def test_render_ml_metrics_with_empty_features():
         "top_negative_features": [],
     }
     html = _render_ml_metrics(metrics)
-    assert "No positive coefficients found." in html
+    assert "No features found." in html
     assert "No negative coefficients found." in html
 
 
