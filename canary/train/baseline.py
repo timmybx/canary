@@ -5,18 +5,19 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
-import numpy as np
-import pandas as pd
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.metrics import (
+import joblib  # pyright: ignore[reportMissingImports]
+import numpy as np  # pyright: ignore[reportMissingImports]
+import pandas as pd  # pyright: ignore[reportMissingModuleSource]
+from sklearn.compose import ColumnTransformer  # pyright: ignore[reportMissingModuleSource]
+from sklearn.impute import SimpleImputer  # pyright: ignore[reportMissingModuleSource]
+from sklearn.metrics import (  # pyright: ignore[reportMissingModuleSource]
     average_precision_score,
     classification_report,
     confusion_matrix,
     precision_recall_curve,
     roc_auc_score,
 )
-from sklearn.pipeline import Pipeline
+from sklearn.pipeline import Pipeline  # pyright: ignore[reportMissingModuleSource]
 
 DEFAULT_EXCLUDE_COLUMNS = {
     # Identifiers / bookkeeping
@@ -447,6 +448,15 @@ def train_model(
             sort_keys=True,
         ),
         encoding="utf-8",
+    )
+
+    # --- Save the fitted pipeline so it can be loaded for inference ---
+    # The pipeline includes the imputer + model, and is sklearn-compatible.
+    # feature_columns.json records the exact column order the pipeline expects,
+    # which is required to construct a matching feature vector at inference time.
+    joblib.dump(full_pipeline, out_path / "model.joblib")
+    (out_path / "feature_columns.json").write_text(
+        json.dumps(feature_cols, indent=2), encoding="utf-8"
     )
 
     return metrics

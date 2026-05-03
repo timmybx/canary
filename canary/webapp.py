@@ -30,6 +30,7 @@ from canary.cli import (
 )
 from canary.plugin_aliases import canonicalize_plugin_id
 from canary.scoring.baseline import ScoreResult, score_plugin_baseline
+from canary.scoring.ml import MLScorer, MLScoreResult, load_ml_scorer, score_plugin_ml
 
 DEFAULT_DATA_DIR = "data/raw"
 DEFAULT_REGISTRY_PATH = "data/raw/registry/plugins.jsonl"
@@ -191,6 +192,8 @@ p { margin:.35rem 0 0; }
   border-radius:999px; color:var(--accent2); font-size:.85rem;
 }
 .pill--muted { background:rgba(255,255,255,.05); border-color:rgba(255,255,255,.08); color:var(--muted); }
+.pill--warn  { background:rgba(230,160,30,.15);  border-color:rgba(230,160,30,.35);  color:#e6a01e; }
+.pill--danger{ background:rgba(220,80,60,.15);   border-color:rgba(220,80,60,.35);   color:#e05c5c; }
 .form-grid {
   display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:.9rem; margin-top:1rem;
 }
@@ -943,6 +946,26 @@ def _score_payload(result: ScoreResult) -> dict[str, Any]:
     return payload
 
 
+def _get_ml_scorer(model_dir: str) -> MLScorer | None:
+    """Load the ML scorer from *model_dir*, returning None if not yet trained."""
+    try:
+        return load_ml_scorer(model_dir)
+    except FileNotFoundError:
+        return None
+
+
+def _ml_score_payload(result: MLScoreResult) -> dict:
+    """Serialize an MLScoreResult for template rendering."""
+    payload = result.to_dict()
+    payload["probability_pct"] = f"{result.probability * 100:.1f}%"
+    payload["pretty_json"] = json.dumps(
+        {k: v for k, v in payload.items() if k != "feature_vector"},
+        indent=2,
+        ensure_ascii=False,
+    )
+    return payload
+
+
 def _render_command_result(result: dict[str, Any] | None, title: str) -> str:
     if not result:
         return ""
@@ -953,6 +976,52 @@ def _render_command_result(result: dict[str, Any] | None, title: str) -> str:
         f'<div class="metric"><span class="metric__label">Exit code</span><span class="metric__value">{_escape(result["exit_code"])}</span></div>'
         "</div>"
         f'<div class="panel"><h4>Console output</h4><pre>{_escape(result["output"] or "No stdout captured.")}</pre></div>'
+        "</div>"
+    )
+
+
+def _render_ml_score_panel(ml: dict[str, Any]) -> str:
+    """Render the ML score panel that sits below the heuristic score card."""
+    risk_colors = {"Low": "pill--muted", "Medium": "pill--warn", "High": "pill--danger"}
+    risk_pill_cls = risk_colors.get(ml.get("risk_category", ""), "pill--muted")
+
+    drivers_html = ""
+    for d in ml.get("drivers") or []:
+        direction = d.get("direction", "neutral")
+        icon = (
+            "▲"
+            if direction == "increases_risk"
+            else ("▼" if direction == "decreases_risk" else "—")
+        )
+        color = (
+            "color:#e05c5c"
+            if direction == "increases_risk"
+            else ("color:#5ce0a0" if direction == "decreases_risk" else "")
+        )
+        val = d.get("value")
+        val_str = f"{val:.3g}" if val is not None else "n/a"
+        drivers_html += (
+            f'<li style="display:flex;justify-content:space-between;padding:.3rem 0;border-bottom:1px solid rgba(255,255,255,.05)">'
+            f'<span><span style="{color};font-weight:700;margin-right:.4rem">{_escape(icon)}</span><code>{_escape(d["name"])}</code></span>'
+            f'<span class="muted" style="font-size:.85rem">{_escape(val_str)}</span>'
+            f"</li>"
+        )
+
+    return (
+        '<div class="result-stack">'
+        '<div class="score-banner">'
+        f'<div><p class="eyebrow">ML Score (experimental)</p><h3>{_escape(ml["plugin"])}</h3></div>'
+        f'<div style="display:flex;align-items:center;gap:.75rem">'
+        f'<div class="score-number">{_escape(ml["probability_pct"])}<span> advisory risk</span></div>'
+        f'<span class="pill {risk_pill_cls}">{_escape(ml.get("risk_category", "?"))}</span>'
+        "</div></div>"
+        '<div class="metrics-row">'
+        f'<div class="metric"><span class="metric__label">Probability</span><span class="metric__value">{_escape(str(ml["probability"]))}</span></div>'
+        f'<div class="metric"><span class="metric__label">Risk category</span><span class="metric__value">{_escape(ml.get("risk_category", "?"))}</span></div>'
+        f'<div class="metric"><span class="metric__label">Top drivers</span><span class="metric__value">{len(ml.get("drivers") or [])}</span></div>'
+        "</div>"
+        f'<div class="panel"><h4>Top contributing features</h4><ul style="list-style:none;padding:0;margin:0">{drivers_html}</ul></div>'
+        f'<div class="panel"><h4>ML result (JSON)</h4><pre>{_escape(ml["pretty_json"])}</pre></div>'
         "</div>"
     )
 
@@ -992,7 +1061,7 @@ def _render_score_section(
         )
         summary = (
             '<div class="result-stack">'
-            f'<div class="score-banner"><div><p class="eyebrow">Score result</p><h3>{_escape(score_result["plugin"])}</h3></div><div class="score-number">{_escape(score_result["score"])}<span>/100</span></div></div>'
+            f'<div class="score-banner"><div><p class="eyebrow">Heuristic score</p><h3>{_escape(score_result["plugin"])}</h3></div><div class="score-number">{_escape(score_result["score"])}<span>/100</span></div></div>'
             '<div class="metrics-row">'
             f'<div class="metric"><span class="metric__label">Reasons</span><span class="metric__value">{len(score_result["reasons"])}</span></div>'
             f'<div class="metric"><span class="metric__label">Feature keys</span><span class="metric__value">{len(score_result["features"])}</span></div>'
@@ -1006,9 +1075,31 @@ def _render_score_section(
             f'<div class="panel"><h4>Detected local data files</h4>{files_html}</div>'
             "</div>"
         )
+
     parts.append(
         f'<section class="card"><div class="card__header"><div><p class="eyebrow">Readable output</p><h2>Score details</h2></div><span class="pill pill--muted">Reasons + evidence</span></div>{summary}</section>'
     )
+
+    # ML score panel — shown only when a trained model is available
+    ml = (score_result or {}).get("ml")
+    if ml:
+        parts.append(
+            '<section class="card"><div class="card__header"><div>'
+            '<p class="eyebrow">Machine learning</p><h2>ML advisory risk score</h2>'
+            '<p class="kicker">Probability of a Jenkins security advisory within the next 180 days, based on the trained CANARY model.</p>'
+            '</div><span class="pill pill--muted">Experimental</span></div>'
+            + _render_ml_score_panel(ml)
+            + "</section>"
+        )
+    elif score_result is not None:
+        parts.append(
+            '<section class="card"><div class="card__header"><div>'
+            '<p class="eyebrow">Machine learning</p><h2>ML advisory risk score</h2></div>'
+            '<span class="pill pill--muted">Not available</span></div>'
+            '<p class="muted" style="padding:1rem">No trained model found. Run <strong>canary train baseline</strong> to enable ML scoring.</p>'
+            "</section>"
+        )
+
     parts.append("</div>")
     return "".join(parts)
 
@@ -2461,6 +2552,23 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 score_result = _score_payload(
                     score_plugin_baseline(plugin, real=_bool_from_form(form.get("real")))
                 )
+                # Also run the ML scorer if a trained model is available
+                _ml_scorer = _get_ml_scorer(values.get("model_dir") or DEFAULT_MODEL_DIR)
+                if _ml_scorer is not None:
+                    try:
+                        ml_score_result = _ml_score_payload(
+                            score_plugin_ml(
+                                plugin,
+                                scorer=_ml_scorer,
+                                data_raw_dir=values.get("data_dir") or DEFAULT_DATA_DIR,
+                            )
+                        )
+                        score_result["ml"] = ml_score_result
+                    except Exception as _ml_exc:
+                        logger.warning("ML scoring failed for %s: %s", plugin, _ml_exc)
+                        score_result["ml"] = None
+                else:
+                    score_result["ml"] = None
                 values["active_tab"] = "score"
             elif path == "/run":
                 command = values["command"]
