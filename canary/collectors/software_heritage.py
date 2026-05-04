@@ -85,10 +85,6 @@ def _normalize_origin_url(repo_url: str) -> str:
     return text.rstrip("/")
 
 
-def _safe_slug(plugin_id: str) -> str:
-    return plugin_id.strip().replace("/", "_")
-
-
 def _validate_http_url(url: str) -> None:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme != "https" or not parsed.netloc:

@@ -27,9 +27,10 @@ def safe_plugin_id(plugin_id: str) -> str | None:
 
 def safe_join_under(base: Path, *parts: str) -> Path:
     """Join *parts* under *base*, raising ``ValueError`` if the resolved path escapes *base*."""
-    candidate = (base.joinpath(*parts)).resolve()
+    base_resolved = base.resolve()
+    candidate = base_resolved.joinpath(*parts).resolve()
     try:
-        candidate.relative_to(base.resolve())
+        candidate.relative_to(base_resolved)
     except ValueError as exc:
         raise ValueError("Resolved path escapes base directory") from exc
     return candidate
