@@ -65,13 +65,12 @@ def test_get_model_error_includes_available_models():
 def test_get_model_none_model_raises():
     """If a model key exists but the value is None (optional dep not installed),
     get_model should raise ValueError with a helpful message."""
-    # Temporarily override a model to None for testing
+    from unittest.mock import patch
+
     import canary.train.registry as reg
 
-    original = reg.MODEL_REGISTRY.get("xgboost")
-    if original is not None:
-        # xgboost is installed; skip this test path
-        pytest.skip("xgboost is installed; cannot test None model path")
-
-    with pytest.raises(ValueError, match="not installed"):
-        get_model("xgboost")
+    # Patch the registry so "xgboost" maps to None, simulating an absent optional dep
+    patched_registry = {**reg.MODEL_REGISTRY, "xgboost": None}
+    with patch.object(reg, "MODEL_REGISTRY", patched_registry):
+        with pytest.raises(ValueError, match="not installed"):
+            get_model("xgboost")
