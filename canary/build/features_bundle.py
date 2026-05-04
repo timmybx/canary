@@ -9,6 +9,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+from canary.collectors._path_utils import safe_join_under, safe_plugin_id
 from canary.plugin_aliases import canonicalize_plugin_id
 from canary.scoring.baseline import _load_healthscore_record
 
@@ -161,9 +162,12 @@ def _cvss_candidates(rec: dict[str, Any]) -> list[float]:
 
 
 def _load_snapshot_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
-    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
-    path = data_raw_dir / "plugins" / f"{plugin_id}.snapshot.json"
     row: dict[str, Any] = {"snapshot_present": False}
+    canonical = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    safe_id = safe_plugin_id(canonical)
+    if safe_id is None:
+        return row
+    path = safe_join_under(data_raw_dir / "plugins", f"{safe_id}.snapshot.json")
     if not path.exists():
         return row
 
@@ -249,12 +253,15 @@ def _parse_iso_date(value: Any) -> date | None:
 
 
 def _load_advisory_records(plugin_id: str, data_raw_dir: Path) -> list[dict[str, Any]]:
-    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    canonical = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    safe_id = safe_plugin_id(canonical)
+    if safe_id is None:
+        return []
     advisories_dir = data_raw_dir / "advisories"
     candidates = [
-        advisories_dir / f"{plugin_id}.advisories.real.jsonl",
-        advisories_dir / f"{plugin_id}.advisories.sample.jsonl",
-        advisories_dir / f"{plugin_id}.advisories.jsonl",
+        safe_join_under(advisories_dir, f"{safe_id}.advisories.real.jsonl"),
+        safe_join_under(advisories_dir, f"{safe_id}.advisories.sample.jsonl"),
+        safe_join_under(advisories_dir, f"{safe_id}.advisories.jsonl"),
     ]
     for path in candidates:
         if path.exists():
@@ -371,8 +378,16 @@ def _load_advisory_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any
 
 
 def _load_healthscore_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
-    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
-    hs = _load_healthscore_record(plugin_id, data_raw_dir.resolve())
+    canonical = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    safe_id = safe_plugin_id(canonical)
+    if safe_id is None:
+        return {
+            "healthscore_present": False,
+            "healthscore_value": None,
+            "healthscore_date": None,
+            "healthscore_collected_at": None,
+        }
+    hs = _load_healthscore_record(safe_id, data_raw_dir.resolve())
 
     if not isinstance(hs, dict):
         return {
@@ -391,20 +406,23 @@ def _load_healthscore_features(plugin_id: str, data_raw_dir: Path) -> dict[str, 
 
 
 def _load_github_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
-    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    canonical = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    safe_id = safe_plugin_id(canonical)
+    if safe_id is None:
+        return {"github_present": False}
     github_dir = data_raw_dir / "github"
-    index_path = github_dir / f"{plugin_id}.github_index.json"
-    repo_path = github_dir / f"{plugin_id}.repo.json"
-    releases_path = github_dir / f"{plugin_id}.releases.json"
-    tags_path = github_dir / f"{plugin_id}.tags.json"
-    contributors_path = github_dir / f"{plugin_id}.contributors.json"
-    open_issues_path = github_dir / f"{plugin_id}.open_issues.json"
-    open_pulls_path = github_dir / f"{plugin_id}.open_pulls.json"
-    workflows_path = github_dir / f"{plugin_id}.workflows_dir.json"
-    codeowners_path = github_dir / f"{plugin_id}.codeowners.json"
-    security_policy_path = github_dir / f"{plugin_id}.security_policy.json"
-    dependabot_path = github_dir / f"{plugin_id}.dependabot.json"
-    commit_candidates = sorted(github_dir.glob(f"{plugin_id}.commits_*d.json"))
+    index_path = safe_join_under(github_dir, f"{safe_id}.github_index.json")
+    repo_path = safe_join_under(github_dir, f"{safe_id}.repo.json")
+    releases_path = safe_join_under(github_dir, f"{safe_id}.releases.json")
+    tags_path = safe_join_under(github_dir, f"{safe_id}.tags.json")
+    contributors_path = safe_join_under(github_dir, f"{safe_id}.contributors.json")
+    open_issues_path = safe_join_under(github_dir, f"{safe_id}.open_issues.json")
+    open_pulls_path = safe_join_under(github_dir, f"{safe_id}.open_pulls.json")
+    workflows_path = safe_join_under(github_dir, f"{safe_id}.workflows_dir.json")
+    codeowners_path = safe_join_under(github_dir, f"{safe_id}.codeowners.json")
+    security_policy_path = safe_join_under(github_dir, f"{safe_id}.security_policy.json")
+    dependabot_path = safe_join_under(github_dir, f"{safe_id}.dependabot.json")
+    commit_candidates = sorted(github_dir.glob(f"{safe_id}.commits_*d.json"))
 
     out: dict[str, Any] = {"github_present": False}
     index = _read_json(index_path) if index_path.exists() else {}
@@ -497,7 +515,7 @@ def _load_github_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
         commits = _read_json(latest_path)
         out["github_commits_latest_window_count"] = len(commits) if isinstance(commits, list) else 0
         name = latest_path.name
-        prefix = f"{plugin_id}.commits_"
+        prefix = f"{safe_id}.commits_"
         if name.startswith(prefix) and name.endswith("d.json"):
             days_str = name[len(prefix) : -len("d.json")]
             try:
@@ -569,12 +587,6 @@ def _resolve_swh_backend_dir(
 
 
 def _load_software_heritage_features_athena(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
-    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
-    swh_dir = data_raw_dir / "software_heritage_athena"
-
-    index_path = swh_dir / f"{plugin_id}.swh_athena_index.json"
-    visits_path = swh_dir / f"{plugin_id}.swh_athena_visits.jsonl"
-
     row: dict[str, Any] = {
         "swh_present": False,
         "swh_origin_found": False,
@@ -620,6 +632,15 @@ def _load_software_heritage_features_athena(plugin_id: str, data_raw_dir: Path) 
         "swh_late_night_commit_fraction": None,
         "swh_backend": "athena",
     }
+
+    canonical = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    safe_id = safe_plugin_id(canonical)
+    if safe_id is None:
+        return row
+
+    swh_dir = data_raw_dir / "software_heritage_athena"
+    index_path = safe_join_under(swh_dir, f"{safe_id}.swh_athena_index.json")
+    visits_path = safe_join_under(swh_dir, f"{safe_id}.swh_athena_visits.jsonl")
 
     if not index_path.exists():
         return row
@@ -709,15 +730,6 @@ def _load_software_heritage_features(
 
 
 def _load_software_heritage_features_api(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
-    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
-    swh_dir = data_raw_dir / "software_heritage_api"
-
-    index_path = swh_dir / f"{plugin_id}.swh_index.json"
-    origin_path = swh_dir / f"{plugin_id}.swh_origin.json"
-    visits_path = swh_dir / f"{plugin_id}.swh_visits.json"
-    latest_visit_path = swh_dir / f"{plugin_id}.swh_latest_visit.json"
-    snapshot_path = swh_dir / f"{plugin_id}.swh_snapshot.json"
-
     row: dict[str, Any] = {
         "swh_present": False,
         "swh_origin_found": False,
@@ -731,6 +743,19 @@ def _load_software_heritage_features_api(plugin_id: str, data_raw_dir: Path) -> 
         "swh_visits_last_365d": 0,
         "swh_snapshot_branch_count": 0,
     }
+
+    canonical = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    safe_id = safe_plugin_id(canonical)
+    if safe_id is None:
+        return row
+
+    swh_dir = data_raw_dir / "software_heritage_api"
+
+    index_path = safe_join_under(swh_dir, f"{safe_id}.swh_index.json")
+    origin_path = safe_join_under(swh_dir, f"{safe_id}.swh_origin.json")
+    visits_path = safe_join_under(swh_dir, f"{safe_id}.swh_visits.json")
+    latest_visit_path = safe_join_under(swh_dir, f"{safe_id}.swh_latest_visit.json")
+    snapshot_path = safe_join_under(swh_dir, f"{safe_id}.swh_snapshot.json")
 
     if not index_path.exists():
         return row
@@ -786,16 +811,20 @@ def _load_software_heritage_features_api(plugin_id: str, data_raw_dir: Path) -> 
 
 
 def _load_gharchive_features(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
-    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
-    path = data_raw_dir / "gharchive" / "plugins" / f"{plugin_id}.gharchive.jsonl"
+    _default: dict[str, Any] = {
+        "gharchive_present": False,
+        "gharchive_window_count": 0,
+        "gharchive_sample_percent": None,
+        "gharchive_latest_window_end": None,
+    }
+    canonical = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    safe_id = safe_plugin_id(canonical)
+    if safe_id is None:
+        return _default
+    path = safe_join_under(data_raw_dir / "gharchive" / "plugins", f"{safe_id}.gharchive.jsonl")
     rows = _read_jsonl(path)
     if not rows:
-        return {
-            "gharchive_present": False,
-            "gharchive_window_count": 0,
-            "gharchive_sample_percent": None,
-            "gharchive_latest_window_end": None,
-        }
+        return _default
 
     latest = max(rows, key=lambda r: str(r.get("window_end_yyyymmdd") or ""))
     out: dict[str, Any] = {
