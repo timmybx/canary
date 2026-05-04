@@ -1,36 +1,15 @@
 from __future__ import annotations
 
 import json
-import re
 import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from canary.collectors._path_utils import safe_join_under, safe_plugin_id
+
 SWH_API_BASE = "https://archive.softwareheritage.org/api/1"
-
-_PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-
-
-def _safe_plugin_id(plugin_id: str) -> str | None:
-    """Return a filesystem-safe plugin id or None when invalid."""
-    candidate = plugin_id.strip()
-    if not candidate:
-        return None
-    if not _PLUGIN_ID_RE.fullmatch(candidate):
-        return None
-    return candidate
-
-
-def _safe_join_under(base: Path, *parts: str) -> Path:
-    """Join path parts under base, raising ValueError if the result escapes base."""
-    candidate = (base.joinpath(*parts)).resolve()
-    try:
-        candidate.relative_to(base.resolve())
-    except ValueError as exc:
-        raise ValueError("Resolved path escapes base directory") from exc
-    return candidate
 
 
 def _nonempty(path: Path) -> bool:
@@ -50,11 +29,11 @@ def _read_json(path: Path) -> Any:
 
 
 def _load_plugin_snapshot(plugin_id: str, *, data_dir: str) -> dict[str, Any]:
-    safe_id = _safe_plugin_id(plugin_id)
+    safe_id = safe_plugin_id(plugin_id)
     if safe_id is None:
         raise ValueError(f"Invalid plugin_id for path construction: {plugin_id!r}")
     base = Path(data_dir).resolve()
-    snap_path = _safe_join_under(base, "plugins", f"{safe_id}.snapshot.json")
+    snap_path = safe_join_under(base, "plugins", f"{safe_id}.snapshot.json")
     if not snap_path.exists():
         raise FileNotFoundError(
             f"Plugin snapshot not found: {snap_path}. "
@@ -160,10 +139,10 @@ def collect_software_heritage_real(
     timeout_s: float = 20.0,
     overwrite: bool = False,
 ) -> dict[str, Any]:
-    safe_id = _safe_plugin_id(plugin_id)
-    if safe_id is None:
-        raise ValueError(f"Invalid plugin_id for path construction: {plugin_id!r}")
+    # _load_plugin_snapshot validates plugin_id; safe_id is non-None if it succeeds.
     snapshot = _load_plugin_snapshot(plugin_id, data_dir=data_dir)
+    safe_id = safe_plugin_id(plugin_id)
+    assert safe_id is not None  # guaranteed by prior _load_plugin_snapshot validation
     repo_url = _infer_repo_url(snapshot)
     if not repo_url:
         raise RuntimeError(
@@ -176,13 +155,13 @@ def collect_software_heritage_real(
     out_base.mkdir(parents=True, exist_ok=True)
 
     def out(name: str) -> Path:
-        return _safe_join_under(out_base, f"{safe_id}.{name}.json")
+        return safe_join_under(out_base, f"{safe_id}.{name}.json")
 
     origin_path = out("swh_origin")
     visits_path = out("swh_visits")
     latest_visit_path = out("swh_latest_visit")
     snapshot_path = out("swh_snapshot")
-    index_path = _safe_join_under(out_base, f"{safe_id}.swh_index.json")
+    index_path = safe_join_under(out_base, f"{safe_id}.swh_index.json")
 
     result: dict[str, Any] = {
         "plugin_id": plugin_id,

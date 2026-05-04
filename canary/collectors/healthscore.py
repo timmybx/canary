@@ -1,36 +1,14 @@
 from __future__ import annotations
 
 import json
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import requests
 
+from canary.collectors._path_utils import safe_join_under, safe_plugin_id
 from canary.plugin_aliases import canonicalize_plugin_id
-
-_PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-
-
-def _safe_plugin_id(plugin_id: str) -> str | None:
-    """Return a filesystem-safe plugin id or None when invalid."""
-    candidate = plugin_id.strip()
-    if not candidate:
-        return None
-    if not _PLUGIN_ID_RE.fullmatch(candidate):
-        return None
-    return candidate
-
-
-def _safe_join_under(base: Path, *parts: str) -> Path:
-    """Join path parts under base, raising ValueError if the result escapes base."""
-    candidate = (base.joinpath(*parts)).resolve()
-    try:
-        candidate.relative_to(base.resolve())
-    except ValueError as exc:
-        raise ValueError("Resolved path escapes base directory") from exc
-    return candidate
 
 
 def _utc_now_iso() -> str:
@@ -139,12 +117,12 @@ def collect_health_scores(
         if not plugin_id:
             continue
 
-        safe_id = _safe_plugin_id(plugin_id)
+        safe_id = safe_plugin_id(plugin_id)
         if safe_id is None:
             continue
 
         results["processed"] += 1
-        out_path = _safe_join_under(base, "plugins", f"{safe_id}.healthscore.json")
+        out_path = safe_join_under(base, "plugins", f"{safe_id}.healthscore.json")
 
         if out_path.exists() and out_path.stat().st_size > 0 and not overwrite:
             results["skipped"] += 1
