@@ -3,7 +3,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from canary.build.features_bundle import build_feature_bundle
+import pytest
+
+from canary.build.features_bundle import (
+    _load_advisory_features,
+    _load_gharchive_features,
+    _load_github_features,
+    _load_healthscore_features,
+    _load_snapshot_features,
+    _load_software_heritage_features_api,
+    _load_software_heritage_features_athena,
+    build_feature_bundle,
+)
 
 
 def test_build_feature_bundle_loads_software_heritage_features(tmp_path: Path) -> None:
@@ -304,3 +315,77 @@ def test_build_feature_bundle_writes_joined_outputs(tmp_path: Path) -> None:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["plugins_total"] == 1
     assert summary["plugins_with_gharchive"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Security regression: malicious / invalid plugin IDs must never reach the FS
+# ---------------------------------------------------------------------------
+
+_MALICIOUS_IDS = [
+    "../evil",
+    "../../etc/passwd",
+    "/etc/passwd",
+    "plugin\x00id",
+    "",
+    "  ",
+    "../",
+    "a/b",
+]
+
+
+@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+def test_load_snapshot_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
+    data_raw = tmp_path / "data" / "raw"
+    (data_raw / "plugins").mkdir(parents=True)
+    result = _load_snapshot_features(bad_id, data_raw)
+    assert result == {"snapshot_present": False}
+
+
+@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+def test_load_advisory_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
+    data_raw = tmp_path / "data" / "raw"
+    (data_raw / "advisories").mkdir(parents=True)
+    result = _load_advisory_features(bad_id, data_raw)
+    assert result["advisories_present"] is False
+    assert result["advisory_count"] == 0
+
+
+@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+def test_load_healthscore_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
+    data_raw = tmp_path / "data" / "raw"
+    (data_raw / "healthscore" / "plugins").mkdir(parents=True)
+    result = _load_healthscore_features(bad_id, data_raw)
+    assert result["healthscore_present"] is False
+    assert result["healthscore_value"] is None
+
+
+@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+def test_load_github_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
+    data_raw = tmp_path / "data" / "raw"
+    (data_raw / "github").mkdir(parents=True)
+    result = _load_github_features(bad_id, data_raw)
+    assert result == {"github_present": False}
+
+
+@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+def test_load_gharchive_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
+    data_raw = tmp_path / "data" / "raw"
+    (data_raw / "gharchive" / "plugins").mkdir(parents=True)
+    result = _load_gharchive_features(bad_id, data_raw)
+    assert result["gharchive_present"] is False
+
+
+@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+def test_load_swh_api_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
+    data_raw = tmp_path / "data" / "raw"
+    (data_raw / "software_heritage_api").mkdir(parents=True)
+    result = _load_software_heritage_features_api(bad_id, data_raw)
+    assert result["swh_present"] is False
+
+
+@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+def test_load_swh_athena_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
+    data_raw = tmp_path / "data" / "raw"
+    (data_raw / "software_heritage_athena").mkdir(parents=True)
+    result = _load_software_heritage_features_athena(bad_id, data_raw)
+    assert result["swh_present"] is False
