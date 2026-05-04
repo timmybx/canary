@@ -10,7 +10,7 @@ from statistics import mean
 from typing import Any
 
 from canary.plugin_aliases import canonicalize_plugin_id
-from canary.scoring.baseline import _load_healthscore_record
+from canary.scoring.baseline import _load_healthscore_record, _safe_plugin_id
 
 
 def _iter_registry_records(registry_path: Path) -> list[dict[str, Any]]:
@@ -709,15 +709,6 @@ def _load_software_heritage_features(
 
 
 def _load_software_heritage_features_api(plugin_id: str, data_raw_dir: Path) -> dict[str, Any]:
-    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
-    swh_dir = data_raw_dir / "software_heritage_api"
-
-    index_path = swh_dir / f"{plugin_id}.swh_index.json"
-    origin_path = swh_dir / f"{plugin_id}.swh_origin.json"
-    visits_path = swh_dir / f"{plugin_id}.swh_visits.json"
-    latest_visit_path = swh_dir / f"{plugin_id}.swh_latest_visit.json"
-    snapshot_path = swh_dir / f"{plugin_id}.swh_snapshot.json"
-
     row: dict[str, Any] = {
         "swh_present": False,
         "swh_origin_found": False,
@@ -731,6 +722,19 @@ def _load_software_heritage_features_api(plugin_id: str, data_raw_dir: Path) -> 
         "swh_visits_last_365d": 0,
         "swh_snapshot_branch_count": 0,
     }
+
+    canonical_plugin_id = canonicalize_plugin_id(plugin_id, data_dir=data_raw_dir)
+    safe_plugin_id = _safe_plugin_id(canonical_plugin_id)
+    if safe_plugin_id is None:
+        return row
+
+    swh_dir = data_raw_dir / "software_heritage_api"
+
+    index_path = swh_dir / f"{safe_plugin_id}.swh_index.json"
+    origin_path = swh_dir / f"{safe_plugin_id}.swh_origin.json"
+    visits_path = swh_dir / f"{safe_plugin_id}.swh_visits.json"
+    latest_visit_path = swh_dir / f"{safe_plugin_id}.swh_latest_visit.json"
+    snapshot_path = swh_dir / f"{safe_plugin_id}.swh_snapshot.json"
 
     if not index_path.exists():
         return row
