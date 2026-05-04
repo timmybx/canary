@@ -139,10 +139,10 @@ def collect_software_heritage_real(
     timeout_s: float = 20.0,
     overwrite: bool = False,
 ) -> dict[str, Any]:
-    # _load_plugin_snapshot validates plugin_id; safe_id is non-None if it succeeds.
-    snapshot = _load_plugin_snapshot(plugin_id, data_dir=data_dir)
     safe_id = safe_plugin_id(plugin_id)
-    assert safe_id is not None  # guaranteed by prior _load_plugin_snapshot validation
+    if safe_id is None:
+        raise ValueError(f"Invalid plugin_id for path construction: {plugin_id!r}")
+    snapshot = _load_plugin_snapshot(plugin_id, data_dir=data_dir)
     repo_url = _infer_repo_url(snapshot)
     if not repo_url:
         raise RuntimeError(
