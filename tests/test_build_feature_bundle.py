@@ -321,7 +321,7 @@ def test_build_feature_bundle_writes_joined_outputs(tmp_path: Path) -> None:
 # Security regression: malicious / invalid plugin IDs must never reach the FS
 # ---------------------------------------------------------------------------
 
-_MALICIOUS_IDS = [
+_INVALID_PLUGIN_IDS = [
     "../evil",
     "../../etc/passwd",
     "/etc/passwd",
@@ -333,7 +333,7 @@ _MALICIOUS_IDS = [
 ]
 
 
-@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+@pytest.mark.parametrize("bad_id", _INVALID_PLUGIN_IDS)
 def test_load_snapshot_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
     data_raw = tmp_path / "data" / "raw"
     (data_raw / "plugins").mkdir(parents=True)
@@ -341,7 +341,7 @@ def test_load_snapshot_features_rejects_invalid_plugin_id(bad_id: str, tmp_path:
     assert result == {"snapshot_present": False}
 
 
-@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+@pytest.mark.parametrize("bad_id", _INVALID_PLUGIN_IDS)
 def test_load_advisory_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
     data_raw = tmp_path / "data" / "raw"
     (data_raw / "advisories").mkdir(parents=True)
@@ -350,7 +350,7 @@ def test_load_advisory_features_rejects_invalid_plugin_id(bad_id: str, tmp_path:
     assert result["advisory_count"] == 0
 
 
-@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+@pytest.mark.parametrize("bad_id", _INVALID_PLUGIN_IDS)
 def test_load_healthscore_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
     data_raw = tmp_path / "data" / "raw"
     (data_raw / "healthscore" / "plugins").mkdir(parents=True)
@@ -359,7 +359,7 @@ def test_load_healthscore_features_rejects_invalid_plugin_id(bad_id: str, tmp_pa
     assert result["healthscore_value"] is None
 
 
-@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+@pytest.mark.parametrize("bad_id", _INVALID_PLUGIN_IDS)
 def test_load_github_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
     data_raw = tmp_path / "data" / "raw"
     (data_raw / "github").mkdir(parents=True)
@@ -367,7 +367,7 @@ def test_load_github_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: P
     assert result == {"github_present": False}
 
 
-@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+@pytest.mark.parametrize("bad_id", _INVALID_PLUGIN_IDS)
 def test_load_gharchive_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
     data_raw = tmp_path / "data" / "raw"
     (data_raw / "gharchive" / "plugins").mkdir(parents=True)
@@ -375,7 +375,7 @@ def test_load_gharchive_features_rejects_invalid_plugin_id(bad_id: str, tmp_path
     assert result["gharchive_present"] is False
 
 
-@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+@pytest.mark.parametrize("bad_id", _INVALID_PLUGIN_IDS)
 def test_load_swh_api_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
     data_raw = tmp_path / "data" / "raw"
     (data_raw / "software_heritage_api").mkdir(parents=True)
@@ -383,7 +383,7 @@ def test_load_swh_api_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: 
     assert result["swh_present"] is False
 
 
-@pytest.mark.parametrize("bad_id", _MALICIOUS_IDS)
+@pytest.mark.parametrize("bad_id", _INVALID_PLUGIN_IDS)
 def test_load_swh_athena_features_rejects_invalid_plugin_id(bad_id: str, tmp_path: Path) -> None:
     data_raw = tmp_path / "data" / "raw"
     (data_raw / "software_heritage_athena").mkdir(parents=True)
