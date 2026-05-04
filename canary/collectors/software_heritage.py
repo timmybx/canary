@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
@@ -8,6 +9,28 @@ from pathlib import Path
 from typing import Any
 
 SWH_API_BASE = "https://archive.softwareheritage.org/api/1"
+
+_PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _safe_plugin_id(plugin_id: str) -> str | None:
+    """Return a filesystem-safe plugin id or None when invalid."""
+    candidate = plugin_id.strip()
+    if not candidate:
+        return None
+    if not _PLUGIN_ID_RE.fullmatch(candidate):
+        return None
+    return candidate
+
+
+def _safe_join_under(base: Path, *parts: str) -> Path:
+    """Join path parts under base, raising ValueError if the result escapes base."""
+    candidate = (base.joinpath(*parts)).resolve()
+    try:
+        candidate.relative_to(base.resolve())
+    except ValueError as exc:
+        raise ValueError("Resolved path escapes base directory") from exc
+    return candidate
 
 
 def _nonempty(path: Path) -> bool:
@@ -27,7 +50,11 @@ def _read_json(path: Path) -> Any:
 
 
 def _load_plugin_snapshot(plugin_id: str, *, data_dir: str) -> dict[str, Any]:
-    snap_path = Path(data_dir) / "plugins" / f"{plugin_id}.snapshot.json"
+    safe_id = _safe_plugin_id(plugin_id)
+    if safe_id is None:
+        raise ValueError(f"Invalid plugin_id for path construction: {plugin_id!r}")
+    base = Path(data_dir).resolve()
+    snap_path = _safe_join_under(base, "plugins", f"{safe_id}.snapshot.json")
     if not snap_path.exists():
         raise FileNotFoundError(
             f"Plugin snapshot not found: {snap_path}. "
@@ -133,6 +160,9 @@ def collect_software_heritage_real(
     timeout_s: float = 20.0,
     overwrite: bool = False,
 ) -> dict[str, Any]:
+    safe_id = _safe_plugin_id(plugin_id)
+    if safe_id is None:
+        raise ValueError(f"Invalid plugin_id for path construction: {plugin_id!r}")
     snapshot = _load_plugin_snapshot(plugin_id, data_dir=data_dir)
     repo_url = _infer_repo_url(snapshot)
     if not repo_url:
@@ -145,16 +175,14 @@ def collect_software_heritage_real(
     out_base = Path(out_dir)
     out_base.mkdir(parents=True, exist_ok=True)
 
-    slug = _safe_slug(plugin_id)
-
     def out(name: str) -> Path:
-        return out_base / f"{slug}.{name}.json"
+        return _safe_join_under(out_base, f"{safe_id}.{name}.json")
 
     origin_path = out("swh_origin")
     visits_path = out("swh_visits")
     latest_visit_path = out("swh_latest_visit")
     snapshot_path = out("swh_snapshot")
-    index_path = out_base / f"{slug}.swh_index.json"
+    index_path = _safe_join_under(out_base, f"{safe_id}.swh_index.json")
 
     result: dict[str, Any] = {
         "plugin_id": plugin_id,

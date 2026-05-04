@@ -15,6 +15,28 @@ from urllib.parse import urlparse, urlunparse
 
 _ALLOWED_NETLOCS = {"jenkins.io", "www.jenkins.io"}
 
+_PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _safe_plugin_id(plugin_id: str) -> str | None:
+    """Return a filesystem-safe plugin id or None when invalid."""
+    candidate = plugin_id.strip()
+    if not candidate:
+        return None
+    if not _PLUGIN_ID_RE.fullmatch(candidate):
+        return None
+    return candidate
+
+
+def _safe_join_under(base: Path, *parts: str) -> Path:
+    """Join path parts under base, raising ValueError if the result escapes base."""
+    candidate = (base.joinpath(*parts)).resolve()
+    try:
+        candidate.relative_to(base.resolve())
+    except ValueError as exc:
+        raise ValueError("Resolved path escapes base directory") from exc
+    return candidate
+
 
 _SEVERITY_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 
@@ -160,7 +182,10 @@ def _date_from_advisory_url(url: str) -> date | None:
 
 
 def _load_plugin_snapshot(plugin_id: str, data_dir: Path) -> dict[str, Any]:
-    path = data_dir / "plugins" / f"{plugin_id}.snapshot.json"
+    safe_id = _safe_plugin_id(plugin_id)
+    if safe_id is None:
+        raise ValueError(f"Invalid plugin_id for path construction: {plugin_id!r}")
+    path = _safe_join_under(data_dir, "plugins", f"{safe_id}.snapshot.json")
     return json.loads(path.read_text(encoding="utf-8"))
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,28 @@ from canary.collectors.github_repo import (
     fetch_github_workflows_dir,
     parse_github_owner_repo,
 )
+
+_PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _safe_plugin_id(plugin_id: str) -> str | None:
+    """Return a filesystem-safe plugin id or None when invalid."""
+    candidate = plugin_id.strip()
+    if not candidate:
+        return None
+    if not _PLUGIN_ID_RE.fullmatch(candidate):
+        return None
+    return candidate
+
+
+def _safe_join_under(base: Path, *parts: str) -> Path:
+    """Join path parts under base, raising ValueError if the result escapes base."""
+    candidate = (base.joinpath(*parts)).resolve()
+    try:
+        candidate.relative_to(base.resolve())
+    except ValueError as exc:
+        raise ValueError("Resolved path escapes base directory") from exc
+    return candidate
 
 
 def _nonempty(path: Path) -> bool:
@@ -41,7 +64,11 @@ def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
 
 
 def _load_plugin_snapshot(plugin_id: str, *, data_dir: str) -> dict[str, Any]:
-    snap_path = Path(data_dir) / "plugins" / f"{plugin_id}.snapshot.json"
+    safe_id = _safe_plugin_id(plugin_id)
+    if safe_id is None:
+        raise ValueError(f"Invalid plugin_id for path construction: {plugin_id!r}")
+    base = Path(data_dir).resolve()
+    snap_path = _safe_join_under(base, "plugins", f"{safe_id}.snapshot.json")
     if not snap_path.exists():
         raise FileNotFoundError(
             f"Plugin snapshot not found: {snap_path}. "
@@ -133,6 +160,9 @@ def backfill_github_identities_from_indexes(
         plugin_id = idx_path.name.split(".github_index.json", 1)[0]
         results["processed"] += 1
         try:
+            safe_id = _safe_plugin_id(plugin_id)
+            if safe_id is None:
+                raise ValueError(f"Invalid plugin_id in filename: {idx_path.name!r}")
             idx = json.loads(idx_path.read_text(encoding="utf-8"))
             full_name = idx.get("repo_full_name") or idx.get("repo_fullname")
             repo_url = idx.get("repo_url")
@@ -142,7 +172,7 @@ def backfill_github_identities_from_indexes(
 
             owner, repo = full_name.split("/", 1)
 
-            identity_path = out_base / "plugins" / plugin_id / "identity.json"
+            identity_path = _safe_join_under(out_base, "plugins", safe_id, "identity.json")
             if not overwrite and _nonempty(identity_path):
                 results["skipped"] += 1
                 continue
@@ -195,6 +225,9 @@ def collect_github_plugin_real(
       - <plugin>.security_policy.json
       - <plugin>.dependabot.json
     """
+    safe_id = _safe_plugin_id(plugin_id)
+    if safe_id is None:
+        raise ValueError(f"Invalid plugin_id for path construction: {plugin_id!r}")
     snapshot = _load_plugin_snapshot(plugin_id, data_dir=data_dir)
     repo_url = _infer_repo_url(snapshot)
     if not repo_url:
@@ -216,7 +249,7 @@ def collect_github_plugin_real(
     out_base.mkdir(parents=True, exist_ok=True)
 
     def out(name: str) -> Path:
-        return out_base / f"{plugin_id}.{name}.json"
+        return _safe_join_under(out_base, f"{safe_id}.{name}.json")
 
     results: dict[str, Any] = {
         "plugin_id": plugin_id,
@@ -228,7 +261,7 @@ def collect_github_plugin_real(
     }
 
     # index is always rewritten
-    index_path = out_base / f"{plugin_id}.github_index.json"
+    index_path = _safe_join_under(out_base, f"{safe_id}.github_index.json")
 
     # Helper to fetch+write with resume
     def fetch_and_store(key: str, path: Path, fetch_fn) -> None:
