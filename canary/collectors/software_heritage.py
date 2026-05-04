@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from canary.collectors._path_utils import safe_join_under, safe_plugin_id
+
 SWH_API_BASE = "https://archive.softwareheritage.org/api/1"
 
 
@@ -27,7 +29,11 @@ def _read_json(path: Path) -> Any:
 
 
 def _load_plugin_snapshot(plugin_id: str, *, data_dir: str) -> dict[str, Any]:
-    snap_path = Path(data_dir) / "plugins" / f"{plugin_id}.snapshot.json"
+    safe_id = safe_plugin_id(plugin_id)
+    if safe_id is None:
+        raise ValueError(f"Invalid plugin_id for path construction: {plugin_id!r}")
+    base = Path(data_dir).resolve()
+    snap_path = safe_join_under(base, "plugins", f"{safe_id}.snapshot.json")
     if not snap_path.exists():
         raise FileNotFoundError(
             f"Plugin snapshot not found: {snap_path}. "
@@ -77,10 +83,6 @@ def _normalize_origin_url(repo_url: str) -> str:
     if text.endswith(".git"):
         text = text[:-4]
     return text.rstrip("/")
-
-
-def _safe_slug(plugin_id: str) -> str:
-    return plugin_id.strip().replace("/", "_")
 
 
 def _validate_http_url(url: str) -> None:
@@ -133,6 +135,9 @@ def collect_software_heritage_real(
     timeout_s: float = 20.0,
     overwrite: bool = False,
 ) -> dict[str, Any]:
+    safe_id = safe_plugin_id(plugin_id)
+    if safe_id is None:
+        raise ValueError(f"Invalid plugin_id for path construction: {plugin_id!r}")
     snapshot = _load_plugin_snapshot(plugin_id, data_dir=data_dir)
     repo_url = _infer_repo_url(snapshot)
     if not repo_url:
@@ -145,16 +150,14 @@ def collect_software_heritage_real(
     out_base = Path(out_dir)
     out_base.mkdir(parents=True, exist_ok=True)
 
-    slug = _safe_slug(plugin_id)
-
     def out(name: str) -> Path:
-        return out_base / f"{slug}.{name}.json"
+        return safe_join_under(out_base, f"{safe_id}.{name}.json")
 
     origin_path = out("swh_origin")
     visits_path = out("swh_visits")
     latest_visit_path = out("swh_latest_visit")
     snapshot_path = out("swh_snapshot")
-    index_path = out_base / f"{slug}.swh_index.json"
+    index_path = safe_join_under(out_base, f"{safe_id}.swh_index.json")
 
     result: dict[str, Any] = {
         "plugin_id": plugin_id,

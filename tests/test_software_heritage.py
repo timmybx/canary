@@ -15,7 +15,6 @@ from canary.collectors.software_heritage import (
     _origin_get_url,
     _origin_latest_visit_url,
     _origin_visits_url,
-    _safe_slug,
     _scm_to_url,
     _snapshot_url,
     _validate_http_url,
@@ -124,23 +123,6 @@ def test_normalize_origin_url_strips_trailing_slash():
 def test_normalize_origin_url_no_change_needed():
     url = "https://github.com/org/repo"
     assert _normalize_origin_url(url) == url
-
-
-# ---------------------------------------------------------------------------
-# _safe_slug
-# ---------------------------------------------------------------------------
-
-
-def test_safe_slug_replaces_slash():
-    assert _safe_slug("org/repo") == "org_repo"
-
-
-def test_safe_slug_no_change():
-    assert _safe_slug("my-plugin") == "my-plugin"
-
-
-def test_safe_slug_strips_whitespace():
-    assert _safe_slug("  plugin  ") == "plugin"
 
 
 # ---------------------------------------------------------------------------

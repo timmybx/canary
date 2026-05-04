@@ -7,6 +7,7 @@ from typing import Any
 
 import requests
 
+from canary.collectors._path_utils import safe_join_under, safe_plugin_id
 from canary.plugin_aliases import canonicalize_plugin_id
 
 
@@ -116,8 +117,12 @@ def collect_health_scores(
         if not plugin_id:
             continue
 
+        safe_id = safe_plugin_id(plugin_id)
+        if safe_id is None:
+            continue
+
         results["processed"] += 1
-        out_path = base / "plugins" / f"{plugin_id}.healthscore.json"
+        out_path = safe_join_under(base, "plugins", f"{safe_id}.healthscore.json")
 
         if out_path.exists() and out_path.stat().st_size > 0 and not overwrite:
             results["skipped"] += 1

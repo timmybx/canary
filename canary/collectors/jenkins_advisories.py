@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
+from canary.collectors._path_utils import safe_join_under, safe_plugin_id
+
 _ALLOWED_NETLOCS = {"jenkins.io", "www.jenkins.io"}
 
 
@@ -160,7 +162,10 @@ def _date_from_advisory_url(url: str) -> date | None:
 
 
 def _load_plugin_snapshot(plugin_id: str, data_dir: Path) -> dict[str, Any]:
-    path = data_dir / "plugins" / f"{plugin_id}.snapshot.json"
+    safe_id = safe_plugin_id(plugin_id)
+    if safe_id is None:
+        raise ValueError(f"Invalid plugin_id for path construction: {plugin_id!r}")
+    path = safe_join_under(data_dir, "plugins", f"{safe_id}.snapshot.json")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
