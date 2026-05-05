@@ -263,11 +263,11 @@ def test_extract_drivers_coef_direction_increases():
 
 
 def test_extract_drivers_coef_zero_contribution_filtered():
-    # coef=1.0 * val=0.0 → contribution=0.0 → filtered out by abs > 1e-10 threshold
     cols = ["feat_a"]
     vec = {"feat_a": 0.0}
     clf = _clf_with_coef([1.0])
     drivers = _extract_drivers(clf, cols, vec, top_n=5)
+    # coef=1.0 * val=0.0 → contribution=0.0 → filtered out by abs > 1e-10 threshold
     assert drivers == []
 
 
