@@ -267,8 +267,8 @@ def test_extract_drivers_coef_neutral():
     vec = {"feat_a": 0.0}
     clf = _clf_with_coef([1.0])
     drivers = _extract_drivers(clf, cols, vec, top_n=5)
-    # coef=1.0 * val=0.0 → score=0.0 → neutral
-    assert drivers[0].direction == "neutral"
+    # coef=1.0 * val=0.0 → contribution=0.0 → filtered out by abs > 1e-10 threshold
+    assert drivers == []
 
 
 def test_extract_drivers_coef_top_n():
@@ -309,13 +309,13 @@ def test_extract_drivers_pipeline_named_steps_unwraps():
 
 
 def test_extract_drivers_none_values_treated_as_zero():
-    """None feature values are treated as 0.0 in coef-based scoring."""
+    """None feature values are treated as 0.0 in coef-based scoring, producing no driver."""
     cols = ["feat_a"]
     vec = {"feat_a": None}
     clf = _clf_with_coef([1.0])
     drivers = _extract_drivers(clf, cols, vec, top_n=5)
-    assert drivers[0].value is None
-    assert drivers[0].direction == "neutral"
+    # coef=1.0 * imputed(None)=0.0 → contribution=0.0 → filtered out
+    assert drivers == []
 
 
 # ---------------------------------------------------------------------------

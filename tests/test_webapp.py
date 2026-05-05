@@ -72,7 +72,7 @@ def test_render_page_shows_errors():
         score_error="boom",
     )
     assert "boom" in html
-    assert "Prefer real advisory data" in html
+    assert "ML model" in html
 
 
 def test_static_logo_route():
