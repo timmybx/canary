@@ -378,7 +378,7 @@ def _extract_drivers(
         # coef * imputed_value gives the actual per-feature log-odds contribution
         coefs = clf.coef_[0]
         for col, coef, imp_val in zip(feature_columns, coefs, imp_values, strict=False):
-            contribution = float(coef) * float(imp_val)
+            contribution = float(coef) * float(imp_val if imp_val is not None else 0.0)
             if abs(contribution) > 1e-10:  # skip zero-contribution features
                 scores.append((col, contribution))
 
@@ -388,15 +388,14 @@ def _extract_drivers(
                 scores.append((col, float(imp)))
 
     scores.sort(key=lambda x: abs(x[1]), reverse=True)
-    return (
-        _make_drivers(
-            feature_columns,
-            feature_vector,
-            [s for _, s in scores[:top_n]],
-            top_n,
-        )
-        if scores
-        else []
+    if not scores:
+        return []
+    top_scores = scores[:top_n]
+    return _make_drivers(
+        [col for col, _ in top_scores],
+        feature_vector,
+        [s for _, s in top_scores],
+        top_n,
     )
 
 
