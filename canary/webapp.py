@@ -1022,11 +1022,14 @@ def _render_ml_score_panel(ml: dict[str, Any]) -> str:
             f"</li>"
         )
 
+    model_badge_html = _render_model_badge(ml.get("model_name") or "")
+
     return (
         '<div class="result-stack">'
         '<div class="score-banner">'
         f'<div><p class="eyebrow">ML Score (experimental)</p><h3>{_escape(ml["plugin"])}</h3></div>'
         f'<div style="display:flex;align-items:center;gap:.75rem">'
+        f"{model_badge_html}"
         f'<div class="score-number">{_escape(ml["probability_pct"])}<span> advisory risk</span></div>'
         f'<span class="pill {risk_pill_cls}">{_escape(ml.get("risk_category", "?"))}</span>'
         "</div></div>"

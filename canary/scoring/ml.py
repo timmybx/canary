@@ -57,6 +57,7 @@ class MLScoreResult:
     drivers: list[FeatureDriver]
     feature_vector: dict[str, float | None]
     model_dir: str
+    model_name: str  # e.g. "xgboost", "logistic", "lightgbm"
     scored_at: str  # ISO timestamp
 
     def to_dict(self) -> dict[str, Any]:
@@ -65,6 +66,7 @@ class MLScoreResult:
             "probability": self.probability,
             "canary_score": self.canary_score,
             "risk_category": self.risk_category,
+            "model_name": self.model_name,
             "drivers": [
                 {
                     "name": d.name,
@@ -87,6 +89,7 @@ class MLScorer:
     pipeline: Any  # fitted sklearn Pipeline
     feature_columns: list[str]  # exact ordered column list the pipeline expects
     model_dir: str
+    model_name: str  # e.g. "xgboost", "logistic", "lightgbm" — from metrics.json
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +146,13 @@ _BUNDLE_TO_MODEL: dict[str, str] = {
 _WINDOW_EPOCH = date(2020, 1, 1)
 
 
+# Features excluded from driver display — temporal window artifacts that
+# reflect training-period position rather than plugin-level risk signals.
+# They may still contribute to the model's probability estimate, but showing
+# them to analysts is misleading and not actionable.
+_DRIVER_EXCLUDE: frozenset[str] = frozenset({"window_index", "window_month", "window_year"})
+
+
 def _window_features(today: date | None = None) -> dict[str, float]:
     d = today or datetime.now(tz=UTC).date()
     months_since_epoch = (d.year - _WINDOW_EPOCH.year) * 12 + (d.month - _WINDOW_EPOCH.month)
@@ -187,10 +197,21 @@ def load_ml_scorer(model_dir: str | Path) -> MLScorer:
     pipeline = joblib.load(model_path)
     feature_columns: list[str] = json.loads(cols_path.read_text(encoding="utf-8"))
 
+    # Read model_name from metrics.json if available — used for UI badge display
+    model_name = "unknown"
+    metrics_path = model_dir / "metrics.json"
+    if metrics_path.exists():
+        try:
+            metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+            model_name = str(metrics.get("model_name") or "unknown")
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug("Could not read model metadata from metrics.json.", exc_info=exc)
+
     return MLScorer(
         pipeline=pipeline,
         feature_columns=feature_columns,
         model_dir=str(model_dir),
+        model_name=model_name,
     )
 
 
@@ -291,15 +312,23 @@ def _make_drivers(
     contribs: Any,
     top_n: int,
 ) -> list[FeatureDriver]:
-    """Build a ranked FeatureDriver list from a contribution array."""
+    """Build a ranked FeatureDriver list from a contribution array.
+
+    Window features (window_index, window_month, window_year) are excluded
+    from the driver list — they are training-period artifacts that are not
+    actionable signals for an analyst reviewing a specific plugin.
+    """
     pairs = sorted(
-        zip(feature_columns, contribs, strict=False),
-        key=lambda x: abs(float(x[1])),
+        (
+            (col, float(sv))
+            for col, sv in zip(feature_columns, contribs, strict=False)
+            if col not in _DRIVER_EXCLUDE
+        ),
+        key=lambda x: abs(x[1]),
         reverse=True,
     )[:top_n]
     drivers = []
-    for rank, (name, sv) in enumerate(pairs, start=1):
-        sv_f = float(sv)
+    for rank, (name, sv_f) in enumerate(pairs, start=1):
         direction = "increases_risk" if sv_f > 0 else "decreases_risk" if sv_f < 0 else "neutral"
         drivers.append(
             FeatureDriver(
@@ -470,5 +499,6 @@ def score_plugin_ml(
         drivers=drivers,
         feature_vector=feature_vector,
         model_dir=scorer.model_dir,
+        model_name=scorer.model_name,
         scored_at=datetime.now(tz=UTC).isoformat(),
     )
