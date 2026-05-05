@@ -69,8 +69,13 @@ def test_get_model_none_model_raises():
 
     import canary.train.registry as reg
 
-    # Patch the registry so "xgboost" maps to None, simulating an absent optional dep
+    # Patch both MODEL_REGISTRY and AVAILABLE_MODELS to simulate xgboost being absent,
+    # so the test exercises a realistic not-installed state.
     patched_registry = {**reg.MODEL_REGISTRY, "xgboost": None}
-    with patch.object(reg, "MODEL_REGISTRY", patched_registry):
+    patched_available = [name for name, est in patched_registry.items() if est is not None]
+    with (
+        patch.object(reg, "MODEL_REGISTRY", patched_registry),
+        patch.object(reg, "AVAILABLE_MODELS", patched_available),
+    ):
         with pytest.raises(ValueError, match="not installed"):
             get_model("xgboost")

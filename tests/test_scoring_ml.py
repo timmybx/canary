@@ -136,10 +136,14 @@ def test_window_features_has_expected_keys():
 
 
 def test_window_features_reasonable_values():
+    from canary.scoring.ml import _WINDOW_EPOCH
+
     result = _window_features()
-    assert result["window_year"] >= 2025.0
+    today = date.today()
+    assert result["window_year"] == float(today.year)
     assert 1.0 <= result["window_month"] <= 12.0
-    assert result["window_index"] >= 0.0
+    expected_index = (today.year - _WINDOW_EPOCH.year) * 12 + (today.month - _WINDOW_EPOCH.month)
+    assert result["window_index"] == float(expected_index)
 
 
 def test_window_features_fixed_date():
