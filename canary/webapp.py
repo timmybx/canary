@@ -80,6 +80,7 @@ DEFAULTS: dict[str, Any] = {
     "target_col": "label_advisory_within_6m",
     "model_in_path": DEFAULT_LABELED_PATH,
     "model_out_dir": DEFAULT_MODEL_DIR,
+    "score_model_dir": DEFAULT_MODEL_DIR,
     "test_start_month": "2025-10",
     "exclude_cols": "",
     "include_prefixes": "",
@@ -1031,7 +1032,16 @@ def _render_score_section(
     plugin_options: list[str],
     score_result: dict[str, Any] | None,
     score_error: str | None,
+    model_dir_options: list[str] | None = None,
 ) -> str:
+    # Build model dropdown options — only include dirs that have a model.joblib
+    from pathlib import Path as _Path
+
+    ml_model_options: list[tuple[str, str]] = [("", "— none / heuristic only —")]
+    for d in model_dir_options or []:
+        if (_Path(d) / "model.joblib").exists():
+            ml_model_options.append((d, _Path(d).name))
+
     parts = [
         '<div class="grid--score">',
         '<section class="card">',
@@ -1041,6 +1051,7 @@ def _render_score_section(
         _plugin_picker("plugin", "Plugin ID", values["plugin"], plugin_options),
         _input_text("data_dir", "Data directory", values["data_dir"], readonly=True),
         _checkbox("real", "Prefer real advisory data", bool(values["real"])),
+        _select("score_model_dir", "ML model", values.get("score_model_dir", ""), ml_model_options),
         '<button type="submit">Score plugin</button></form>',
     ]
     if score_error:
@@ -2414,7 +2425,9 @@ def render_page(
     )
     active_panel_html = ""
     if active_tab == "score":
-        active_panel_html = _render_score_section(values, plugin_options, score_result, score_error)
+        active_panel_html = _render_score_section(
+            values, plugin_options, score_result, score_error, model_dir_options
+        )
     elif active_tab == "data":
         active_panel_html = _render_data_tab(values, plugin_options, data_result, data_error)
     else:
@@ -2553,7 +2566,10 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                     score_plugin_baseline(plugin, real=_bool_from_form(form.get("real")))
                 )
                 # Also run the ML scorer if a trained model is available
-                _ml_scorer = _get_ml_scorer(values.get("model_dir") or DEFAULT_MODEL_DIR)
+                _score_model_dir = (
+                    values.get("score_model_dir") or values.get("model_dir") or DEFAULT_MODEL_DIR
+                )
+                _ml_scorer = _get_ml_scorer(_score_model_dir) if _score_model_dir else None
                 if _ml_scorer is not None:
                     try:
                         ml_score_result = _ml_score_payload(
