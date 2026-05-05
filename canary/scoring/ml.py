@@ -26,7 +26,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 LOGGER = logging.getLogger(__name__)
 
@@ -263,7 +263,7 @@ def _build_feature_vector(
 def _extract_drivers(
     pipeline: Any,
     feature_columns: list[str],
-    feature_vector: dict[str, float | None],
+    feature_vector: Mapping[str, float | None],
     top_n: int = 10,
 ) -> list[FeatureDriver]:
     """
