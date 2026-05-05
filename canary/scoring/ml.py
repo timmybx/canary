@@ -388,15 +388,14 @@ def _extract_drivers(
                 scores.append((col, float(imp)))
 
     scores.sort(key=lambda x: abs(x[1]), reverse=True)
-    return (
-        _make_drivers(
-            feature_columns,
-            feature_vector,
-            [s for _, s in scores[:top_n]],
-            top_n,
-        )
-        if scores
-        else []
+    if not scores:
+        return []
+    top_scores = scores[:top_n]
+    return _make_drivers(
+        [col for col, _ in top_scores],
+        feature_vector,
+        [s for _, s in top_scores],
+        top_n,
     )
 
 

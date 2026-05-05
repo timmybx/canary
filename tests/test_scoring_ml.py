@@ -262,12 +262,12 @@ def test_extract_drivers_coef_direction_increases():
     assert any(d.direction == "decreases_risk" for d in drivers)
 
 
-def test_extract_drivers_coef_neutral():
+def test_extract_drivers_coef_zero_contribution_filtered():
+    # coef=1.0 * val=0.0 → contribution=0.0 → filtered out by abs > 1e-10 threshold
     cols = ["feat_a"]
     vec = {"feat_a": 0.0}
     clf = _clf_with_coef([1.0])
     drivers = _extract_drivers(clf, cols, vec, top_n=5)
-    # coef=1.0 * val=0.0 → contribution=0.0 → filtered out by abs > 1e-10 threshold
     assert drivers == []
 
 
@@ -279,6 +279,17 @@ def test_extract_drivers_coef_top_n():
     assert len(drivers) == 2
     assert drivers[0].rank == 1
     assert drivers[1].rank == 2
+
+
+def test_extract_drivers_coef_name_matches_contribution():
+    """Driver names must correspond to their actual contributions after sorting."""
+    # "b" has higher contribution (coef=0.9 * val=1.0) than "a" (coef=0.1 * val=1.0)
+    cols = ["a", "b"]
+    vec = {"a": 1.0, "b": 1.0}
+    clf = _clf_with_coef([0.1, 0.9])
+    drivers = _extract_drivers(clf, cols, vec, top_n=2)
+    assert drivers[0].name == "b"
+    assert drivers[1].name == "a"
 
 
 def test_extract_drivers_feature_importances():
