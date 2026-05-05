@@ -62,6 +62,7 @@ def _make_result(probability: float = 0.1) -> MLScoreResult:
         drivers=drivers,
         feature_vector={"feat_a": 1.0},
         model_dir="/tmp/model",
+        model_name="xgboost",
         scored_at="2025-01-01T00:00:00+00:00",
     )
 
@@ -72,6 +73,7 @@ def test_ml_score_result_to_dict_keys():
     assert d["plugin"] == "test-plugin"
     assert d["probability"] == 0.1
     assert d["canary_score"] == 0.1
+    assert d["model_name"] == "xgboost"
     assert isinstance(d["drivers"], list)
     assert len(d["drivers"]) == 1
     assert d["drivers"][0]["name"] == "feat_a"
@@ -442,7 +444,12 @@ def _make_mock_scorer(
     cols = feature_columns or ["feat_a", "feat_b"]
     mock_pipeline = MagicMock()
     mock_pipeline.predict_proba.return_value = np.array([[1 - proba, proba]])
-    return MLScorer(pipeline=mock_pipeline, feature_columns=cols, model_dir="/tmp/model")
+    return MLScorer(
+        pipeline=mock_pipeline,
+        feature_columns=cols,
+        model_dir="/tmp/model",
+        model_name="xgboost",
+    )
 
 
 def _score_with_mocks(
