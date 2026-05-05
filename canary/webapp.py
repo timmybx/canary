@@ -80,6 +80,7 @@ DEFAULTS: dict[str, Any] = {
     "target_col": "label_advisory_within_6m",
     "model_in_path": DEFAULT_LABELED_PATH,
     "model_out_dir": DEFAULT_MODEL_DIR,
+    "model_out_dir_new": "",
     "score_model_dir": DEFAULT_MODEL_DIR,
     "test_start_month": "2025-10",
     "exclude_cols": "",
@@ -224,6 +225,10 @@ input[readonly] { color:var(--muted); background:rgba(255,255,255,.04); cursor:n
 }
 .field-note { display:block; font-size:.82rem; color:var(--muted); font-weight:500; }
 .result-stack { display:grid; gap:1rem; margin-top:1rem; }
+.score-output { display:grid; gap:1rem; align-content:start; }
+details > summary { cursor:pointer; font-weight:600; color:var(--muted); font-size:.9rem; padding:.3rem 0; }
+details[open] > summary { color:var(--text); }
+details pre { margin-top:.6rem; }
 .score-number { font-size:2.6rem; font-weight:800; }
 .score-number span { font-size:1rem; color:var(--muted); margin-left:.2rem; }
 .metric, .panel, .action-card {
@@ -454,7 +459,13 @@ def _namespace_for_data_action(command_name: str, form: dict[str, str]) -> argpa
 
 
 def _namespace_for_train(form: dict[str, str]) -> argparse.Namespace:
-    model_out_dir = _normalize_model_output_dir(form.get("model_out_dir") or DEFAULT_MODEL_DIR)
+    # Prefer the "new directory" text input when the user has filled it in
+    _raw_dir = (
+        (form.get("model_out_dir_new") or "").strip()
+        or (form.get("model_out_dir") or "").strip()
+        or DEFAULT_MODEL_DIR
+    )
+    model_out_dir = _normalize_model_output_dir(_raw_dir)
     return argparse.Namespace(
         in_path=(form.get("model_in_path") or DEFAULT_LABELED_PATH).strip(),
         target_col=(form.get("target_col") or "label_advisory_within_6m").strip(),
@@ -667,7 +678,10 @@ def _run_train_action(form: dict[str, str]) -> dict[str, Any]:
 
 
 def _run_load_metrics_action(form: dict[str, str]) -> dict[str, Any]:
-    out_dir = _normalize_model_output_dir(form.get("model_out_dir") or DEFAULT_MODEL_DIR)
+    # Load metrics uses the dropdown selection only (must be an existing run)
+    out_dir = _normalize_model_output_dir(
+        (form.get("model_out_dir") or "").strip() or DEFAULT_MODEL_DIR
+    )
     metrics_path = _model_metrics_path(out_dir)
     metrics = _load_model_metrics(out_dir)
     if not metrics:
@@ -1034,85 +1048,106 @@ def _render_score_section(
     score_error: str | None,
     model_dir_options: list[str] | None = None,
 ) -> str:
-    # Build model dropdown options — only include dirs that have a model.joblib
+    # Build model dropdown — all discovered dirs, no existence filter
     from pathlib import Path as _Path
 
     ml_model_options: list[tuple[str, str]] = [("", "— none / heuristic only —")]
     for d in model_dir_options or []:
-        if (_Path(d) / "model.joblib").exists():
-            ml_model_options.append((d, _Path(d).name))
+        ml_model_options.append((d, _Path(d).name))
 
-    parts = [
-        '<div class="grid--score">',
-        '<section class="card">',
-        '<div class="card__header"><div><p class="eyebrow">Plugin scoring</p><h2>Score a plugin</h2><p class="kicker">Review the CANARY score, rationale, and supporting evidence.</p></div><span class="pill">Core workflow</span></div>',
-        '<form method="post" action="/score" class="form-grid" data-plugin-strict="true">',
-        '<input type="hidden" name="active_tab" value="score">',
-        _plugin_picker("plugin", "Plugin ID", values["plugin"], plugin_options),
-        _input_text("data_dir", "Data directory", values["data_dir"], readonly=True),
-        _checkbox("real", "Prefer real advisory data", bool(values["real"])),
-        _select("score_model_dir", "ML model", values.get("score_model_dir", ""), ml_model_options),
-        '<button type="submit">Score plugin</button></form>',
-    ]
-    if score_error:
-        parts.append(f'<div class="notice">{_escape(score_error)}</div>')
-    parts.append("</section>")
-
-    summary = '<p class="muted">Choose a plugin and run a score to see the rationale, features, and local supporting files.</p>'
-    if score_result:
-        reasons = "".join(f"<li>{_escape(reason)}</li>" for reason in score_result["reasons"])
-        files_html = (
-            '<ul class="bullet-list">'
-            + "".join(
-                f"<li><code>{_escape(path)}</code></li>" for path in score_result["data_files"]
-            )
-            + "</ul>"
-            if score_result["data_files"]
-            else '<p class="muted">No matching local files were found under <code>data/raw</code> for this plugin.</p>'
-        )
-        summary = (
-            '<div class="result-stack">'
-            f'<div class="score-banner"><div><p class="eyebrow">Heuristic score</p><h3>{_escape(score_result["plugin"])}</h3></div><div class="score-number">{_escape(score_result["score"])}<span>/100</span></div></div>'
-            '<div class="metrics-row">'
-            f'<div class="metric"><span class="metric__label">Reasons</span><span class="metric__value">{len(score_result["reasons"])}</span></div>'
-            f'<div class="metric"><span class="metric__label">Feature keys</span><span class="metric__value">{len(score_result["features"])}</span></div>'
-            f'<div class="metric"><span class="metric__label">Local files found</span><span class="metric__value">{len(score_result["data_files"])}</span></div>'
-            "</div>"
-            f'<div class="panel"><h4>Why this score</h4><ul class="bullet-list">{reasons}</ul></div>'
-            '<div class="grid--two">'
-            f'<div class="panel"><h4>Feature details</h4><pre>{_escape(score_result["pretty_features"])}</pre></div>'
-            f'<div class="panel"><h4>JSON payload</h4><pre>{_escape(score_result["pretty_json"])}</pre></div>'
-            "</div>"
-            f'<div class="panel"><h4>Detected local data files</h4>{files_html}</div>'
-            "</div>"
-        )
-
-    parts.append(
-        f'<section class="card"><div class="card__header"><div><p class="eyebrow">Readable output</p><h2>Score details</h2></div><span class="pill pill--muted">Reasons + evidence</span></div>{summary}</section>'
+    # ── Left column: form card ────────────────────────────────────────────────
+    form_card = "".join(
+        [
+            '<section class="card" style="align-self:start">',
+            '<div class="card__header"><div>'
+            '<p class="eyebrow">Plugin scoring</p>'
+            "<h2>Score a plugin</h2>"
+            '<p class="kicker">Review the CANARY score, rationale, and supporting evidence.</p>'
+            '</div><span class="pill">Core workflow</span></div>',
+            '<form method="post" action="/score" class="form-grid" data-plugin-strict="true">',
+            '<input type="hidden" name="active_tab" value="score">',
+            _plugin_picker("plugin", "Plugin ID", values["plugin"], plugin_options),
+            _input_text("data_dir", "Data directory", values["data_dir"], readonly=True),
+            _select(
+                "score_model_dir", "ML model", values.get("score_model_dir", ""), ml_model_options
+            ),
+            '<button type="submit">Score plugin</button></form>',
+            f'<div class="notice">{_escape(score_error)}</div>' if score_error else "",
+            "</section>",
+        ]
     )
 
-    # ML score panel — shown only when a trained model is available
-    ml = (score_result or {}).get("ml")
-    if ml:
-        parts.append(
-            '<section class="card"><div class="card__header"><div>'
-            '<p class="eyebrow">Machine learning</p><h2>ML advisory risk score</h2>'
-            '<p class="kicker">Probability of a Jenkins security advisory within the next 180 days, based on the trained CANARY model.</p>'
-            '</div><span class="pill pill--muted">Experimental</span></div>'
-            + _render_ml_score_panel(ml)
-            + "</section>"
+    # ── Right column: output cards stacked vertically ─────────────────────────
+    output_parts: list[str] = []
+
+    if score_result:
+        # Heuristic score card — compact, with collapsible raw sections
+        reasons_html = "".join(f"<li>{_escape(r)}</li>" for r in score_result["reasons"])
+        files_html = (
+            '<ul class="bullet-list">'
+            + "".join(f"<li><code>{_escape(p)}</code></li>" for p in score_result["data_files"])
+            + "</ul>"
+            if score_result["data_files"]
+            else '<p class="muted">No matching local files found.</p>'
         )
-    elif score_result is not None:
-        parts.append(
-            '<section class="card"><div class="card__header"><div>'
-            '<p class="eyebrow">Machine learning</p><h2>ML advisory risk score</h2></div>'
-            '<span class="pill pill--muted">Not available</span></div>'
-            '<p class="muted" style="padding:1rem">No trained model found. Run <strong>canary train baseline</strong> to enable ML scoring.</p>'
+        output_parts.append(
+            '<section class="card">'
+            '<div class="card__header"><div>'
+            '<p class="eyebrow">Heuristic score</p>'
+            f"<h2>{_escape(score_result['plugin'])}</h2>"
+            '<p class="kicker">Rule-based score — independent of the ML model selection above.</p>'
+            "</div>"
+            f'<div class="score-number">{_escape(score_result["score"])}<span>/100</span></div>'
+            "</div>"
+            '<div class="metrics-row" style="margin-top:.8rem">'
+            f'<div class="metric"><span class="metric__label">Reasons</span><span class="metric__value">{len(score_result["reasons"])}</span></div>'
+            f'<div class="metric"><span class="metric__label">Features</span><span class="metric__value">{len(score_result["features"])}</span></div>'
+            f'<div class="metric"><span class="metric__label">Local files</span><span class="metric__value">{len(score_result["data_files"])}</span></div>'
+            "</div>"
+            f'<div class="panel" style="margin-top:.8rem"><h4>Why this score</h4><ul class="bullet-list">{reasons_html}</ul></div>'
+            '<div style="margin-top:.8rem;display:grid;gap:.6rem">'
+            f"<details><summary>Feature details ({len(score_result['features'])} keys)</summary><pre>{_escape(score_result['pretty_features'])}</pre></details>"
+            f"<details><summary>JSON payload</summary><pre>{_escape(score_result['pretty_json'])}</pre></details>"
+            f"<details><summary>Detected local data files</summary>{files_html}</details>"
+            "</div>"
             "</section>"
         )
 
-    parts.append("</div>")
-    return "".join(parts)
+        # ML score card
+        ml = score_result.get("ml")
+        if ml:
+            output_parts.append(
+                '<section class="card">'
+                '<div class="card__header"><div>'
+                '<p class="eyebrow">Machine learning</p>'
+                "<h2>ML advisory risk score</h2>"
+                '<p class="kicker">Probability of a Jenkins security advisory within the next 180 days.</p>'
+                '</div><span class="pill pill--muted">Experimental</span></div>'
+                + _render_ml_score_panel(ml)
+                + "</section>"
+            )
+        else:
+            output_parts.append(
+                '<section class="card">'
+                '<div class="card__header"><div>'
+                '<p class="eyebrow">Machine learning</p>'
+                "<h2>ML advisory risk score</h2>"
+                '</div><span class="pill pill--muted">Not available</span></div>'
+                '<p class="muted" style="padding:.6rem 0">Select a trained ML model above, or run '
+                "<strong>canary train baseline</strong> to create one.</p>"
+                "</section>"
+            )
+    else:
+        output_parts.append(
+            '<section class="card">'
+            '<p class="muted" style="padding:.4rem 0">Choose a plugin and click '
+            "<strong>Score plugin</strong> to see results here.</p>"
+            "</section>"
+        )
+
+    right_col = '<div class="score-output">' + "".join(output_parts) + "</div>"
+
+    return '<div class="grid--score">' + form_card + right_col + "</div>"
 
 
 def _action_card(title: str, subtitle: str, form_html: str) -> str:
@@ -2359,8 +2394,18 @@ def _render_ml_tab(
         _input_text(
             "test_start_month", "Test start month", values["test_start_month"], input_type="month"
         ),
-        _model_dir_picker(
-            "model_out_dir", "Model output directory", values["model_out_dir"], model_dir_options
+        # Existing runs dropdown — for loading metrics or continuing from a saved run
+        _select(
+            "model_out_dir",
+            "Model directory",
+            values["model_out_dir"],
+            [("", "— select an existing run —")] + [(d, Path(d).name) for d in model_dir_options],
+        ),
+        _input_text(
+            "model_out_dir_new",
+            "Or enter a new output directory for training",
+            values.get("model_out_dir_new", ""),
+            "data/processed/models/my_run",
         ),
         _input_text(
             "include_prefixes",
@@ -2506,9 +2551,9 @@ def _prepare_request_state(
         _load_plugin_choices(values["registry_path"]) if active_tab in {"score", "data"} else []
     )
     latest_metrics = None
-    model_dir_options: list[str] = []
+    # Always discover model dirs — needed by both the ML tab and the Score tab dropdown
+    model_dir_options: list[str] = _discover_model_output_dirs()
     if active_tab == "ml":
-        model_dir_options = _discover_model_output_dirs()
         try:
             values["model_out_dir"] = _normalize_model_output_dir(
                 values.get("model_out_dir") or DEFAULT_MODEL_DIR
@@ -2562,9 +2607,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                     raise ValueError("Please enter a plugin ID to score.")
                 if not _plugin_known(plugin, values["registry_path"]):
                     raise ValueError("Please choose a plugin ID from the current registry list.")
-                score_result = _score_payload(
-                    score_plugin_baseline(plugin, real=_bool_from_form(form.get("real")))
-                )
+                score_result = _score_payload(score_plugin_baseline(plugin, real=True))
                 # Also run the ML scorer if a trained model is available
                 _score_model_dir = (
                     values.get("score_model_dir") or values.get("model_dir") or DEFAULT_MODEL_DIR

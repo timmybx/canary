@@ -261,6 +261,57 @@ def _build_feature_vector(
 # ---------------------------------------------------------------------------
 
 
+def _unwrap_pipeline(pipeline: Any) -> tuple[Any, Any]:
+    """Return (imputer_step, classifier_step) from a fitted sklearn Pipeline."""
+    if hasattr(pipeline, "named_steps"):
+        imputer = pipeline.named_steps.get("impute")
+        model = pipeline.named_steps.get("model")
+        if model is not None:
+            return imputer, model
+        # Fallback: second-to-last and last steps
+        steps = list(pipeline.named_steps.values())
+        return (steps[-2] if len(steps) >= 2 else None), steps[-1]
+    return None, pipeline
+
+
+def _is_tree_model(clf: Any) -> bool:
+    """True for XGBoost, LightGBM, RandomForest and similar tree ensembles."""
+    name = type(clf).__name__
+    return any(k in name for k in ("XGB", "LGBM", "LGB", "Forest", "GBM", "Gradient", "Tree"))
+
+
+def _is_linear_model(clf: Any) -> bool:
+    """True for LogisticRegression and similar linear classifiers."""
+    return hasattr(clf, "coef_")
+
+
+def _make_drivers(
+    feature_columns: list[str],
+    feature_vector: Mapping[str, float | None],
+    contribs: Any,
+    top_n: int,
+) -> list[FeatureDriver]:
+    """Build a ranked FeatureDriver list from a contribution array."""
+    pairs = sorted(
+        zip(feature_columns, contribs, strict=False),
+        key=lambda x: abs(float(x[1])),
+        reverse=True,
+    )[:top_n]
+    drivers = []
+    for rank, (name, sv) in enumerate(pairs, start=1):
+        sv_f = float(sv)
+        direction = "increases_risk" if sv_f > 0 else "decreases_risk" if sv_f < 0 else "neutral"
+        drivers.append(
+            FeatureDriver(
+                name=name,
+                value=feature_vector.get(name),
+                direction=direction,
+                rank=rank,
+            )
+        )
+    return drivers
+
+
 def _extract_drivers(
     pipeline: Any,
     feature_columns: list[str],
@@ -271,98 +322,82 @@ def _extract_drivers(
     Return the top-N features that most influenced this prediction,
     with direction (increases/decreases risk).
 
-    Uses SHAP if available (preferred), falls back to feature importance
-    multiplied by feature value for tree-based models, or raw coefficients
-    for logistic regression.
+    Strategy by model type:
+      Tree models   → SHAP TreeExplainer (accurate per-prediction explanation)
+      Linear models → SHAP LinearExplainer, fallback to coef * imputed_value
+      Unknown       → feature_importances_ if available, else empty list
+
+    The fallback uses *imputed* feature values (as seen by the model) rather
+    than raw None values, so coef * imputed_value reflects the model's actual
+    per-feature contribution rather than zeroing out missing inputs.
     """
+    import numpy as np  # pyright: ignore[reportMissingImports]
+    import pandas as pd  # pyright: ignore[reportMissingModuleSource]
 
-    values = [feature_vector.get(col) for col in feature_columns]
+    raw_values = [feature_vector.get(col) for col in feature_columns]
+    imputer_step, clf = _unwrap_pipeline(pipeline)
 
-    # Try SHAP first
+    # Impute values the same way the pipeline does so contributions are accurate
+    try:
+        X_raw = pd.DataFrame([raw_values], columns=feature_columns)
+        X_imputed: Any = imputer_step.transform(X_raw) if imputer_step is not None else X_raw.values
+    except Exception as exc:
+        LOGGER.debug("Imputation failed in driver extraction; using zero-fill.", exc_info=exc)
+        X_imputed = np.array([[v if v is not None else 0.0 for v in raw_values]])
+
+    # ── SHAP path ─────────────────────────────────────────────────────────────
     try:
         import shap  # pyright: ignore[reportMissingImports]
 
-        clf = pipeline
-        # Unwrap imputer step to get the model and imputed values
-        if hasattr(pipeline, "named_steps"):
-            imputer_step = pipeline.named_steps.get("impute")
-            model_step = pipeline.named_steps.get("model")
-            if imputer_step is not None and model_step is not None:
-                import pandas as pd  # pyright: ignore[reportMissingModuleSource]
+        if _is_tree_model(clf):
+            explainer = shap.TreeExplainer(clf)
+            shap_out = explainer.shap_values(X_imputed)
+            # Binary tree classifiers return [neg_class_array, pos_class_array]
+            contrib = (shap_out[1] if isinstance(shap_out, list) else shap_out)[0]
 
-                X = pd.DataFrame([values], columns=feature_columns)
-                X_imputed = imputer_step.transform(X)
-                explainer = shap.TreeExplainer(model_step)
-                shap_values = explainer.shap_values(X_imputed)
-                # For binary classifiers shap_values may be a list [neg, pos]
-                if isinstance(shap_values, list):
-                    shap_vals = shap_values[1][0]
-                else:
-                    shap_vals = shap_values[0]
+        elif _is_linear_model(clf):
+            # Use a zero background — appropriate for mean-imputed features
+            background = np.zeros((1, len(feature_columns)))
+            explainer = shap.LinearExplainer(clf, background, feature_perturbation="interventional")
+            shap_out = explainer.shap_values(X_imputed)
+            contrib = shap_out[0]
 
-                pairs = sorted(
-                    zip(feature_columns, shap_vals, strict=False),
-                    key=lambda x: abs(float(x[1])),
-                    reverse=True,
-                )[:top_n]
+        else:
+            raise ValueError(f"No SHAP explainer for model type {type(clf).__name__!r}")
 
-                drivers = []
-                for rank, (name, sv) in enumerate(pairs, start=1):
-                    sv_f = float(sv)
-                    direction = (
-                        "increases_risk"
-                        if sv_f > 0
-                        else "decreases_risk"
-                        if sv_f < 0
-                        else "neutral"
-                    )
-                    drivers.append(
-                        FeatureDriver(
-                            name=name,
-                            value=feature_vector.get(name),
-                            direction=direction,
-                            rank=rank,
-                        )
-                    )
-                return drivers
+        return _make_drivers(feature_columns, feature_vector, contrib, top_n)
+
     except Exception as exc:
-        LOGGER.debug("SHAP driver extraction failed; using fallback drivers.", exc_info=exc)
+        LOGGER.debug("SHAP driver extraction failed; using fallback.", exc_info=exc)
 
-    # Fallback: use coefficient or feature_importance * value
-    clf = pipeline
-    if hasattr(pipeline, "named_steps"):
-        steps = list(pipeline.named_steps.values())
-        clf = steps[-1]
-
+    # ── Fallback: coef * imputed_value (linear) or feature_importances (tree) ─
+    imp_values: Any = X_imputed[0]
     scores: list[tuple[str, float]] = []
 
-    if hasattr(clf, "coef_"):
+    if _is_linear_model(clf):
+        # coef * imputed_value gives the actual per-feature log-odds contribution
         coefs = clf.coef_[0]
-        for col, coef, val in zip(feature_columns, coefs, values, strict=False):
-            v = val if val is not None else 0.0
-            scores.append((col, float(coef) * float(v)))
+        for col, coef, imp_val in zip(feature_columns, coefs, imp_values, strict=False):
+            contribution = float(coef) * float(imp_val)
+            if abs(contribution) > 1e-10:  # skip zero-contribution features
+                scores.append((col, contribution))
 
     elif hasattr(clf, "feature_importances_"):
-        imps = clf.feature_importances_
-        for col, imp in zip(feature_columns, imps, strict=False):
-            scores.append((col, float(imp)))
+        for col, imp in zip(feature_columns, clf.feature_importances_, strict=False):
+            if float(imp) > 1e-10:
+                scores.append((col, float(imp)))
 
     scores.sort(key=lambda x: abs(x[1]), reverse=True)
-
-    drivers = []
-    for rank, (name, score_val) in enumerate(scores[:top_n], start=1):
-        direction = (
-            "increases_risk" if score_val > 0 else "decreases_risk" if score_val < 0 else "neutral"
+    return (
+        _make_drivers(
+            feature_columns,
+            feature_vector,
+            [s for _, s in scores[:top_n]],
+            top_n,
         )
-        drivers.append(
-            FeatureDriver(
-                name=name,
-                value=feature_vector.get(name),
-                direction=direction,
-                rank=rank,
-            )
-        )
-    return drivers
+        if scores
+        else []
+    )
 
 
 # ---------------------------------------------------------------------------
