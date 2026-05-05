@@ -293,6 +293,148 @@ def _healthscore_to_risk_points(value: Any) -> int | None:
     return max(0, min(20, pts))
 
 
+# ---------------------------------------------------------------------------
+# Component score ceilings — each domain contributes at most this many points.
+# The ceilings sum to 100, making the score directly interpretable.
+# ---------------------------------------------------------------------------
+
+_CAP_ADVISORY_HISTORY = 30  # prior advisory count + recency
+_CAP_ADVISORY_SEVERITY = 15  # CVSS-based severity across advisories
+_CAP_STALENESS = 20  # commit + release staleness
+_CAP_ACTIVE_WARNINGS = 15  # active Jenkins security warnings
+_CAP_GOVERNANCE = 10  # presence/absence of governance artifacts
+_CAP_DEPENDENCY = 5  # dependency risk (reduced — secondary signal)
+_CAP_HEALTH_SCORE = 5  # Jenkins plugin health score (now a minor signal)
+# Total ceiling: 100
+
+
+def _load_swh_features(plugin_id: str, data_dir: Path) -> dict[str, Any]:
+    """Load SWH Athena features for a plugin, returning an empty dict on failure."""
+    try:
+        from canary.build.features_bundle import _load_software_heritage_features
+
+        return _load_software_heritage_features(plugin_id, data_dir, backend="athena")
+    except Exception:
+        return {}
+
+
+def _staleness_points(
+    days_since_commit: int | float | None,
+    days_since_release: int | float | None,
+) -> tuple[int, list[str]]:
+    """
+    Compute staleness risk points (0.._CAP_STALENESS) and reasons.
+
+    Uses whichever staleness signal is available and most informative.
+    Commit staleness is weighted more heavily than release staleness because
+    a plugin can ship infrequent releases while still being actively maintained,
+    but no commits at all is a strong signal of abandonment.
+    """
+    reasons: list[str] = []
+    points = 0
+
+    # Commit staleness (primary signal — strongest predictor per ablation results)
+    if days_since_commit is not None:
+        try:
+            dsc = int(days_since_commit)
+        except (TypeError, ValueError):
+            dsc = None
+        if dsc is not None:
+            if dsc > 1825:  # > 5 years
+                pts = 16
+                label = f"{dsc // 365} years"
+            elif dsc > 1095:  # > 3 years
+                pts = 12
+                label = f"{dsc // 365} years"
+            elif dsc > 730:  # > 2 years
+                pts = 9
+                label = f"{dsc // 365} years"
+            elif dsc > 365:  # > 1 year
+                pts = 6
+                label = f"{dsc // 30} months"
+            elif dsc > 180:  # 6-12 months
+                pts = 3
+                label = f"{dsc // 30} months"
+            else:
+                pts = 0
+                label = f"{dsc} days"
+
+            if pts > 0:
+                reasons.append(
+                    f"Last commit was {label} ago — elevated maintenance staleness risk (+{pts})."
+                )
+            else:
+                reasons.append(f"Recent commit activity ({label} ago) suggests active maintenance.")
+            points += pts
+
+    # Release staleness (secondary signal — penalises only extreme inactivity
+    # and only when commit data is unavailable or also stale)
+    if days_since_release is not None:
+        try:
+            dsr = int(days_since_release)
+        except (TypeError, ValueError):
+            dsr = None
+        if dsr is not None and dsr > 730:  # > 2 years without a release
+            # Only add release staleness points if they exceed what commits already gave us
+            rel_pts = min(8, dsr // 365 * 3)
+            if rel_pts > points:  # avoid double-counting
+                bonus = rel_pts - points
+                if bonus > 0:
+                    points += bonus
+                    reasons.append(
+                        f"No release in over {dsr // 365} year(s) (+{bonus} additional staleness)."
+                    )
+        elif days_since_release is not None:
+            try:
+                dsr2 = int(days_since_release)
+                if dsr2 <= 180:
+                    reasons.append("Recent release activity supports active maintenance.")
+            except (TypeError, ValueError):
+                pass
+
+    return min(_CAP_STALENESS, points), reasons
+
+
+def _governance_points(swh: dict[str, Any]) -> tuple[int, list[str]]:
+    """
+    Compute governance risk points (0.._CAP_GOVERNANCE) from SWH flags.
+
+    Missing governance artifacts are risk indicators, especially for plugins
+    that handle sensitive operations (auth, credentials, SCM integration).
+    Points are awarded for *absence* of protective artifacts.
+    """
+    if not swh.get("swh_present"):
+        return 0, []
+
+    reasons: list[str] = []
+    points = 0
+
+    # Absence of a SECURITY.md means no disclosed vulnerability reporting process
+    if not swh.get("swh_has_security_md"):
+        points += 3
+        reasons.append("No SECURITY.md — vulnerability reporting process undocumented (+3).")
+
+    # Absence of automated dependency management (Dependabot / GitHub Actions)
+    has_automation = swh.get("swh_has_dependabot") or swh.get("swh_has_github_actions")
+    if not has_automation:
+        points += 3
+        reasons.append(
+            "No Dependabot or GitHub Actions detected — limited automated maintenance (+3)."
+        )
+
+    # Absence of a test directory is a code quality / review-discipline signal
+    if not swh.get("swh_has_tests_directory"):
+        points += 2
+        reasons.append("No test directory detected — reduced code review discipline signal (+2).")
+
+    # Absence of a changelog makes it harder to audit what changed between releases
+    if not swh.get("swh_has_changelog"):
+        points += 2
+        reasons.append("No changelog detected — release transparency limited (+2).")
+
+    return min(_CAP_GOVERNANCE, points), reasons
+
+
 def _parse_iso_datetime(value: str) -> datetime | None:
     if not value:
         return None
@@ -432,14 +574,20 @@ def score_plugin_baseline(
     real: bool = False,
 ) -> ScoreResult:
     """
-    Baseline scoring:
-    - Name-keyword heuristics (existing)
-    - Advisory features from collected data (new, minimal)
-    - Plugin snapshot features from plugins API (new)
+    Heuristic risk scorer for a Jenkins plugin.
 
-    data_dir should point at the directory that contains:
-      advisories/<plugin>.advisories*.jsonl
-      plugins/<plugin>.snapshot.json
+    Score is the sum of six capped components, each with a defined ceiling
+    that together sum to 100.  This makes the score directly interpretable:
+    the reasons list identifies which components contributed and how much.
+
+    Components and ceilings:
+      Advisory history & recency  — up to 30 pts
+      Advisory severity (CVSS)    — up to 15 pts
+      Maintenance staleness        — up to 20 pts
+      Active security warnings     — up to 15 pts
+      Governance signals           — up to 10 pts
+      Dependency risk              — up to  5 pts
+      Health score                 — up to  5 pts
     """
     plugin_id = _safe_plugin_id(
         canonicalize_plugin_id(plugin.lower().strip(), data_dir=_resolved_base_dir())
@@ -448,36 +596,15 @@ def score_plugin_baseline(
         raise ValueError(f"Invalid plugin id: {plugin!r}")
 
     base_dir = _resolved_base_dir()
-    name = plugin_id
-    score = 0
+    today = datetime.now(tz=UTC).date()
     reasons: list[str] = []
-    features: dict[str, Any] = {"matched_core_keywords": [], "matched_scm_keywords": []}
+    features: dict[str, Any] = {}
 
-    # --- Existing heuristics ---
-    core_keywords = ("credentials", "security", "auth", "oauth", "saml", "ldap")
-    scm_keywords = ("git", "svn", "scm", "github", "bitbucket")
-
-    matched_core = [k for k in core_keywords if k in name]
-    matched_scm = [k for k in scm_keywords if k in name]
-    features["matched_core_keywords"] = matched_core
-    features["matched_scm_keywords"] = matched_scm
-
-    if matched_core:
-        score += 20
-        reasons.append("Name suggests auth/security surface area (baseline heuristic).")
-
-    if matched_scm:
-        score += 10
-        reasons.append("Name suggests SCM/integration surface area (baseline heuristic).")
-
-    # --- New: advisory-backed signals ---
+    # ── 1. Advisory history & recency (cap: _CAP_ADVISORY_HISTORY = 30) ──────
     advisories = _load_advisories_for_plugin(plugin_id, base_dir, prefer_real=real)
     advisory_count = len(advisories)
     features["advisory_count"] = advisory_count
 
-    today = datetime.now(tz=UTC).date()
-
-    # Dates + recency buckets
     advisory_dates: list[date] = []
     for rec in advisories:
         d = _parse_date(str(rec.get("published_date", "")).strip())
@@ -486,9 +613,7 @@ def score_plugin_baseline(
 
     latest_date: date | None = max(advisory_dates) if advisory_dates else None
     features["latest_advisory_date"] = latest_date.isoformat() if latest_date else None
-
-    days_since_latest: int | None = (today - latest_date).days if latest_date else None
-    features["days_since_latest_advisory"] = days_since_latest
+    features["days_since_latest_advisory"] = (today - latest_date).days if latest_date else None
 
     within_90 = sum(1 for d in advisory_dates if (today - d).days <= 90)
     within_365 = sum(1 for d in advisory_dates if (today - d).days <= 365)
@@ -496,72 +621,63 @@ def score_plugin_baseline(
     features["advisory_within_365d"] = within_365
     features["had_advisory_within_365d"] = within_365 > 0
 
-    # Severity summary across advisories (best observed in the local dataset)
+    if advisory_count > 0:
+        history_pts = min(15, advisory_count * 2)  # +2 per advisory, cap 15
+        recency_pts = min(15, within_90 * 10 + max(0, within_365 - within_90) * 5)
+        advisory_history_pts = min(_CAP_ADVISORY_HISTORY, history_pts + recency_pts)
+        score_advisory_history = advisory_history_pts
+
+        reasons.append(
+            f"{advisory_count} prior advisory record(s) — "
+            f"history +{history_pts}, recency +{recency_pts} "
+            f"({within_90} within 90d, {within_365} within 365d); "
+            f"component total +{advisory_history_pts} (cap {_CAP_ADVISORY_HISTORY})."
+        )
+    else:
+        score_advisory_history = 0
+        reasons.append("No advisories found in local dataset.")
+
+    # ── 2. Advisory severity / CVSS (cap: _CAP_ADVISORY_SEVERITY = 15) ───────
     max_cvss_overall: float | None = None
+    severity_raw = 0
     for rec in advisories:
         ms = _advisory_record_max_cvss(rec)
         if ms is not None and (max_cvss_overall is None or ms > max_cvss_overall):
             max_cvss_overall = ms
+        label = _cvss_base_score_to_label(_advisory_record_max_cvss(rec))
+        severity_raw += _SEVERITY_BONUS.get(str(label), 0)
+
     features["max_cvss_base_score_observed"] = max_cvss_overall
     features["max_cvss_severity_label_observed"] = (
         _cvss_base_score_to_label(max_cvss_overall) if max_cvss_overall is not None else None
     )
 
-    if advisory_count > 0:
-        reasons.append(f"{advisory_count} advisory record(s) found for this plugin.")
+    score_advisory_severity = min(_CAP_ADVISORY_SEVERITY, severity_raw)
+    if score_advisory_severity > 0:
+        sev_label = features["max_cvss_severity_label_observed"]
+        reasons.append(
+            f"Advisory severity (max CVSS {max_cvss_overall:.1f} — {sev_label}): "
+            f"+{score_advisory_severity} (cap {_CAP_ADVISORY_SEVERITY})."
+        )
 
-        # Advisory points are split into:
-        #  1) Base history (old advisories still matter)
-        #  2) Recency bonus (recent advisories matter much more)
-        #  3) Severity bonus (CVSS-based, per advisory)
-        base_points = min(20, advisory_count * 2)  # +2/advisory, capped
-        recency_points = min(40, within_90 * 20 + max(0, within_365 - within_90) * 10)
-        severity_points_raw = 0
-        for rec in advisories:
-            label = _cvss_base_score_to_label(_advisory_record_max_cvss(rec))
-            severity_points_raw += _SEVERITY_BONUS.get(str(label), 0)
-        severity_points = min(30, severity_points_raw)
+    # ── 3. Maintenance staleness (cap: _CAP_STALENESS = 20) ──────────────────
+    # Load SWH data — primary staleness signal
+    swh = _load_swh_features(plugin_id, base_dir)
+    features["swh_present"] = swh.get("swh_present", False)
+    features["swh_days_since_last_commit"] = swh.get("swh_days_since_last_commit")
+    features["swh_commit_count"] = swh.get("swh_commit_count", 0)
+    features["swh_has_security_md"] = swh.get("swh_has_security_md", False)
+    features["swh_has_dependabot"] = swh.get("swh_has_dependabot", False)
+    features["swh_has_github_actions"] = swh.get("swh_has_github_actions", False)
+    features["swh_has_tests_directory"] = swh.get("swh_has_tests_directory", False)
+    features["swh_has_changelog"] = swh.get("swh_has_changelog", False)
+    features["swh_security_fix_commit_count"] = swh.get("swh_security_fix_commit_count", 0)
 
-        advisory_points = base_points + recency_points + severity_points
-        score += advisory_points
-
-        reasons.append(f"Advisory history: +{base_points} point(s) (2/advisory, capped at 20).")
-
-        if within_365 > 0:
-            if within_90 > 0:
-                reasons.append(
-                    f"Recent advisories: +{recency_points} point(s) "
-                    f"({within_90} within 90d @20, "
-                    f"{within_365 - within_90} within 365d @10; capped at 40)."
-                )
-            else:
-                reasons.append(
-                    f"Recent advisories: +{recency_points} point(s) "
-                    f"({within_365} within 365d @10; capped at 40)."
-                )
-            reasons.append("Recent advisory activity (<= 365 days).")
-        else:
-            reasons.append("No advisory activity in the last 365 days (recency bonus = 0).")
-
-        if severity_points > 0:
-            sev_label = features.get("max_cvss_severity_label_observed")
-            if sev_label:
-                reasons.append(
-                    f"Advisory severity (CVSS): +{severity_points} point(s) "
-                    f"(max observed: {sev_label}, CVSS {max_cvss_overall:.1f}; capped at 30)."
-                )
-            else:
-                reasons.append(
-                    f"Advisory severity (CVSS): +{severity_points} point(s) (capped at 30)."
-                )
-    else:
-        reasons.append("No advisories found in local dataset (yet).")
-
-    # --- New: plugin snapshot signals (plugins API) ---
+    # Load snapshot for release staleness (secondary signal)
     snapshot = _load_plugin_snapshot(plugin_id, base_dir)
     features["has_plugin_snapshot"] = snapshot is not None
 
-    # defaults so JSON always has keys
+    days_since_release: int | None = None
     features.setdefault("required_core", None)
     features.setdefault("dependency_count", 0)
     features.setdefault("security_warning_count", 0)
@@ -569,7 +685,50 @@ def score_plugin_baseline(
     features.setdefault("release_timestamp", None)
     features.setdefault("days_since_release", None)
 
-    # Dependency-risk defaults (present even if snapshot is missing)
+    if snapshot and isinstance(snapshot, dict):
+        api = snapshot.get("plugin_api") or {}
+        required_core = api.get("requiredCore")
+        deps = api.get("dependencies") or []
+        sec_warnings = api.get("securityWarnings") or []
+
+        features["required_core"] = required_core
+        features["dependency_count"] = _safe_int(len(deps), default=0)
+        features["security_warning_count"] = _safe_int(len(sec_warnings), default=0)
+        features["active_security_warning_count"] = _safe_int(
+            sum(1 for w in sec_warnings if (w or {}).get("active") is True), default=0
+        )
+
+        release_ts = _parse_iso_datetime(str(api.get("releaseTimestamp", "")).strip())
+        features["release_timestamp"] = release_ts.isoformat() if release_ts else None
+        if release_ts:
+            days_since_release = (datetime.now(UTC) - release_ts).days
+            features["days_since_release"] = days_since_release
+            reasons.append(f"Latest release: {release_ts.date().isoformat()}.")
+
+    score_staleness, staleness_reasons = _staleness_points(
+        swh.get("swh_days_since_last_commit"), days_since_release
+    )
+    reasons.extend(staleness_reasons)
+
+    # ── 4. Active security warnings (cap: _CAP_ACTIVE_WARNINGS = 15) ─────────
+    active_warn = features.get("active_security_warning_count", 0)
+    score_active_warnings = min(_CAP_ACTIVE_WARNINGS, active_warn * 8)
+    if active_warn > 0:
+        reasons.append(
+            f"{active_warn} active Jenkins security warning(s): "
+            f"+{score_active_warnings} (cap {_CAP_ACTIVE_WARNINGS})."
+        )
+    elif features.get("security_warning_count", 0) > 0:
+        reasons.append(
+            f"{features['security_warning_count']} historical security warning(s) — "
+            "none currently active."
+        )
+
+    # ── 5. Governance signals (cap: _CAP_GOVERNANCE = 10) ────────────────────
+    score_governance, governance_reasons = _governance_points(swh)
+    reasons.extend(governance_reasons)
+
+    # ── 6. Dependency risk (cap: _CAP_DEPENDENCY = 5) ────────────────────────
     features.setdefault("dependency_plugins", [])
     features.setdefault("dependency_total", 0)
     features.setdefault("dependency_risk_points", 0)
@@ -594,130 +753,54 @@ def score_plugin_baseline(
     )
     features.setdefault("dependency_details_top", [])
 
+    raw_dep_points = 0
     if snapshot and isinstance(snapshot, dict):
-        api = snapshot.get("plugin_api") or {}
-
-        required_core = api.get("requiredCore")
-        deps = api.get("dependencies") or []
-        sec_warnings = api.get("securityWarnings") or []
-
-        features["required_core"] = required_core
-        features["dependency_count"] = _safe_int(len(deps), default=0)
-        features["security_warning_count"] = _safe_int(len(sec_warnings), default=0)
-        features["active_security_warning_count"] = _safe_int(
-            sum(1 for w in sec_warnings if (w or {}).get("active") is True),
-            default=0,
-        )
-
-        release_ts = _parse_iso_datetime(str(api.get("releaseTimestamp", "")).strip())
-        features["release_timestamp"] = release_ts.isoformat() if release_ts else None
-        if release_ts:
-            features["days_since_release"] = (datetime.now(UTC) - release_ts).days
-
-        # Human-readable reasons
-        if required_core:
-            reasons.append(f"Requires Jenkins core {required_core} (from plugins API).")
-
-        dep_count = len(deps)
-        if dep_count > 0:
-            reasons.append(f"Declares {dep_count} plugin dependency(ies) (surface area).")
-
-        warn_count = len(sec_warnings)
-        if warn_count > 0:
-            active_warn = features["active_security_warning_count"]
-            if active_warn == 0:
-                reasons.append(f"{warn_count} security warning(s) listed (none active).")
-            else:
-                reasons.append(f"{warn_count} security warning(s) listed (active: {active_warn}).")
-
-        if release_ts:
-            reasons.append(f"Latest release is {release_ts.date().isoformat()}.")
-
-        # Conservative scoring nudges:
-        # - Active security warnings should matter.
-        active_warn = features["active_security_warning_count"]
-        score += min(60, active_warn * 20)
-        if active_warn > 0:
-            reasons.append("Active security warning(s) significantly increase risk.")
-
-        # - Lots of dependencies adds surface area (small bump)
-        if dep_count >= 10:
-            score += 5
-        elif dep_count >= 5:
-            score += 3
-
-        # - Recent release activity suggests maintenance (slight risk reduction)
-        dsr = features.get("days_since_release")
-        if isinstance(dsr, int) and dsr <= 180:
-            reasons.append("Recent release activity suggests active maintenance.")
-            score = max(0, score - 3)
-
-        # --- New: dependency plugin risk (from local datasets) ---
         dep_ids = _extract_dependency_plugin_ids(snapshot)
         features["dependency_plugins"] = dep_ids
         features["dependency_total"] = len(dep_ids)
 
-        dep_details: list[dict[str, Any]] = []
-        missing_snap = 0
-        missing_adv = 0
-        missing_hs = 0
-
+        dep_points_pairs: list[tuple[int, dict[str, Any]]] = []
+        missing_snap = missing_adv = missing_hs = 0
         worst_dep_id: str | None = None
         worst_dep_cvss: float | None = None
         worst_dep_latest: str | None = None
-        deps_with_any_adv = 0
-        deps_with_recent_adv_365d = 0
-        deps_with_active_warn = 0
+        deps_with_any_adv = deps_with_recent_adv = deps_with_active_warn = 0
 
-        dep_points_pairs: list[tuple[int, dict[str, Any]]] = []
         for dep_id in dep_ids:
-            pts, det = _dependency_points(
-                dep_id,
-                data_dir=base_dir,
-                today=today,
-                prefer_real=real,
-            )
+            pts, det = _dependency_points(dep_id, data_dir=base_dir, today=today, prefer_real=real)
             dep_points_pairs.append((pts, det))
-
-            # missing-data counts (best-effort)
             if _load_plugin_snapshot(dep_id, base_dir) is None:
                 missing_snap += 1
-            if not _load_advisories_for_plugin(dep_id, base_dir, prefer_real=real):
-                # Note: empty list can mean "no advisories" OR "missing file".
-                # We treat it as missing if the expected file doesn't exist.
-                adv_candidates = _advisory_candidates(base_dir, dep_id, prefer_real=real)
-                if adv_candidates and not any(path.exists() for path in adv_candidates):
-                    missing_adv += 1
+            adv_candidates = _advisory_candidates(base_dir, dep_id, prefer_real=real)
+            if adv_candidates and not any(p.exists() for p in adv_candidates):
+                missing_adv += 1
             if _load_healthscore_record(dep_id, base_dir) is None:
                 missing_hs += 1
-
-            if det.get("advisory_count", 0) and int(det.get("advisory_count", 0)) > 0:
+            if int(det.get("advisory_count", 0)) > 0:
                 deps_with_any_adv += 1
             if det.get("recent_advisory_365d") is True:
-                deps_with_recent_adv_365d += 1
+                deps_with_recent_adv += 1
             if int(det.get("active_security_warning_count", 0) or 0) > 0:
                 deps_with_active_warn += 1
-
             mcv = det.get("max_cvss")
-            if isinstance(mcv, (int, float)):
-                if worst_dep_cvss is None or float(mcv) > worst_dep_cvss:
-                    worst_dep_cvss = float(mcv)
-                    worst_dep_id = dep_id
-                    worst_dep_latest = det.get("latest_advisory_date")
+            if isinstance(mcv, (int, float)) and (
+                worst_dep_cvss is None or float(mcv) > worst_dep_cvss
+            ):
+                worst_dep_cvss = float(mcv)
+                worst_dep_id = dep_id
+                worst_dep_latest = det.get("latest_advisory_date")
 
-        # Summarize + cap: only count top-N risky deps to avoid explosion.
         dep_points_pairs.sort(key=lambda x: (x[0], x[1].get("max_cvss") or 0), reverse=True)
         top_n = 5
         dep_details = [
             d for _, d in dep_points_pairs[:top_n] if int(d.get("risk_points", 0) or 0) > 0
         ]
+        raw_dep_points = sum(int(p) for p, _ in dep_points_pairs[:top_n])
 
-        dep_points_sum = sum(int(p) for p, _ in dep_points_pairs[:top_n])
-        dep_points = max(0, min(20, dep_points_sum))
-        features["dependency_risk_points"] = dep_points
+        features["dependency_risk_points"] = raw_dep_points
         features["dependency_risk_summary"] = {
             "deps_with_any_advisory": deps_with_any_adv,
-            "deps_with_recent_advisory_365d": deps_with_recent_adv_365d,
+            "deps_with_recent_advisory_365d": deps_with_recent_adv,
             "deps_with_active_warning": deps_with_active_warn,
             "worst_dep_max_cvss": worst_dep_cvss,
             "worst_dep_id": worst_dep_id,
@@ -730,56 +813,64 @@ def score_plugin_baseline(
         }
         features["dependency_details_top"] = dep_details
 
-        # Score contribution
-        score += dep_points
+        if dep_ids and (deps_with_any_adv or deps_with_active_warn):
+            dep_msg = f"{deps_with_any_adv} of {len(dep_ids)} dep(s) have advisories"
+            if worst_dep_id and worst_dep_cvss is not None:
+                dep_msg += f"; worst: {worst_dep_id} (CVSS {worst_dep_cvss:.1f})"
+            reasons.append(f"Dependency risk: {dep_msg}.")
 
-        # Human-readable reasons (keep it tight)
-        if dep_ids:
-            reasons.append(f"Dependency plugins: {len(dep_ids)} declared.")
-            if deps_with_any_adv or deps_with_active_warn:
-                if worst_dep_id and worst_dep_cvss is not None:
-                    reasons.append(
-                        f"Dependency risk: {deps_with_any_adv} deps have advisories; "
-                        f"worst is {worst_dep_id} (CVSS {worst_dep_cvss:.1f}"
-                        + (f", latest {worst_dep_latest}" if worst_dep_latest else "")
-                        + ")."
-                    )
-                else:
-                    reasons.append(
-                        f"Dependency risk: {deps_with_any_adv} deps have advisories; "
-                        f"{deps_with_active_warn} deps have active warnings."
-                    )
-            if dep_points > 0:
-                reasons.append(
-                    f"Dependency risk contribution: +{dep_points} point(s) "
-                    f"(cap 20; top {top_n} deps)."
-                )
+    score_dependency = min(_CAP_DEPENDENCY, raw_dep_points // 4)
 
-    # --- New: plugin health score (plugin-health.jenkins.io) ---
+    # ── 7. Health score (cap: _CAP_HEALTH_SCORE = 5) ─────────────────────────
     features.setdefault("healthscore_value", None)
     features.setdefault("healthscore_date", None)
     features.setdefault("healthscore_collected_at", None)
 
     hs = _load_healthscore_record(plugin_id, base_dir)
+    score_health = 0
     if hs is not None:
         features["healthscore_value"] = hs.get("value")
         features["healthscore_date"] = hs.get("date")
         features["healthscore_collected_at"] = hs.get("collected_at")
+        raw_hs_pts = _healthscore_to_risk_points(hs.get("value"))
+        if raw_hs_pts is not None:
+            # Scale the 0-20 raw points down to the new 0-5 ceiling
+            score_health = min(_CAP_HEALTH_SCORE, raw_hs_pts // 4)
+            if score_health > 0:
+                reasons.append(
+                    f"Plugin health score {hs.get('value')}/100 — "
+                    f"below-average maintenance posture (+{score_health})."
+                )
+            else:
+                reasons.append(
+                    f"Plugin health score {hs.get('value')}/100 — acceptable maintenance posture."
+                )
 
-        pts = _healthscore_to_risk_points(hs.get("value"))
-        if pts is not None:
-            score += pts
-            reasons.append(
-                f"Health score: {hs.get('value')} "
-                f"(higher is healthier; +{pts} risk point(s), max 20)."
-            )
-        else:
-            reasons.append("Health score record present but value was not parseable.")
-    else:
-        reasons.append("No health score record found in local dataset (yet).")
+    # ── Final score ───────────────────────────────────────────────────────────
+    score = (
+        score_advisory_history
+        + score_advisory_severity
+        + score_staleness
+        + score_active_warnings
+        + score_governance
+        + score_dependency
+        + score_health
+    )
+
+    # Record component breakdown in features for UI display
+    features["score_components"] = {
+        "advisory_history": score_advisory_history,
+        "advisory_severity": score_advisory_severity,
+        "staleness": score_staleness,
+        "active_warnings": score_active_warnings,
+        "governance": score_governance,
+        "dependency": score_dependency,
+        "health_score": score_health,
+    }
+
     if score == 0:
         score = 5
-        reasons.append("No heuristics matched (baseline default).")
+        reasons.append("No risk signals matched — baseline default applied.")
 
     score = max(0, min(100, score))
     return ScoreResult(plugin=plugin_id, score=score, reasons=tuple(reasons), features=features)
