@@ -3,6 +3,15 @@
 # To run on all files: pre-commit run --all-files
 
 repos:
+  # Unit tests must pass before lint/type/security hooks run.
+  - repo: local
+    hooks:
+      - id: pytest-docker
+        name: pytest (unit tests, docker)
+        entry: docker compose run --rm canary pytest -ra
+        language: system
+        pass_filenames: false
+
   # Ruff (lint + autofix) + Ruff formatter
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.12
