@@ -306,7 +306,7 @@ _CAP_GOVERNANCE = 10  # presence/absence of governance artifacts
 _CAP_DEPENDENCY = 5  # dependency risk (reduced — secondary signal)
 _CAP_HEALTH_SCORE = 5  # Jenkins plugin health score (now a minor signal)
 _CAP_SECURITY_SENSITIVITY = 20  # plugin name suggests auth/security domain
-# Individual caps sum to 120; final score is clamped to [0, 100].
+# The sum of all individual caps exceeds 100; the final score is clamped to [0, 100].
 
 _SECURITY_SENSITIVE_KEYWORDS: frozenset[str] = frozenset(
     [
@@ -898,10 +898,11 @@ def score_plugin_baseline(
                     f"Plugin health score {hs.get('value')}/100 — acceptable maintenance posture."
                 )
 
-    # ── Final score ───────────────────────────────────────────────────────────
+    # ── 8. Security name sensitivity (cap: _CAP_SECURITY_SENSITIVITY = 20) ───
     score_sensitivity, sensitivity_reasons = _security_sensitivity_points(plugin_id)
     reasons.extend(sensitivity_reasons)
 
+    # ── Final score ───────────────────────────────────────────────────────────
     score = (
         score_advisory_history
         + score_advisory_severity
