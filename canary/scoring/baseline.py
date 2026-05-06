@@ -618,9 +618,9 @@ def score_plugin_baseline(
     """
     Heuristic risk scorer for a Jenkins plugin.
 
-    Score is the sum of six capped components, each with a defined ceiling
-    that together sum to 100.  This makes the score directly interpretable:
-    the reasons list identifies which components contributed and how much.
+    Score is the sum of eight capped components.  Because the individual caps
+    sum to more than 100, the final score is clamped to [0, 100].  The reasons
+    list identifies which components contributed and how much.
 
     Components and ceilings:
       Advisory history & recency  — up to 30 pts
@@ -630,6 +630,7 @@ def score_plugin_baseline(
       Governance signals           — up to 10 pts
       Dependency risk              — up to  5 pts
       Health score                 — up to  5 pts
+      Security name sensitivity    — up to 20 pts
     """
     plugin_id = _safe_plugin_id(
         canonicalize_plugin_id(plugin.lower().strip(), data_dir=_resolved_base_dir())
@@ -675,7 +676,7 @@ def score_plugin_baseline(
             f"({within_90} within 90d, {within_365} within 365 days); "
             f"component total +{advisory_history_pts} (cap {_CAP_ADVISORY_HISTORY})."
         )
-        if within_365 == 0:
+        if within_365 == 0 and latest_date is not None:
             reasons.append("No advisory activity in the last 365 days — historical record only.")
     else:
         score_advisory_history = 0
