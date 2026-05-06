@@ -377,6 +377,7 @@ def _extract_drivers(
     # ── SHAP path ─────────────────────────────────────────────────────────────
     try:
         import shap  # pyright: ignore[reportMissingImports]
+        import shap.maskers  # pyright: ignore[reportMissingImports]
 
         if _is_tree_model(clf):
             explainer = shap.TreeExplainer(clf)
