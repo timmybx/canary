@@ -387,7 +387,7 @@ def _extract_drivers(
         elif _is_linear_model(clf):
             # Use a zero background — appropriate for mean-imputed features
             background = np.zeros((1, len(feature_columns)))
-            explainer = shap.LinearExplainer(clf, background, feature_perturbation="interventional")
+            explainer = shap.LinearExplainer(clf, shap.maskers.Independent(background))
             shap_out = explainer.shap_values(X_imputed)
             contrib = shap_out[0]
 
