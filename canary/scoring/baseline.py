@@ -305,7 +305,49 @@ _CAP_ACTIVE_WARNINGS = 15  # active Jenkins security warnings
 _CAP_GOVERNANCE = 10  # presence/absence of governance artifacts
 _CAP_DEPENDENCY = 5  # dependency risk (reduced — secondary signal)
 _CAP_HEALTH_SCORE = 5  # Jenkins plugin health score (now a minor signal)
-# Total ceiling: 100
+_CAP_SECURITY_SENSITIVITY = 20  # plugin name suggests auth/security domain
+# Individual caps sum to 120; final score is clamped to [0, 100].
+
+_SECURITY_SENSITIVE_KEYWORDS: frozenset[str] = frozenset(
+    [
+        "credentials",
+        "auth",
+        "secret",
+        "token",
+        "password",
+        "security",
+        "saml",
+        "oauth",
+        "ldap",
+        "openid",
+        "kerberos",
+        "ssh",
+        "ssl",
+        "tls",
+        "jwt",
+        "certificate",
+        "signing",
+    ]
+)
+
+
+def _security_sensitivity_points(plugin_id: str) -> tuple[int, list[str]]:
+    """Award risk points if the plugin name contains security-sensitive keywords.
+
+    Plugins that operate in the auth/credentials/secrets domain carry an elevated
+    baseline risk because a compromise of such a plugin can expose credentials or
+    bypass access controls.
+    """
+    pid_lower = plugin_id.lower()
+    matched = sorted(kw for kw in _SECURITY_SENSITIVE_KEYWORDS if kw in pid_lower)
+    if not matched:
+        return 0, []
+    pts = _CAP_SECURITY_SENSITIVITY
+    reasons = [
+        f"Plugin name suggests auth/security sensitivity "
+        f"({', '.join(matched)}): +{pts} (cap {_CAP_SECURITY_SENSITIVITY})."
+    ]
+    return pts, reasons
 
 
 def _load_swh_features(plugin_id: str, data_dir: Path) -> dict[str, Any]:
@@ -630,9 +672,11 @@ def score_plugin_baseline(
         reasons.append(
             f"{advisory_count} prior advisory record(s) — "
             f"history +{history_pts}, recency +{recency_pts} "
-            f"({within_90} within 90d, {within_365} within 365d); "
+            f"({within_90} within 90d, {within_365} within 365 days); "
             f"component total +{advisory_history_pts} (cap {_CAP_ADVISORY_HISTORY})."
         )
+        if within_365 == 0:
+            reasons.append("No advisory activity in the last 365 days — historical record only.")
     else:
         score_advisory_history = 0
         reasons.append("No advisories found in local dataset.")
@@ -705,6 +749,9 @@ def score_plugin_baseline(
             features["days_since_release"] = days_since_release
             reasons.append(f"Latest release: {release_ts.date().isoformat()}.")
 
+        if required_core:
+            reasons.append(f"Requires Jenkins core {required_core}.")
+
     score_staleness, staleness_reasons = _staleness_points(
         swh.get("swh_days_since_last_commit"), days_since_release
     )
@@ -715,7 +762,7 @@ def score_plugin_baseline(
     score_active_warnings = min(_CAP_ACTIVE_WARNINGS, active_warn * 8)
     if active_warn > 0:
         reasons.append(
-            f"{active_warn} active Jenkins security warning(s): "
+            f"{active_warn} active security warning(s): "
             f"+{score_active_warnings} (cap {_CAP_ACTIVE_WARNINGS})."
         )
     elif features.get("security_warning_count", 0) > 0:
@@ -818,6 +865,11 @@ def score_plugin_baseline(
             if worst_dep_id and worst_dep_cvss is not None:
                 dep_msg += f"; worst: {worst_dep_id} (CVSS {worst_dep_cvss:.1f})"
             reasons.append(f"Dependency risk: {dep_msg}.")
+        elif dep_ids and len(dep_ids) >= 10:
+            reasons.append(
+                f"Dependency surface area: {len(dep_ids)} plugin dependencies — "
+                "elevated supply-chain exposure."
+            )
 
     score_dependency = min(_CAP_DEPENDENCY, raw_dep_points // 4)
 
@@ -847,6 +899,9 @@ def score_plugin_baseline(
                 )
 
     # ── Final score ───────────────────────────────────────────────────────────
+    score_sensitivity, sensitivity_reasons = _security_sensitivity_points(plugin_id)
+    reasons.extend(sensitivity_reasons)
+
     score = (
         score_advisory_history
         + score_advisory_severity
@@ -855,6 +910,7 @@ def score_plugin_baseline(
         + score_governance
         + score_dependency
         + score_health
+        + score_sensitivity
     )
 
     # Record component breakdown in features for UI display
@@ -866,6 +922,7 @@ def score_plugin_baseline(
         "governance": score_governance,
         "dependency": score_dependency,
         "health_score": score_health,
+        "security_sensitivity": score_sensitivity,
     }
 
     if score == 0:
