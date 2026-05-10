@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.8] - 2026-05-10
+### Added
+- ML-backed scoring support for the CLI and local web console, including model-directory selection and SHAP-style driver extraction for trained baseline models.
+- A componentized scoring model layer that separates baseline score components from aggregation logic while preserving explainable score output.
+- Additional UI affordances for the web console, including score form refinements, tooltips, badges, clearer empty-feature messaging, and model-name display in ML scoring results.
+- Expanded regression coverage for CLI helpers, ML scoring, feature-bundle path handling, train registry behavior, collector path utilities, and webapp scoring flows, raising coverage to roughly 81%.
+- A `pytest-docker` pre-commit hook and expanded monthly ablation experiment helper script support.
+
+### Changed
+- ML scoring now reports model names, excludes time-window feature leakage from driver output, accepts broader mapping-like feature vectors, and uses the newer `shap.maskers.Independent` LinearExplainer API.
+- Baseline scoring internals were refactored into smaller components, with follow-up fixes for the affected unit-test expectations.
+- Software Heritage Athena loading is now lazy, reducing import-time coupling for flows that do not use the Athena backend.
+- Refreshed pre-commit hooks and dependency pins, including updates for the pip tooling group, `boto3`/`botocore`, `cryptography`, and `s3transfer`.
+
+### Fixed
+- Prevented plugin ID path traversal in collectors and feature-bundle handling by centralizing strict path validation and adding regression tests for CodeQL CWE-022 findings.
+- Fixed ML driver extraction and scoring UI edge cases, including alignment between `_extract_drivers(...)`, score form behavior, and test expectations.
+- Resolved scoring baseline regressions that caused six unit tests to fail after the componentized scoring refactor.
+- Updated webapp empty-feature assertions and previously skipped ML/train-registry test coverage.
+
 ## [0.1.7] - 2026-04-29
 ### Added
 - Flexible train/test split controls for `canary train baseline`, including `time`, `group`, and `group_time` strategies with configurable grouping, holdout fraction, and seed behavior.
