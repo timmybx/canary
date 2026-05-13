@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import requests
+
 from canary.devtools.pip_audit_wrapper import build_argv, load_ignored_vulns, main
 
 # ---------------------------------------------------------------------------
@@ -126,3 +128,33 @@ def test_main_returns_exit_code_from_system_exit():
             result = main()
 
     assert result == 2
+
+
+def test_main_returns_1_on_network_failure_without_override():
+    mock_cli = MagicMock()
+    mock_cli.audit = MagicMock(side_effect=requests.exceptions.ConnectionError("dns failed"))
+
+    with patch.dict("sys.modules", {"pip_audit._cli": mock_cli}):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch(
+                "canary.devtools.pip_audit_wrapper.load_ignored_vulns",
+                return_value=[],
+            ):
+                result = main()
+
+    assert result == 1
+
+
+def test_main_allows_network_failure_when_configured():
+    mock_cli = MagicMock()
+    mock_cli.audit = MagicMock(side_effect=requests.exceptions.ConnectionError("dns failed"))
+
+    with patch.dict("sys.modules", {"pip_audit._cli": mock_cli}):
+        with patch.dict("os.environ", {"CANARY_PIP_AUDIT_ALLOW_NETWORK_FAILURE": "1"}):
+            with patch(
+                "canary.devtools.pip_audit_wrapper.load_ignored_vulns",
+                return_value=[],
+            ):
+                result = main()
+
+    assert result == 0

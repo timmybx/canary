@@ -193,6 +193,26 @@ def test_load_plugin_alias_map_reads_registry_jsonl(tmp_path: Path):
     assert result.get("former-name") == "new-name"
 
 
+def test_load_plugin_alias_map_infers_data_dir_from_registry_path(tmp_path: Path):
+    raw_dir = tmp_path / "raw"
+    registry_dir = raw_dir / "registry"
+    plugins_dir = raw_dir / "plugins"
+    registry_dir.mkdir(parents=True)
+    plugins_dir.mkdir(parents=True)
+
+    registry_path = registry_dir / "plugins.jsonl"
+    registry_path.write_text(json.dumps({"plugin_id": "canonical-plugin"}) + "\n", encoding="utf-8")
+    snap = {
+        "plugin_id": "canonical-plugin",
+        "aliases": ["snapshot-alias"],
+    }
+    (plugins_dir / "canonical-plugin.snapshot.json").write_text(json.dumps(snap), encoding="utf-8")
+
+    result = load_plugin_alias_map(registry_path=registry_path)
+
+    assert result.get("snapshot-alias") == "canonical-plugin"
+
+
 def test_load_plugin_alias_map_reads_snapshot_files(tmp_path: Path):
     plugins_dir = tmp_path / "plugins"
     plugins_dir.mkdir(parents=True)

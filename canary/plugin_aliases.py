@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_ALIAS_PATH = Path("data/raw/registry/plugin_aliases.json")
+DEFAULT_DATA_DIR = Path("data/raw")
 
 
 ALIAS_PAYLOAD_KEYS = (
@@ -64,10 +65,28 @@ def _load_json_if_exists(path: Path) -> Any:
 
 def alias_file_candidates(*, data_dir: str | Path = "data/raw") -> list[Path]:
     data_dir = Path(data_dir)
-    return [
+    candidates = [
         data_dir / "registry" / "plugin_aliases.json",
-        Path("data/raw/registry/plugin_aliases.json"),
     ]
+    default_alias_path = DEFAULT_DATA_DIR / "registry" / "plugin_aliases.json"
+    if candidates[0] != default_alias_path:
+        candidates.append(default_alias_path)
+    return candidates
+
+
+def _data_dir_for_alias_lookup(
+    *,
+    registry_path: str | Path | None,
+    data_dir: str | Path,
+) -> Path:
+    data_path = Path(data_dir)
+    if data_path != DEFAULT_DATA_DIR or registry_path is None:
+        return data_path
+
+    registry = Path(registry_path)
+    if registry.parent.name == "registry":
+        return registry.parent.parent
+    return registry.parent
 
 
 def load_plugin_alias_map(
@@ -76,6 +95,7 @@ def load_plugin_alias_map(
     data_dir: str | Path = "data/raw",
 ) -> dict[str, str]:
     alias_map: dict[str, str] = {}
+    data_root = _data_dir_for_alias_lookup(registry_path=registry_path, data_dir=data_dir)
 
     registry = Path(registry_path) if registry_path is not None else None
     if registry is not None and registry.exists() and registry.is_file():
@@ -99,7 +119,7 @@ def load_plugin_alias_map(
         except OSError:
             pass
 
-    for path in alias_file_candidates(data_dir=data_dir):
+    for path in alias_file_candidates(data_dir=data_root):
         payload = _load_json_if_exists(path)
         if payload is None:
             continue
@@ -110,7 +130,7 @@ def load_plugin_alias_map(
                 if alias_norm and canonical_norm and alias_norm != canonical_norm:
                     alias_map[alias_norm] = canonical_norm
 
-    plugins_dir = Path(data_dir) / "plugins"
+    plugins_dir = data_root / "plugins"
     if plugins_dir.exists() and plugins_dir.is_dir():
         for snap_path in sorted(plugins_dir.glob("*.snapshot.json")):
             payload = _load_json_if_exists(snap_path)

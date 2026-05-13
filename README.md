@@ -14,7 +14,7 @@
 
 CANARY is a research prototype for collecting software ecosystem signals for Jenkins plugins and turning them into transparent, explainable risk indicators.
 
-Today, CANARY has a working Docker-based CLI, a local web console, first-class collectors for registry/snapshot/advisory/healthscore/GitHub/GHArchive/Software Heritage data, and a baseline scorer. The project now produces two feature outputs: a broader static current-point feature bundle for scoring/reporting and a separate monthly time-bounded feature bundle for modeling.
+Today, CANARY has a working Docker-based CLI, a local web console, first-class collectors for registry/snapshot/advisory/healthscore/GitHub/GHArchive/Software Heritage data, an explainable heuristic scorer, and an experimental ML scoring path. The project now produces static current-point feature bundles for scoring/reporting, monthly time-bounded feature bundles for modeling, future advisory labels, and trained model artifacts.
 
 > **Dependency source of truth:** `pyproject.toml` is the source of dependency declarations.  
 > `requirements*.txt` files are generated lockfiles used for reproducible installs.
@@ -38,8 +38,10 @@ Today, CANARY has a working Docker-based CLI, a local web console, first-class c
 - ✅ Collects Software Heritage archival origin/visit/snapshot metadata
 - ✅ Builds a static current-point feature bundle for scoring and reporting
 - ✅ Builds a separate monthly time-bounded feature bundle for modeling
+- ✅ Labels monthly feature rows with future advisory horizons
 - ✅ Builds normalized advisory events for downstream analytics / ML
-- ✅ Scores a plugin using explainable signals from multiple data sources
+- ✅ Trains baseline ML models on labeled monthly rows
+- ✅ Scores a plugin using explainable heuristic and ML-backed signals
 - ✅ Runs tests, linting, fuzzing, and security checks in a consistent Docker environment
 
 ---
@@ -54,10 +56,12 @@ Recent milestones:
   - `plugins.features.*` for current-point scoring and reporting
   - `plugins.monthly.features.*` for time-bounded modeling
 - Restricted the monthly dataset to time-bounded feature families only
+- Added future advisory labeling with configurable horizons
+- Added baseline model training outputs and an ML scoring CLI / web-console path
 - Validated historical collection at full-registry scale
 - Successfully collected Software Heritage data for the large majority of registry plugins
 
-That means CANARY now has a cleaner separation between present-day scoring/reporting and historical modeling, with the monthly dataset intentionally limited to time-bounded inputs.
+That means CANARY now has a cleaner separation between present-day scoring/reporting and historical modeling, with the monthly dataset intentionally limited to time-bounded inputs and the labeled dataset feeding repeatable baseline model runs.
 
 ---
 
@@ -113,6 +117,8 @@ flowchart LR
         direction TB
         D2[[build monthly-features]]:::feature
         E2[/plugins.monthly.features.jsonl/]:::feature
+        D3[[build monthly-labels]]:::feature
+        E3[/plugins.monthly.labeled.jsonl/]:::feature
     end
 
     subgraph U[Usage]
@@ -120,6 +126,7 @@ flowchart LR
         FCLI[CLI / Scoring]:::usage
         FGUI[GUI / Reporting]:::usage
         FML[Model Training]:::usage
+        FMLScore[ML Scoring]:::usage
     end
 
     %% Connections
@@ -132,11 +139,12 @@ flowchart LR
     A6 --> B6 --> C7
 
     C1 & C2 & C3 & C4 & C6 & C7 --> D1 --> E1
-    C1 & C4 & C5 & C7 --> D2 --> E2
+    C1 & C4 & C5 & C7 --> D2 --> E2 --> D3 --> E3
 
     E1 --> FCLI
     E1 --> FGUI
-    E2 --> FML
+    E3 --> FML --> FMLScore
+    E1 --> FMLScore
 ```
 
 ---
@@ -158,11 +166,16 @@ flowchart LR
 │   ├── build/                      # Dataset builders / normalizers
 │   │   ├── advisories_events.py
 │   │   ├── features_bundle.py
+│   │   ├── monthly_labels.py
 │   │   └── monthly_features.py
 │   ├── datasets/                   # Auxiliary / legacy dataset scripts
 │   │   └── github_repo_features.py
+│   ├── train/
+│   │   ├── baseline.py              # Baseline model training
+│   │   └── registry.py              # Model registry
 │   └── scoring/
-│       └── baseline.py             # Baseline scorer (explainable)
+│       ├── baseline.py              # Heuristic scorer (explainable)
+│       └── ml.py                    # ML-backed scorer
 ├── fuzzers/
 │   └── jenkins_url_fuzzer.py
 ├── tests/
@@ -177,7 +190,8 @@ flowchart LR
 │   │   └── software_heritage/
 │   └── processed/                  # Derived datasets / features (generated)
 │       ├── events/
-│       └── features/
+│       ├── features/
+│       └── models/
 ├── .github/
 │   ├── workflows/
 │   └── rulesets/
@@ -209,23 +223,42 @@ Processed:
 - `data/processed/features/plugins.monthly.features.jsonl` — monthly time-bounded feature bundle
 - `data/processed/features/plugins.monthly.features.csv` — CSV export of the monthly feature bundle
 - `data/processed/features/plugins.monthly.features.summary.json` — monthly feature summary
+- `data/processed/features/plugins.monthly.labeled.jsonl` — monthly features with future advisory labels
+- `data/processed/features/plugins.monthly.labeled.csv` — CSV export of labeled monthly rows
+- `data/processed/features/plugins.monthly.labeled.summary.json` — labeled monthly summary
+- `data/processed/models/<run>/metrics.json` — model metrics and selected feature columns
+- `data/processed/models/<run>/model.joblib` — trained sklearn pipeline
+- `data/processed/models/<run>/feature_columns.json` — ordered feature contract used by ML scoring
+- `data/processed/models/<run>/test_predictions.csv` — held-out predictions
 
 ### Feature outputs
 
 - `build features` creates the broader **static current-point** dataset used for current scoring, reporting, and GUI workflows. This path can use present-day enriched metadata.
 - `build monthly-features` creates the **monthly time-bounded** dataset used for model training and evaluation. This path is intentionally restricted to time-bounded feature families.
+- `build monthly-labels` adds future advisory labels such as `label_advisory_within_6m` to the monthly rows.
+- `train baseline` fits a baseline model from labeled monthly rows and writes reusable model artifacts for `score-ml` and the web console.
 
 ---
 
 ## ✅ Prerequisites
 
-The recommended local workflow is Docker Compose.
+CANARY can run from a plain Python 3.12 virtual environment. Docker Compose remains supported for reproducible CI-like runs and local demos.
 
 Required:
-- Docker Desktop (includes Docker Engine and Docker Compose v2)
-- Internet access for image pulls / dependency installation
+- Python 3.12+
+- Internet access for dependency installation
 
-Verify install:
+Optional:
+- Docker Desktop (includes Docker Engine and Docker Compose v2)
+
+Local Python setup:
+
+```bash
+python -m pip install --require-hashes -r requirements.txt
+python -m pip install --require-hashes -r requirements-dev.txt
+```
+
+Verify Docker install if you plan to use Compose:
 
 ```bash
 docker --version
@@ -235,6 +268,8 @@ docker compose version
 ---
 
 ## 🚀 Quickstart
+
+The examples below use Docker Compose. In a local Python environment, drop the `docker compose run --rm canary` prefix and run the `canary ...` command directly.
 
 ### 1) Build the image
 
@@ -257,9 +292,17 @@ docker compose up canary-web
 Then open:
 - `http://localhost:8000`
 
+With a local Python environment, you can also run:
+
+```bash
+canary-web
+```
+
 The web console is currently aimed at local demos and day-to-day use. It can:
 - score a plugin and show the JSON / reasons in the browser
+- optionally run the trained ML scorer alongside the heuristic score
 - run collection / enrichment commands without memorizing flags
+- build monthly labels and train / inspect baseline model runs
 - show command preview and captured console output
 - display the bundled CANARY logo and favicon
 
@@ -384,7 +427,30 @@ Writes:
 - `data/processed/features/plugins.monthly.features.csv`
 - `data/processed/features/plugins.monthly.features.summary.json`
 
-### 12) Score a plugin
+### 12) Label monthly rows for ML
+
+```bash
+docker compose run --rm canary canary build monthly-labels
+```
+
+Writes:
+- `data/processed/features/plugins.monthly.labeled.jsonl`
+- `data/processed/features/plugins.monthly.labeled.csv`
+- `data/processed/features/plugins.monthly.labeled.summary.json`
+
+### 13) Train a baseline model
+
+```bash
+docker compose run --rm canary canary train baseline --model logistic
+```
+
+The default target is `label_advisory_within_6m`, and the default output directory is:
+- `data/processed/models/baseline_6m`
+
+Available model names are `logistic`, `random_forest`, `xgboost`, and `lightgbm`.
+`xgboost` and `lightgbm` require their optional packages to be installed.
+
+### 14) Score a plugin with the heuristic scorer
 
 ```bash
 docker compose run --rm canary canary score cucumber-reports --real --json
@@ -394,6 +460,18 @@ Output includes:
 - final numeric score
 - human-readable reasons
 - raw feature values
+
+### 15) Score a plugin with a trained ML model
+
+```bash
+docker compose run --rm canary canary score-ml cucumber-reports --model-dir data/processed/models/baseline_6m --json
+```
+
+Output includes:
+- predicted advisory risk probability
+- risk category
+- top contributing features
+- feature vector aligned to the trained model contract
 
 ---
 
@@ -534,6 +612,12 @@ python -m canary.datasets.github_repo_features --include-alerts
 ## 🧪 Running Tests
 
 ```bash
+pytest -ra
+```
+
+Docker equivalent:
+
+```bash
 docker compose run --rm canary pytest
 ```
 
@@ -552,10 +636,22 @@ Then open `htmlcov/index.html`.
 Fix lint issues Ruff can auto-fix:
 
 ```bash
+ruff check . --fix
+```
+
+Docker equivalent:
+
+```bash
 docker compose run --rm canary ruff check . --fix
 ```
 
 Format code:
+
+```bash
+ruff format .
+```
+
+Docker equivalent:
 
 ```bash
 docker compose run --rm canary ruff format .
@@ -574,25 +670,33 @@ CANARY aims to be reproducible and supply-chain aware:
 
 ---
 
-## 🧠 How Baseline Scoring Works
+## 🧠 How Scoring Works
 
-CANARY’s current scorer is intentionally simple and explainable. It combines:
+CANARY has two scoring paths.
+
+The default `canary score` path is a transparent heuristic scorer. It combines:
 
 - **name heuristics** (keywords that suggest auth/security or SCM surface area)
 - **advisory features**
   - advisory count
   - most recent advisory date
   - recency-weighted advisory risk
+  - CVSS severity
 - **plugin snapshot features**
   - required Jenkins core
-  - dependency count (surface area proxy)
-  - security warnings
+  - dependency count and dependency risk
+  - active and historical security warnings
   - release recency
+- **Software Heritage features**
+  - last commit recency
+  - governance artifacts such as `SECURITY.md`, automation, tests, and changelogs
 - **healthscore features**
   - healthscore value/date
   - small risk-points mapping (higher health = lower risk)
 
 Output includes the final score, human-readable reasons, and raw feature values in JSON mode.
+
+The experimental `canary score-ml` path loads a trained model from `data/processed/models/<run>/`, builds a current feature vector from collected raw data, and returns an advisory-risk probability, category, top drivers, and the aligned feature vector.
 
 ---
 
@@ -603,20 +707,14 @@ The next technical layer for CANARY is less about adding isolated collectors and
 Good next steps include:
 
 - per-plugin feature bundles such as `data/processed/features/<plugin>.features.json`
-- a unifying dataset builder that joins:
-  - registry
-  - plugin snapshot
-  - advisories / advisory events
-  - healthscore
-  - GitHub API signals
-  - GH Archive historical windows
-- time-sliced “as-of date” datasets for ML experiments
+- calibration and validation reports for trained ML models
+- richer drift checks between current-point scoring features and monthly training features
 - lightweight schema/version metadata for generated datasets
-- GUI updates that expose more collection options without requiring CLI-only workflows
+- GUI updates that expose more collection and modeling options without requiring CLI-only workflows
   - date pickers / calendar widgets for historical collection
   - preset ranges such as 30 days / 90 days / 1 year
   - sample / byte-cap fields surfaced in the web UI
-  - collection progress and output summaries
+  - collection and training progress summaries
 
 ---
 
@@ -630,10 +728,13 @@ Good next steps include:
 - [x] Historical GH Archive collector integrated into the main workflow
 - [x] Baseline scoring with explainable features
 - [x] Add GitHub signals as first-class collectors in `collect enrich`
+- [x] Build monthly advisory labels for ML training
+- [x] Train baseline ML models from labeled monthly features
+- [x] Add ML-backed plugin scoring
 - [ ] Build per-plugin feature bundles (`data/processed/features/<plugin>.features.json`)
-- [ ] Build a unified training / analysis dataset from collected sources
-- [ ] Add time-sliced dataset builders for ML (`as_of_date`, prediction horizon)
-- [ ] Expand the web UI with collection forms, date widgets, and richer output summaries
+- [ ] Add schema/version metadata for generated datasets
+- [ ] Expand model validation, calibration, and drift reporting
+- [ ] Expand the web UI with date widgets and richer output summaries
 
 ---
 

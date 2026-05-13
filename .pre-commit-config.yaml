@@ -35,7 +35,7 @@ repos:
         name: pip-audit (runtime + dev, docker)
         # Audit the already-installed, hash-pinned container environment.
         # This avoids intermittent failures from pip-audit's requirements bootstrap.
-        entry: docker compose run --rm canary python -m canary.devtools.pip_audit_wrapper
+        entry: docker compose run --rm -e CANARY_PIP_AUDIT_ALLOW_NETWORK_FAILURE=1 canary python -m canary.devtools.pip_audit_wrapper
         language: system
         pass_filenames: false
 

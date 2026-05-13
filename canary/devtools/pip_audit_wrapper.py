@@ -4,8 +4,12 @@ import importlib
 import os
 import sys
 from pathlib import Path
+from urllib.error import URLError
+
+import requests
 
 DEFAULT_IGNORE_FILE = ".pip-audit-ignore.txt"
+ALLOW_NETWORK_FAILURE_ENV = "CANARY_PIP_AUDIT_ALLOW_NETWORK_FAILURE"
 
 
 def _repo_root() -> Path:
@@ -46,6 +50,16 @@ def main() -> int:
     try:
         audit = importlib.import_module("pip_audit._cli").audit
         audit()
+    except (requests.exceptions.RequestException, URLError) as exc:
+        print(f"pip-audit could not reach its vulnerability service: {exc}", file=sys.stderr)
+        if os.environ.get(ALLOW_NETWORK_FAILURE_ENV) == "1":
+            print(
+                "Continuing because "
+                f"{ALLOW_NETWORK_FAILURE_ENV}=1. CI still runs pip-audit strictly.",
+                file=sys.stderr,
+            )
+            return 0
+        return 1
     except SystemExit as exc:
         code = exc.code
         return code if isinstance(code, int) else 1
