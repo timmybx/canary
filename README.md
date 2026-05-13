@@ -199,7 +199,7 @@ Raw:
 - `data/raw/gharchive/windows/<start>_<end>.gharchive.jsonl` — historical GH Archive features by window
 - `data/raw/gharchive/plugins/<plugin>.gharchive.jsonl` — historical GH Archive timeline per plugin
 - `data/raw/gharchive/gharchive_index.json` — GH Archive collection run summary
-- `data/raw/software_heritage/<plugin>.*` — Software Heritage origin / visits / latest visit / snapshot metadata
+- `data/raw/software_heritage_api/<plugin>.swh.json` and `data/raw/software_heritage_athena/<plugin>.swh_athena.json` — Software Heritage metadata from API and Athena backends
 
 Processed:
 - `data/processed/events/advisories.jsonl` — normalized/deduped advisory events stream
