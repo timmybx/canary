@@ -3,8 +3,8 @@ name: Pre-commit autoupdate
 on:
   workflow_dispatch:
   schedule:
-    # Weekly on Mondays at 09:00 UTC
-    - cron: "0 9 * * 1"
+    # Daily at 09:00 UTC
+    - cron: "0 9 * * *"
 
 # Default to least privilege: keep GITHUB_TOKEN read-only
 permissions:
