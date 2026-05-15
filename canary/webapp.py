@@ -2682,7 +2682,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
 def main() -> None:
     host = os.getenv("CANARY_WEB_HOST", "127.0.0.1")
     try:
-        port = int(os.getenv("CANARY_WEB_PORT", "8000"))
+        port = int(os.getenv("PORT", os.getenv("CANARY_WEB_PORT", "8000")))
     except ValueError:
         port = 8000
     try:

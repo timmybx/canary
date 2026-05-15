@@ -38,4 +38,4 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup --home /ap
  && chown -R appuser:appgroup /app
 USER appuser
 
-CMD ["canary", "--help"]
+CMD ["python", "-m", "canary.webapp"]
