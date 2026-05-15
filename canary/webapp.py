@@ -43,6 +43,7 @@ DEFAULT_LABELED_SUMMARY = "data/processed/features/plugins.monthly.labeled.summa
 DEFAULT_MODEL_DIR = "data/processed/models/baseline_6m"
 MODEL_OUTPUTS_ROOT = Path("data/processed/models").resolve()
 MODEL_OUTPUTS_ROOT_PARTS = Path("data/processed/models").parts
+VALID_TABS = frozenset({"score", "ml"})
 MODEL_OUTPUT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 DEFAULTS: dict[str, Any] = {
@@ -844,128 +845,6 @@ def _load_model_metrics(model_out_dir: str | Path) -> dict[str, Any] | None:
     except OSError:
         return None
     return _load_model_metrics_cached(model_dir_parts, stat.st_mtime_ns)
-
-
-def _load_feature_selection(model_out_dir: str | Path) -> dict[str, Any] | None:
-    """Load feature_selection.json from a model directory if it exists."""
-    try:
-        parts = _model_output_dir_parts(model_out_dir)
-    except ValueError:
-        return None
-    target = MODEL_OUTPUTS_ROOT.joinpath(*parts, "feature_selection.json")
-    if not target.exists():
-        return None
-    try:
-        return json.loads(target.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _render_feature_selection_panel(fs: dict[str, Any]) -> str:
-    """Render the feature selection results as a card panel for the ML tab."""
-    full_n = fs.get("full_model_feature_count", "?")
-    full_ap = fs.get("full_model_average_precision")
-    h3_ok = fs.get("h3_satisfied", False)
-    h3_info = fs.get("h3_smallest_qualifying_subset")
-    results = fs.get("subset_results", [])
-    ranking = fs.get("feature_ranking", [])
-
-    # H3 verdict banner
-    if h3_ok and h3_info:
-        verdict_cls = "pill pill--warn"
-        verdict = (
-            f"H3 SATISFIED &#x2014; {h3_info['size']}-feature model retains "
-            f"{h3_info['ap_retention'] * 100:.1f}% of full AP "
-            f"({h3_info['average_precision']:.4f})"
-        )
-    else:
-        verdict_cls = "pill pill--muted"
-        verdict = "H3 not satisfied at evaluated subset sizes"
-
-    # Subset results table
-    rows_html = ""
-    for res in results:
-        label = _escape(res.get("subset_label", "?"))
-        n = res.get("actual_feature_count", "?")
-        ap = res.get("average_precision")
-        ret = res.get("ap_retention_vs_full")
-        h3_flag = res.get("meets_h3_threshold")
-        ap_str = f"{ap:.4f}" if ap is not None else "n/a"
-        ret_str = f"{ret * 100:.1f}%" if ret is not None else "—"
-        h3_cell = (
-            '<span style="color:#5ce0a0;font-weight:700">&#x2713;</span>'
-            if h3_flag is True
-            else ('<span style="color:var(--muted)">&#x2014;</span>' if h3_flag is False else "")
-        )
-        is_full = "full" in str(res.get("subset_label", ""))
-        row_style = 'style="background:rgba(255,255,255,.04)"' if is_full else ""
-        rows_html += (
-            f"<tr {row_style}>"
-            f"<td><code>{label}</code></td>"
-            f"<td style='text-align:right'>{n}</td>"
-            f"<td style='text-align:right'>{ap_str}</td>"
-            f"<td style='text-align:right'>{ret_str}</td>"
-            f"<td style='text-align:center'>{h3_cell}</td>"
-            f"</tr>"
-        )
-
-    table_html = (
-        '<table style="width:100%;border-collapse:collapse;font-size:.9rem;margin-top:.6rem">'
-        "<thead><tr>"
-        "<th style='text-align:left;padding:.3rem .5rem;color:var(--muted)'>Subset</th>"
-        "<th style='text-align:right;padding:.3rem .5rem;color:var(--muted)'>Features</th>"
-        "<th style='text-align:right;padding:.3rem .5rem;color:var(--muted)'>Avg Precision</th>"
-        "<th style='text-align:right;padding:.3rem .5rem;color:var(--muted)'>% of Full</th>"
-        "<th style='text-align:center;padding:.3rem .5rem;color:var(--muted)'>H3 &#x2265;90%</th>"
-        "</tr></thead>"
-        f"<tbody>{rows_html}</tbody>"
-        "</table>"
-    )
-
-    # Top-10 feature ranking
-    top10_html = ""
-    for item in ranking[:10]:
-        rank = item.get("rank", "")
-        feat = _escape(str(item.get("feature", "")))
-        score = float(item.get("mean_abs_shap") or 0.0)
-        max_score = max(
-            (float(r.get("mean_abs_shap") or 0.0) for r in ranking[:1]),
-            default=1.0,
-        )
-        bar_w = max(4, int(score / max(max_score, 1.0) * 180))
-        top10_html += (
-            f'<li style="display:flex;align-items:center;gap:.5rem;padding:.25rem 0;'
-            f'border-bottom:1px solid rgba(255,255,255,.04)">'
-            f'<span style="color:var(--muted);width:1.6rem;text-align:right;font-size:.8rem">{rank}</span>'
-            f'<code style="flex:1;font-size:.82rem">{feat}</code>'
-            f'<span style="width:{bar_w}px;height:6px;background:#3266ad;border-radius:3px;'
-            f'flex-shrink:0"></span>'
-            f'<span style="color:var(--muted);font-size:.8rem;width:4.5rem;text-align:right">'
-            f"{score:.5f}</span>"
-            f"</li>"
-        )
-
-    return (
-        f'<span class="{verdict_cls}" style="margin-bottom:.6rem;display:inline-block">'
-        f"{verdict}</span>"
-        f'<div class="metrics-row" style="margin:.6rem 0">'
-        f'<div class="metric"><span class="metric__label">Full model features</span>'
-        f'<span class="metric__value">{full_n}</span></div>'
-        f'<div class="metric"><span class="metric__label">Full model AP</span>'
-        f'<span class="metric__value">'
-        f"{f'{full_ap:.4f}' if full_ap is not None else 'n/a'}</span></div>"
-        f'<div class="metric"><span class="metric__label">H3 satisfied</span>'
-        f'<span class="metric__value">{"Yes" if h3_ok else "No"}</span></div>'
-        f"</div>"
-        f'<div class="panel" style="margin-top:.6rem">'
-        f"<h4>AP retention by feature subset</h4>"
-        f"{table_html}"
-        f"</div>"
-        f'<div class="panel" style="margin-top:.6rem">'
-        f"<h4>Top 10 features by SHAP global importance</h4>"
-        f'<ul style="list-style:none;padding:0;margin:0">{top10_html}</ul>'
-        f"</div>"
-    )
 
 
 def _model_output_dir_parts(path: str | Path) -> tuple[str, ...]:
@@ -2563,37 +2442,6 @@ def _render_ml_tab(
     parts.append(
         f'<section class="card"><div class="card__header"><div><p class="eyebrow">Model performance</p><h2>Readable metrics</h2></div><span class="pill pill--muted">Metrics view</span></div>{status_text}{_render_ml_metrics(metrics)}</section>'
     )
-
-    # Feature selection panel — shown when feature_selection.json exists
-    model_dir_for_fs = values.get("model_out_dir") or ""
-    fs_data = _load_feature_selection(model_dir_for_fs) if model_dir_for_fs else None
-    if fs_data:
-        fs_content = _render_feature_selection_panel(fs_data)
-        parts.append(
-            '<section class="card">'
-            '<div class="card__header"><div>'
-            '<p class="eyebrow">Feature selection</p>'
-            "<h2>Principled feature selection (H3)</h2>"
-            '<p class="kicker">SHAP-ranked feature subsets — smallest set retaining &#x2265;90% of full-model average precision.</p>'
-            '</div><span class="pill pill--muted">Empirical H3 test</span></div>'
-            + fs_content
-            + "</section>"
-        )
-    else:
-        if model_dir_for_fs:
-            parts.append(
-                '<section class="card">'
-                '<div class="card__header"><div>'
-                '<p class="eyebrow">Feature selection</p>'
-                "<h2>Principled feature selection (H3)</h2>"
-                '</div><span class="pill pill--muted">Not yet run</span></div>'
-                '<p class="muted" style="padding:.6rem 0">Run '
-                "<strong>canary train feature-select --model-dir "
-                + _escape(model_dir_for_fs)
-                + "</strong> to generate the feature selection report.</p>"
-                "</section>"
-            )
-
     parts.append("</div>")
     return "".join(parts)
 
@@ -2604,8 +2452,6 @@ def render_page(
     plugin_options: list[str] | None = None,
     score_result: dict[str, Any] | None = None,
     score_error: str | None = None,
-    data_result: dict[str, Any] | None = None,
-    data_error: str | None = None,
     ml_result: dict[str, Any] | None = None,
     ml_error: str | None = None,
     latest_metrics: dict[str, Any] | None = None,
@@ -2615,9 +2461,10 @@ def render_page(
     plugin_options = plugin_options or []
     model_dir_options = model_dir_options or []
     active_tab = values.get("active_tab") or "score"
+    if active_tab not in VALID_TABS:
+        active_tab = "score"
     tabs = [
         ("score", "Scoring", "Plugin score and rationale"),
-        ("data", "Data collection", "Run collection and monthly prep"),
         ("ml", "Machine learning", "Train baseline and review metrics"),
     ]
     tab_links = "".join(
@@ -2629,8 +2476,6 @@ def render_page(
         active_panel_html = _render_score_section(
             values, plugin_options, score_result, score_error, model_dir_options
         )
-    elif active_tab == "data":
-        active_panel_html = _render_data_tab(values, plugin_options, data_result, data_error)
     else:
         active_panel_html = _render_ml_tab(
             values, ml_result, ml_error, latest_metrics, model_dir_options
@@ -2703,9 +2548,10 @@ def _prepare_request_state(
     values: dict[str, Any],
 ) -> tuple[list[str], dict[str, Any] | None, list[str]]:
     active_tab = values.get("active_tab") or "score"
-    plugin_options = (
-        _load_plugin_choices(values["registry_path"]) if active_tab in {"score", "data"} else []
-    )
+    if active_tab not in VALID_TABS:
+        active_tab = "score"
+        values["active_tab"] = active_tab
+    plugin_options = _load_plugin_choices(values["registry_path"]) if active_tab == "score" else []
     latest_metrics = None
     # Always discover model dirs — needed by both the ML tab and the Score tab dropdown
     model_dir_options: list[str] = _discover_model_output_dirs()
@@ -2724,7 +2570,7 @@ def _public_validation_error(path: str) -> str:
     if path == "/score":
         return "The scoring request could not be completed. Check the form values and try again."
     if path == "/run":
-        return "The data collection request could not be completed. Check the form values and try again."
+        return "Data collection is not available in this web deployment."
     return (
         "The machine learning request could not be completed. Check the form values and try again."
     )
@@ -2747,12 +2593,15 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
     plugin_options, latest_metrics, model_dir_options = _prepare_request_state(values)
     score_result = None
     score_error = None
-    data_result = None
-    data_error = None
     ml_result = None
     ml_error = None
 
-    if method == "POST" and path in {"/score", "/run", "/train"}:
+    # /run (data collection) is disabled in the public deployment
+    if path == "/run":
+        start_response("404 Not Found", [("Content-Type", "text/plain; charset=utf-8")])
+        return [b"Not found"]
+
+    if method == "POST" and path in {"/score", "/train"}:
         form = parse_form(environ)
         values = _merge_defaults(form)
         plugin_options, latest_metrics, model_dir_options = _prepare_request_state(values)
@@ -2785,10 +2634,6 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 else:
                     score_result["ml"] = None
                 values["active_tab"] = "score"
-            elif path == "/run":
-                command = values["command"]
-                data_result = _run_data_action(command, form)
-                values["active_tab"] = "data"
             else:
                 ml_action = (form.get("ml_action") or "train").strip().lower()
                 if ml_action == "load":
@@ -2803,9 +2648,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
             if path == "/score":
                 score_error = _public_validation_error(path)
                 values["active_tab"] = "score"
-            elif path == "/run":
-                data_error = _public_validation_error(path)
-                values["active_tab"] = "data"
+
             else:
                 ml_error = _public_validation_error(path)
                 values["active_tab"] = "ml"
@@ -2817,9 +2660,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
             if path == "/score":
                 score_error = public_error
                 values["active_tab"] = "score"
-            elif path == "/run":
-                data_error = public_error
-                values["active_tab"] = "data"
+
             else:
                 ml_error = public_error
                 values["active_tab"] = "ml"
@@ -2829,8 +2670,6 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         plugin_options=plugin_options,
         score_result=score_result,
         score_error=score_error,
-        data_result=data_result,
-        data_error=data_error,
         ml_result=ml_result,
         ml_error=ml_error,
         latest_metrics=latest_metrics,

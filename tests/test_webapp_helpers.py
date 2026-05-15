@@ -514,7 +514,7 @@ def test_unknown_route_returns_200_with_main_page() -> None:
     assert "CANARY" in text
 
 
-def test_tab_query_string_selects_data_tab() -> None:
+def test_tab_query_string_unsupported_tab_falls_back_to_score() -> None:
     environ: dict = {
         "REQUEST_METHOD": "GET",
         "PATH_INFO": "/",
@@ -533,7 +533,7 @@ def test_tab_query_string_selects_data_tab() -> None:
     response = b"".join(app(environ, start_response))
     text = response.decode("utf-8")
     assert status == "200 OK"
-    assert "Data collection" in text
+    assert "Score a plugin" in text
 
 
 def test_tab_query_string_selects_ml_tab() -> None:

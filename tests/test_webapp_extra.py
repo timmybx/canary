@@ -510,7 +510,7 @@ def test_render_page_score_tab_default():
 
 def test_render_page_data_tab():
     html = render_page({"active_tab": "data"})
-    assert "data" in html.lower()
+    assert "Score a plugin" in html
 
 
 def test_render_page_ml_tab():
@@ -546,9 +546,9 @@ def test_render_page_score_error_escaped():
     assert '<div class="notice"><script>' not in html
 
 
-def test_render_page_data_error_shown():
-    html = render_page({"active_tab": "data"}, data_error="Data error occurred")
-    assert "Data error occurred" in html
+def test_render_page_ml_error_shown():
+    html = render_page({"active_tab": "ml"}, ml_error="ML error occurred")
+    assert "ML error occurred" in html
 
 
 def test_render_page_contains_csrf_free_form():
@@ -597,7 +597,7 @@ def test_app_data_tab_query_param():
     status, _, body = _run_app("GET", "/", query_string="tab=data")
     text = body.decode("utf-8")
     assert status == "200 OK"
-    assert "data" in text.lower()
+    assert "Score a plugin" in text
 
 
 def test_app_ml_tab_query_param():
@@ -641,7 +641,7 @@ def test_app_post_score_unknown_plugin(tmp_path, monkeypatch):
 
 
 def test_app_post_run_collect_registry(monkeypatch):
-    """POST to /run with collect-registry command should invoke the handler."""
+    """POST to /run is disabled in the public webapp."""
     captured: list[str] = []
 
     def fake_cmd(args) -> int:
@@ -652,14 +652,14 @@ def test_app_post_run_collect_registry(monkeypatch):
 
     body = b"command=collect-registry&real=false&page_size=10"
     status, _, response = _run_app("POST", "/run", body)
-    assert status == "200 OK"
-    assert len(captured) == 1
+    assert status == "404 Not Found"
+    assert response == b"Not found"
+    assert len(captured) == 0
 
 
 def test_app_post_run_collect_github_missing_plugin(monkeypatch):
     body = b"command=collect-github&plugin="
     status, _, response = _run_app("POST", "/run", body)
     text = response.decode("utf-8")
-    assert status == "200 OK"
-    # Should return validation error
-    assert "data collection" in text.lower() or "CANARY" in text
+    assert status == "404 Not Found"
+    assert text == "Not found"
