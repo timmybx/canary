@@ -45,9 +45,10 @@
 #
 # Estimated wall time (Docker, single machine)
 # --------------------------------------------
-#   Logistic experiments (~12):   ~6 min
-#   Tree model experiments (~17): ~50 min
-#   Total:                        ~1 hour
+#   Logistic experiments (~12):        ~6 min
+#   Tree model experiments (~17):     ~50 min
+#   Feature selection (4 runs × ~7):  ~30 min
+#   Total:                            ~90 min
 #
 # =============================================================================
 set -euo pipefail
@@ -146,6 +147,41 @@ _train() {
 
   echo ""
   echo "--- $(date '+%H:%M:%S') | model=$model split=$split out=$(basename "$out_dir") ---"
+  _run "${cmd[@]}"
+}
+
+_feature_select() {
+  # _feature_select <model_dir> [split_strategy]
+  #
+  # Runs `canary train feature-select` against an already-trained model.
+  # Uses the same IN_PATH, TARGET_COL, TEST_START_MONTH, and split settings
+  # that were used to train the model so results are directly comparable.
+  #
+  # Only run after full-feature models where the feature set is large enough
+  # to rank and the test set has enough positives for stable AP estimates.
+  local out_dir="$1"
+  local split="${2:-time}"
+
+  local cmd=(
+    docker compose run --rm canary
+    canary train feature-select
+    --model-dir        "$out_dir"
+    --in-path          "$IN_PATH"
+    --target-col       "$TARGET_COL"
+    --test-start-month "$TEST_START_MONTH"
+    --split-strategy   "$split"
+    --random-seed      "$RANDOM_SEED"
+  )
+
+  if [[ "$split" == "group" || "$split" == "group_time" ]]; then
+    cmd+=(
+      --group-col     "$GROUP_COL"
+      --test-fraction "$PLUGIN_TEST_FRACTION"
+    )
+  fi
+
+  echo ""
+  echo "--- $(date '+%H:%M:%S') | feature-select out=$(basename "$out_dir") ---"
   _run "${cmd[@]}"
 }
 
@@ -248,6 +284,12 @@ if _section_active 2; then
   _train xgboost time "$GHARCHIVE_ONLY" "$MODEL_BASE/xgb_6m_gharchive_only_time"
   _train xgboost time "$FULL_NO_TIME"   "$MODEL_BASE/xgb_6m_full_no_time_time"
   _train xgboost time "$FULL_CLEANED"   "$MODEL_BASE/xgb_6m_full_cleaned_time"
+
+  # Feature selection on the two full-feature XGBoost models.
+  # xgb_full_cleaned_time is the primary H3 test (includes window features).
+  # xgb_full_no_time_time is the methodologically cleaner reference (no window features).
+  _feature_select "$MODEL_BASE/xgb_6m_full_cleaned_time" time
+  _feature_select "$MODEL_BASE/xgb_6m_full_no_time_time" time
 fi
 
 # =============================================================================
@@ -268,6 +310,9 @@ if _section_active 3; then
   _train lightgbm time "$SWH_ONLY"     "$MODEL_BASE/lgb_6m_swh_only_time"
   _train lightgbm time "$FULL_NO_TIME" "$MODEL_BASE/lgb_6m_full_no_time_time"
   _train lightgbm time "$FULL_CLEANED" "$MODEL_BASE/lgb_6m_full_cleaned_time"
+
+  # Feature selection on LightGBM full model for cross-model comparison.
+  _feature_select "$MODEL_BASE/lgb_6m_full_cleaned_time" time
 fi
 
 # =============================================================================
@@ -287,6 +332,9 @@ if _section_active 4; then
 
   _train random_forest time "$SWH_ONLY"     "$MODEL_BASE/rf_6m_swh_only_time"
   _train random_forest time "$FULL_CLEANED" "$MODEL_BASE/rf_6m_full_cleaned_time"
+
+  # Feature selection on Random Forest full model — third ensemble comparison point.
+  _feature_select "$MODEL_BASE/rf_6m_full_cleaned_time" time
 fi
 
 # =============================================================================
@@ -391,4 +439,10 @@ echo "  xgb_6m_full_cleaned_gt"
 echo "  lgb_6m_swh_only_gt"
 echo "  lgb_6m_full_cleaned_gt"
 echo "  rf_6m_full_cleaned_gt"
+echo ""
+echo "Feature selection (H3 empirical test) — written to feature_selection.json"
+echo "  xgb_6m_full_cleaned_time    primary H3 test (full feature set)"
+echo "  xgb_6m_full_no_time_time    methodologically clean reference (no window features)"
+echo "  lgb_6m_full_cleaned_time    LightGBM cross-model comparison"
+echo "  rf_6m_full_cleaned_time     Random Forest cross-model comparison"
 echo "======================================================================="
