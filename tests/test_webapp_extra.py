@@ -16,7 +16,6 @@ from canary.webapp import (
     _merge_defaults,
     _metric_value,
     _model_output_dir_parts,
-    _namespace_for_data_action,
     _optional_str,
     _plugin_known,
     _public_validation_error,
@@ -105,9 +104,11 @@ def test_merge_defaults_returns_defaults_with_no_form():
 
 
 def test_merge_defaults_applies_form_values():
-    result = _merge_defaults({"plugin": "my-plugin", "sleep": "5"})
+    result = _merge_defaults(
+        {"plugin": "my-plugin", "model_out_dir_new": "data/processed/models/run"}
+    )
     assert result["plugin"] == "my-plugin"
-    assert result["sleep"] == "5"
+    assert result["model_out_dir_new"] == "data/processed/models/run"
 
 
 def test_merge_defaults_handles_bool_fields():
@@ -118,7 +119,7 @@ def test_merge_defaults_handles_bool_fields():
 
 def test_merge_defaults_uses_default_for_missing_keys():
     result = _merge_defaults({"plugin": "test"})
-    assert result["sleep"] == "0"  # default
+    assert result["model_out_dir"] == "data/processed/models/baseline_6m"
     assert result["plugin"] == "test"
 
 
@@ -391,11 +392,6 @@ def test_public_validation_error_score():
     assert "scoring" in msg.lower() or "score" in msg.lower()
 
 
-def test_public_validation_error_run():
-    msg = _public_validation_error("/run")
-    assert "collection" in msg.lower() or "data" in msg.lower()
-
-
 def test_public_validation_error_train():
     msg = _public_validation_error("/train")
     assert "machine learning" in msg.lower() or "ml" in msg.lower()
@@ -430,72 +426,6 @@ def test_plugin_known_in_registry(tmp_path: Path):
     )
     assert _plugin_known("cucumber-reports", str(registry)) is True
     assert _plugin_known("unknown-plugin", str(registry)) is False
-
-
-# ---------------------------------------------------------------------------
-# _namespace_for_data_action
-# ---------------------------------------------------------------------------
-
-
-def test_namespace_for_data_action_collect_registry():
-    ns = _namespace_for_data_action("collect-registry", {"page_size": "1000", "real": "true"})
-    assert ns.page_size == 1000
-    assert ns.real is True
-
-
-def test_namespace_for_data_action_collect_plugin():
-    ns = _namespace_for_data_action("collect-plugin", {"plugin": "cucumber-reports"})
-    assert ns.id == "cucumber-reports"
-
-
-def test_namespace_for_data_action_collect_advisories():
-    ns = _namespace_for_data_action("collect-advisories", {"plugin": "my-plugin", "real": "true"})
-    assert ns.plugin == "my-plugin"
-    assert ns.real is True
-
-
-def test_namespace_for_data_action_collect_github():
-    ns = _namespace_for_data_action(
-        "collect-github",
-        {"plugin": "my-plugin", "github_timeout_s": "15", "github_max_pages": "3"},
-    )
-    assert ns.plugin == "my-plugin"
-    assert ns.timeout_s == 15.0
-    assert ns.max_pages == 3
-
-
-def test_namespace_for_data_action_collect_github_missing_plugin_raises():
-    with pytest.raises(ValueError, match="plugin ID"):
-        _namespace_for_data_action("collect-github", {})
-
-
-def test_namespace_for_data_action_collect_healthscore():
-    ns = _namespace_for_data_action("collect-healthscore", {"healthscore_timeout_s": "20"})
-    assert ns.timeout_s == 20.0
-
-
-def test_namespace_for_data_action_collect_enrich():
-    ns = _namespace_for_data_action("collect-enrich", {"real": "false"})
-    assert ns.real is False
-
-
-def test_namespace_for_data_action_build_monthly_features():
-    ns = _namespace_for_data_action(
-        "build-monthly-features",
-        {"monthly_start": "2025-01", "monthly_end": "2025-12"},
-    )
-    assert ns.start == "2025-01"
-    assert ns.end == "2025-12"
-
-
-def test_namespace_for_data_action_build_monthly_labels():
-    ns = _namespace_for_data_action("build-monthly-labels", {"horizons": "1,3,6"})
-    assert ns.horizons == "1,3,6"
-
-
-def test_namespace_for_data_action_unknown_raises():
-    with pytest.raises(ValueError, match="Unsupported data action"):
-        _namespace_for_data_action("unknown-command", {})
 
 
 # ---------------------------------------------------------------------------
@@ -640,24 +570,15 @@ def test_app_post_score_unknown_plugin(tmp_path, monkeypatch):
     assert "scoring request" in text.lower() or "CANARY" in text
 
 
-def test_app_post_run_collect_registry(monkeypatch):
+def test_app_post_run_collect_registry():
     """POST to /run is disabled in the public webapp."""
-    captured: list[str] = []
-
-    def fake_cmd(args) -> int:
-        captured.append("registry")
-        return 0
-
-    monkeypatch.setattr(webapp, "_cmd_collect_registry", fake_cmd)
-
     body = b"command=collect-registry&real=false&page_size=10"
     status, _, response = _run_app("POST", "/run", body)
     assert status == "404 Not Found"
     assert response == b"Not found"
-    assert len(captured) == 0
 
 
-def test_app_post_run_collect_github_missing_plugin(monkeypatch):
+def test_app_post_run_collect_github_missing_plugin():
     body = b"command=collect-github&plugin="
     status, _, response = _run_app("POST", "/run", body)
     text = response.decode("utf-8")

@@ -299,6 +299,15 @@ def run_feature_selection(
     # Cap sizes at the actual number of ranked features
     all_sizes = [s for s in all_sizes if s <= len(ranked_col_names)]
 
+    # Compute the full available feature set once — used to derive exclusion
+    # sets for each subset.  We do this outside the loop so it is not
+    # recomputed on every iteration.
+    all_available_cols: set[str] = set(_select_feature_columns(usable_rows, target_col=target_col))
+    LOGGER.info(
+        "Full available feature set: %d columns (excluding target and non-numeric).",
+        len(all_available_cols),
+    )
+
     subset_results: list[dict[str, Any]] = []
 
     for size in all_sizes:
@@ -314,28 +323,10 @@ def run_feature_selection(
         )
 
         try:
-            subset_metrics = train_model(
-                estimator=clone(estimator),
-                model_name=model_name,
-                in_path=in_path,
-                target_col=target_col,
-                out_dir=model_dir / f"feature_selection_{label}",
-                test_start_month=test_start_month,
-                extra_exclude=None,
-                # Restrict to only the top-N columns by passing them explicitly
-                # We achieve this by setting include_prefixes=None and letting
-                # the column list be pre-filtered via a custom exclude set
-                split_strategy=split_strategy,
-                group_col=group_col,
-                test_fraction=test_fraction,
-                random_seed=random_seed,
-            )
-            # Note: train_model uses _select_feature_columns which may pick up
-            # extra columns.  We need to force the exact subset.  Use the
-            # exclude mechanism: exclude everything NOT in subset_cols.
-            # Re-run with forced column set via extra_exclude:
-            all_available_cols = set(_select_feature_columns(usable_rows, target_col=target_col))
-            cols_to_exclude = all_available_cols - set(subset_cols)
+            # Exclude every available column that is NOT in this subset.
+            # For the full subset, extra_exclude is empty (train on everything).
+            cols_to_exclude = all_available_cols - set(subset_cols) if not is_full else None
+
             subset_metrics = train_model(
                 estimator=clone(estimator),
                 model_name=model_name,
@@ -384,7 +375,7 @@ def run_feature_selection(
             LOGGER.info("  %s: %d features%s", label, actual_features, status)
 
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("Subset '%s' failed: %s", label, exc)
+            LOGGER.warning("Subset '%s' failed: %s", label, exc, exc_info=True)
             subset_results.append(
                 {
                     "subset_label": label,

@@ -17,29 +17,12 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 from wsgiref.simple_server import make_server
 
-from canary.cli import (
-    _cmd_build_monthly_feature_bundle,
-    _cmd_build_monthly_labels,
-    _cmd_collect_advisories,
-    _cmd_collect_enrich,
-    _cmd_collect_github,
-    _cmd_collect_healthscore,
-    _cmd_collect_plugin,
-    _cmd_collect_registry,
-    _cmd_train_baseline,
-)
-from canary.plugin_aliases import canonicalize_plugin_id
+from canary.cli import _cmd_train_baseline
 from canary.scoring.baseline import ScoreResult, score_plugin_baseline
 from canary.scoring.ml import MLScorer, MLScoreResult, load_ml_scorer, score_plugin_ml
 
-DEFAULT_DATA_DIR = "data/raw"
 DEFAULT_REGISTRY_PATH = "data/raw/registry/plugins.jsonl"
-DEFAULT_MONTHLY_FEATURES_PATH = "data/processed/features/plugins.monthly.features.jsonl"
-DEFAULT_MONTHLY_FEATURES_CSV = "data/processed/features/plugins.monthly.features.csv"
-DEFAULT_MONTHLY_FEATURES_SUMMARY = "data/processed/features/plugins.monthly.features.summary.json"
 DEFAULT_LABELED_PATH = "data/processed/features/plugins.monthly.labeled.jsonl"
-DEFAULT_LABELED_CSV = "data/processed/features/plugins.monthly.labeled.csv"
-DEFAULT_LABELED_SUMMARY = "data/processed/features/plugins.monthly.labeled.summary.json"
 DEFAULT_MODEL_DIR = "data/processed/models/baseline_6m"
 MODEL_OUTPUTS_ROOT = Path("data/processed/models").resolve()
 MODEL_OUTPUTS_ROOT_PARTS = Path("data/processed/models").parts
@@ -49,35 +32,9 @@ MODEL_OUTPUT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 DEFAULTS: dict[str, Any] = {
     "active_tab": "score",
     "plugin": "",
-    "data_dir": DEFAULT_DATA_DIR,
     "real": True,
     "overwrite": False,
-    "out_dir": "data/raw/plugins",
     "registry_path": DEFAULT_REGISTRY_PATH,
-    "max_plugins": "",
-    "sleep": "0",
-    "repo_url": "",
-    "timeout_s": "30",
-    "page_size": "2500",
-    "raw_out": "",
-    "out_name": "plugins.jsonl",
-    "github_out_dir": "data/raw/github",
-    "github_timeout_s": "20",
-    "github_max_pages": "5",
-    "github_commits_days": "365",
-    "only": "",
-    "healthscore_timeout_s": "30",
-    "command": "collect-registry",
-    "monthly_start": "2025-01",
-    "monthly_end": "2025-12",
-    "monthly_out": DEFAULT_MONTHLY_FEATURES_PATH,
-    "monthly_out_csv": DEFAULT_MONTHLY_FEATURES_CSV,
-    "monthly_summary_out": DEFAULT_MONTHLY_FEATURES_SUMMARY,
-    "labeled_in_path": DEFAULT_MONTHLY_FEATURES_PATH,
-    "labeled_out_path": DEFAULT_LABELED_PATH,
-    "labeled_out_csv_path": DEFAULT_LABELED_CSV,
-    "labeled_summary_path": DEFAULT_LABELED_SUMMARY,
-    "horizons": "1,3,6,12",
     "target_col": "label_advisory_within_6m",
     "model_in_path": DEFAULT_LABELED_PATH,
     "model_out_dir": DEFAULT_MODEL_DIR,
@@ -371,94 +328,6 @@ def _capture_command(func: Any, args: argparse.Namespace) -> dict[str, Any]:
     return {"exit_code": exit_code, "output": buffer.getvalue().strip()}
 
 
-def _namespace_for_data_action(command_name: str, form: dict[str, str]) -> argparse.Namespace:
-    if command_name == "collect-registry":
-        return argparse.Namespace(
-            out_dir="data/raw/registry",
-            out_name=(form.get("out_name") or "plugins.jsonl").strip(),
-            raw_out=_optional_str(form.get("raw_out") or ""),
-            page_size=int((form.get("page_size") or "2500").strip()),
-            max_plugins=_optional_str(form.get("max_plugins") or ""),
-            timeout_s=float((form.get("timeout_s") or "30").strip()),
-            real=_bool_from_form(form.get("real")),
-        )
-    if command_name == "collect-plugin":
-        return argparse.Namespace(
-            id=_optional_str(form.get("plugin") or ""),
-            out_dir="data/raw/plugins",
-            repo_url=_optional_str(form.get("repo_url") or ""),
-            real=_bool_from_form(form.get("real")),
-            registry_path=(form.get("registry_path") or DEFAULT_REGISTRY_PATH).strip(),
-            max_plugins=_optional_str(form.get("max_plugins") or ""),
-            sleep=float((form.get("sleep") or "0").strip()),
-            overwrite=_bool_from_form(form.get("overwrite")),
-        )
-    if command_name == "collect-advisories":
-        return argparse.Namespace(
-            plugin=_optional_str(form.get("plugin") or ""),
-            data_dir=DEFAULT_DATA_DIR,
-            out_dir="data/raw/advisories",
-            real=_bool_from_form(form.get("real")),
-            registry_path=(form.get("registry_path") or DEFAULT_REGISTRY_PATH).strip(),
-            max_plugins=_optional_str(form.get("max_plugins") or ""),
-            sleep=float((form.get("sleep") or "0").strip()),
-            overwrite=_bool_from_form(form.get("overwrite")),
-        )
-    if command_name == "collect-github":
-        plugin = (form.get("plugin") or "").strip()
-        if not plugin:
-            raise ValueError("GitHub collection requires a plugin ID.")
-        return argparse.Namespace(
-            plugin=plugin,
-            data_dir=DEFAULT_DATA_DIR,
-            out_dir="data/raw/github",
-            timeout_s=float((form.get("github_timeout_s") or "20").strip()),
-            max_pages=int((form.get("github_max_pages") or "5").strip()),
-            commits_days=int((form.get("github_commits_days") or "365").strip()),
-            overwrite=_bool_from_form(form.get("overwrite")),
-        )
-    if command_name == "collect-healthscore":
-        return argparse.Namespace(
-            data_dir=DEFAULT_DATA_DIR,
-            timeout_s=float((form.get("healthscore_timeout_s") or "30").strip()),
-            overwrite=_bool_from_form(form.get("overwrite")),
-        )
-    if command_name == "collect-enrich":
-        return argparse.Namespace(
-            registry=(form.get("registry_path") or DEFAULT_REGISTRY_PATH).strip(),
-            data_dir=DEFAULT_DATA_DIR,
-            only=_optional_str(form.get("only") or ""),
-            max_plugins=_optional_str(form.get("max_plugins") or ""),
-            sleep=float((form.get("sleep") or "0").strip()),
-            real=_bool_from_form(form.get("real")),
-            github_timeout_s=float((form.get("github_timeout_s") or "20").strip()),
-            github_max_pages=int((form.get("github_max_pages") or "5").strip()),
-            github_commits_days=int((form.get("github_commits_days") or "365").strip()),
-            healthscore_timeout_s=float((form.get("healthscore_timeout_s") or "30").strip()),
-        )
-    if command_name == "build-monthly-features":
-        return argparse.Namespace(
-            data_raw_dir=DEFAULT_DATA_DIR,
-            registry=(form.get("registry_path") or DEFAULT_REGISTRY_PATH).strip(),
-            start=(form.get("monthly_start") or "2025-01").strip(),
-            end=(form.get("monthly_end") or "2025-12").strip(),
-            out=(form.get("monthly_out") or DEFAULT_MONTHLY_FEATURES_PATH).strip(),
-            out_csv=(form.get("monthly_out_csv") or DEFAULT_MONTHLY_FEATURES_CSV).strip(),
-            summary_out=(
-                form.get("monthly_summary_out") or DEFAULT_MONTHLY_FEATURES_SUMMARY
-            ).strip(),
-        )
-    if command_name == "build-monthly-labels":
-        return argparse.Namespace(
-            in_path=(form.get("labeled_in_path") or DEFAULT_MONTHLY_FEATURES_PATH).strip(),
-            out_path=(form.get("labeled_out_path") or DEFAULT_LABELED_PATH).strip(),
-            out_csv_path=(form.get("labeled_out_csv_path") or DEFAULT_LABELED_CSV).strip(),
-            summary_path=(form.get("labeled_summary_path") or DEFAULT_LABELED_SUMMARY).strip(),
-            horizons=(form.get("horizons") or "1,3,6,12").strip(),
-        )
-    raise ValueError(f"Unsupported data action: {command_name}")
-
-
 def _namespace_for_train(form: dict[str, str]) -> argparse.Namespace:
     # Prefer the "new directory" text input when the user has filled it in
     _raw_dir = (
@@ -477,144 +346,6 @@ def _namespace_for_train(form: dict[str, str]) -> argparse.Namespace:
     )
 
 
-def _argv_preview_data(command_name: str, args: argparse.Namespace) -> list[str]:
-    if command_name == "collect-registry":
-        parts = [
-            "--out-dir",
-            args.out_dir,
-            "--out-name",
-            args.out_name,
-            "--page-size",
-            str(args.page_size),
-        ]
-        if args.raw_out:
-            parts += ["--raw-out", args.raw_out]
-        if args.max_plugins is not None:
-            parts += ["--max-plugins", str(args.max_plugins)]
-        parts += ["--timeout-s", str(args.timeout_s)]
-        if args.real:
-            parts.append("--real")
-        return parts
-    if command_name == "collect-plugin":
-        parts = [
-            "--out-dir",
-            args.out_dir,
-            "--registry-path",
-            args.registry_path,
-            "--sleep",
-            str(args.sleep),
-        ]
-        if args.id:
-            parts += ["--id", args.id]
-        if args.repo_url:
-            parts += ["--repo-url", args.repo_url]
-        if args.max_plugins is not None:
-            parts += ["--max-plugins", str(args.max_plugins)]
-        if args.real:
-            parts.append("--real")
-        if args.overwrite:
-            parts.append("--overwrite")
-        return parts
-    if command_name == "collect-advisories":
-        parts = [
-            "--data-dir",
-            args.data_dir,
-            "--out-dir",
-            args.out_dir,
-            "--registry-path",
-            args.registry_path,
-            "--sleep",
-            str(args.sleep),
-        ]
-        if args.plugin:
-            parts += ["--plugin", args.plugin]
-        if args.max_plugins is not None:
-            parts += ["--max-plugins", str(args.max_plugins)]
-        if args.real:
-            parts.append("--real")
-        if args.overwrite:
-            parts.append("--overwrite")
-        return parts
-    if command_name == "collect-github":
-        parts = [
-            "--plugin",
-            args.plugin,
-            "--data-dir",
-            args.data_dir,
-            "--out-dir",
-            args.out_dir,
-            "--timeout-s",
-            str(args.timeout_s),
-            "--max-pages",
-            str(args.max_pages),
-            "--commits-days",
-            str(args.commits_days),
-        ]
-        if args.overwrite:
-            parts.append("--overwrite")
-        return parts
-    if command_name == "collect-healthscore":
-        parts = ["--data-dir", args.data_dir, "--timeout-s", str(args.timeout_s)]
-        if args.overwrite:
-            parts.append("--overwrite")
-        return parts
-    if command_name == "collect-enrich":
-        parts = [
-            "--registry",
-            args.registry,
-            "--data-dir",
-            args.data_dir,
-            "--sleep",
-            str(args.sleep),
-            "--github-timeout-s",
-            str(args.github_timeout_s),
-            "--github-max-pages",
-            str(args.github_max_pages),
-            "--github-commits-days",
-            str(args.github_commits_days),
-            "--healthscore-timeout-s",
-            str(args.healthscore_timeout_s),
-        ]
-        if args.only:
-            parts += ["--only", args.only]
-        if args.max_plugins is not None:
-            parts += ["--max-plugins", str(args.max_plugins)]
-        if args.real:
-            parts.append("--real")
-        return parts
-    if command_name == "build-monthly-features":
-        return [
-            "--data-raw-dir",
-            args.data_raw_dir,
-            "--registry",
-            args.registry,
-            "--start",
-            args.start,
-            "--end",
-            args.end,
-            "--out",
-            args.out,
-            "--out-csv",
-            args.out_csv,
-            "--summary-out",
-            args.summary_out,
-        ]
-    if command_name == "build-monthly-labels":
-        return [
-            "--in-path",
-            args.in_path,
-            "--out-path",
-            args.out_path,
-            "--out-csv-path",
-            args.out_csv_path,
-            "--summary-path",
-            args.summary_path,
-            "--horizons",
-            args.horizons,
-        ]
-    return []
-
-
 def _argv_preview_train(args: argparse.Namespace) -> list[str]:
     parts = [
         "--in-path",
@@ -631,33 +362,6 @@ def _argv_preview_train(args: argparse.Namespace) -> list[str]:
     if args.include_prefixes:
         parts += ["--include-prefixes", args.include_prefixes]
     return parts
-
-
-def _run_data_action(command_name: str, form: dict[str, str]) -> dict[str, Any]:
-    handlers: dict[str, tuple[Any, list[str]]] = {
-        "collect-registry": (_cmd_collect_registry, ["canary", "collect", "registry"]),
-        "collect-plugin": (_cmd_collect_plugin, ["canary", "collect", "plugin"]),
-        "collect-advisories": (_cmd_collect_advisories, ["canary", "collect", "advisories"]),
-        "collect-github": (_cmd_collect_github, ["canary", "collect", "github"]),
-        "collect-healthscore": (_cmd_collect_healthscore, ["canary", "collect", "healthscore"]),
-        "collect-enrich": (_cmd_collect_enrich, ["canary", "collect", "enrich"]),
-        "build-monthly-features": (
-            _cmd_build_monthly_feature_bundle,
-            ["canary", "build", "monthly-features"],
-        ),
-        "build-monthly-labels": (_cmd_build_monthly_labels, ["canary", "build", "monthly-labels"]),
-    }
-    handler, argv = handlers[command_name]
-    args = _namespace_for_data_action(command_name, form)
-    result = _capture_command(handler, args)
-    return {
-        "command": " ".join(
-            shlex.quote(part) for part in argv + _argv_preview_data(command_name, args)
-        ),
-        "exit_code": result["exit_code"],
-        "output": result["output"],
-        "action": command_name,
-    }
 
 
 def _run_train_action(form: dict[str, str]) -> dict[str, Any]:
@@ -698,24 +402,6 @@ def _run_load_metrics_action(form: dict[str, str]) -> dict[str, Any]:
 
 
 @lru_cache(maxsize=256)
-def _detect_available_files_cached(plugin_id: str) -> list[str]:
-    base = Path(DEFAULT_DATA_DIR)
-    plugin_id = canonicalize_plugin_id(plugin_id, data_dir=base)
-    candidates = [
-        base / "plugins" / f"{plugin_id}.snapshot.json",
-        base / "advisories" / f"{plugin_id}.advisories.real.jsonl",
-        base / "advisories" / f"{plugin_id}.advisories.sample.jsonl",
-        base / "github" / f"{plugin_id}.github_index.json",
-        base / "healthscore" / "plugins" / f"{plugin_id}.healthscore.json",
-    ]
-    return [str(path) for path in candidates if path.exists()]
-
-
-def _detect_available_files(plugin_id: str) -> list[str]:
-    return _detect_available_files_cached(plugin_id)
-
-
-@lru_cache(maxsize=32)
 def _load_registry_plugin_choices_cached(registry_path: str, mtime_ns: int) -> tuple[str, ...]:
     path = Path(registry_path)
     plugin_ids: list[str] = []
@@ -905,24 +591,6 @@ def _discover_model_output_dirs(base_dir: str | Path = "data/processed/models") 
     return _discover_model_output_dirs_cached(str(base.resolve()), tuple(signature))
 
 
-def _model_dir_picker(name: str, label: str, value: Any, model_dir_options: list[str]) -> str:
-    datalist_id = f"{name}-list"
-    options_html = "".join(
-        f'<option value="{_escape(path)}"></option>' for path in model_dir_options
-    )
-    note = (
-        '<span class="field-note">Choose an existing model run directory with a <code>metrics.json</code>, or enter a new output directory for training.</span>'
-        if model_dir_options
-        else '<span class="field-note">No existing model runs were discovered yet. Enter a directory to save a new run.</span>'
-    )
-    return (
-        f"<label>{_escape(label)}"
-        f'<input type="text" name="{_escape(name)}" value="{_escape(value)}" placeholder="data/processed/models/baseline_6m" list="{_escape(datalist_id)}" autocomplete="off" spellcheck="false">'
-        f'<datalist id="{_escape(datalist_id)}">{options_html}</datalist>'
-        f"{note}</label>"
-    )
-
-
 def _validation_script(plugin_options: list[str], active_tab: str) -> str:
     if not plugin_options:
         plugin_payload = "[]"
@@ -958,7 +626,6 @@ def _score_payload(result: ScoreResult) -> dict[str, Any]:
     payload = result.to_dict()
     payload["pretty_json"] = json.dumps(payload, indent=2, ensure_ascii=False)
     payload["pretty_features"] = json.dumps(payload["features"], indent=2, ensure_ascii=False)
-    payload["data_files"] = _detect_available_files(result.plugin)
     return payload
 
 
@@ -1071,7 +738,6 @@ def _render_score_section(
             '<form method="post" action="/score" class="form-grid" data-plugin-strict="true">',
             '<input type="hidden" name="active_tab" value="score">',
             _plugin_picker("plugin", "Plugin ID", values["plugin"], plugin_options),
-            _input_text("data_dir", "Data directory", values["data_dir"], readonly=True),
             _select(
                 "score_model_dir", "ML model", values.get("score_model_dir", ""), ml_model_options
             ),
@@ -1087,13 +753,6 @@ def _render_score_section(
     if score_result:
         # Heuristic score card — compact, with collapsible raw sections
         reasons_html = "".join(f"<li>{_escape(r)}</li>" for r in score_result["reasons"])
-        files_html = (
-            '<ul class="bullet-list">'
-            + "".join(f"<li><code>{_escape(p)}</code></li>" for p in score_result["data_files"])
-            + "</ul>"
-            if score_result["data_files"]
-            else '<p class="muted">No matching local files found.</p>'
-        )
         output_parts.append(
             '<section class="card">'
             '<div class="card__header"><div>'
@@ -1106,13 +765,11 @@ def _render_score_section(
             '<div class="metrics-row" style="margin-top:.8rem">'
             f'<div class="metric"><span class="metric__label">Reasons</span><span class="metric__value">{len(score_result["reasons"])}</span></div>'
             f'<div class="metric"><span class="metric__label">Features</span><span class="metric__value">{len(score_result["features"])}</span></div>'
-            f'<div class="metric"><span class="metric__label">Local files</span><span class="metric__value">{len(score_result["data_files"])}</span></div>'
             "</div>"
             f'<div class="panel" style="margin-top:.8rem"><h4>Why this score</h4><ul class="bullet-list">{reasons_html}</ul></div>'
             '<div style="margin-top:.8rem;display:grid;gap:.6rem">'
             f"<details><summary>Feature details ({len(score_result['features'])} keys)</summary><pre>{_escape(score_result['pretty_features'])}</pre></details>"
             f"<details><summary>JSON payload</summary><pre>{_escape(score_result['pretty_json'])}</pre></details>"
-            f"<details><summary>Detected local data files</summary>{files_html}</details>"
             "</div>"
             "</section>"
         )
@@ -1152,142 +809,6 @@ def _render_score_section(
     right_col = '<div class="score-output">' + "".join(output_parts) + "</div>"
 
     return '<div class="grid--score">' + form_card + right_col + "</div>"
-
-
-def _action_card(title: str, subtitle: str, form_html: str) -> str:
-    return f'<section class="action-card"><h3>{_escape(title)}</h3><p>{_escape(subtitle)}</p>{form_html}</section>'
-
-
-def _render_data_tab(
-    values: dict[str, Any],
-    plugin_options: list[str],
-    data_result: dict[str, Any] | None,
-    data_error: str | None,
-) -> str:
-    result_html = _render_command_result(data_result, "Action")
-    parts = [
-        '<div class="tab-summary card"><div class="card__header"><div><p class="eyebrow">Data pipeline</p><h2>Run a collection step</h2><p class="kicker">Run collection and preparation steps with a streamlined set of inputs while keeping standard output paths fixed.</p></div><span class="pill pill--muted">Pipeline actions</span></div></div>',
-        '<div class="action-grid">',
-    ]
-
-    parts.append(
-        _action_card(
-            "Registry",
-            "Refresh the Jenkins plugin universe snapshot.",
-            '<form method="post" action="/run" class="form-grid form-grid--dense">'
-            '<input type="hidden" name="active_tab" value="data">'
-            '<input type="hidden" name="command" value="collect-registry">'
-            f"{_input_text('page_size', 'Page size', values['page_size'])}"
-            f"{_input_text('max_plugins', 'Max plugins', values['max_plugins'], 'optional')}"
-            f"{_input_text('timeout_s', 'Timeout seconds', values['timeout_s'])}"
-            f"{_checkbox('real', 'Use live registry data', bool(values['real']))}"
-            '<button type="submit">Collect registry</button></form>',
-        )
-    )
-
-    parts.append(
-        _action_card(
-            "Plugin snapshot",
-            "Collect one plugin snapshot or bulk snapshots from the registry.",
-            '<form method="post" action="/run" class="form-grid form-grid--dense" data-plugin-strict="false">'
-            '<input type="hidden" name="active_tab" value="data">'
-            '<input type="hidden" name="command" value="collect-plugin">'
-            f"{_plugin_picker('plugin', 'Plugin ID (optional for single-plugin mode)', values['plugin'], plugin_options, note_mode='soft')}"
-            f"{_input_text('repo_url', 'Repo URL override', values['repo_url'], 'https://github.com/jenkinsci/...')}"
-            f"{_input_text('max_plugins', 'Max plugins', values['max_plugins'], 'optional')}"
-            f"{_input_text('sleep', 'Sleep seconds', values['sleep'])}"
-            f"{_checkbox('real', 'Use live snapshot data', bool(values['real']))}"
-            f"{_checkbox('overwrite', 'Overwrite existing files', bool(values['overwrite']))}"
-            '<button type="submit">Collect snapshot(s)</button></form>',
-        )
-    )
-
-    parts.append(
-        _action_card(
-            "Advisories",
-            "Collect advisories for one plugin or in bulk.",
-            '<form method="post" action="/run" class="form-grid form-grid--dense" data-plugin-strict="false">'
-            '<input type="hidden" name="active_tab" value="data">'
-            '<input type="hidden" name="command" value="collect-advisories">'
-            f"{_plugin_picker('plugin', 'Plugin ID (optional)', values['plugin'], plugin_options, note_mode='soft')}"
-            f"{_input_text('max_plugins', 'Max plugins', values['max_plugins'], 'optional')}"
-            f"{_input_text('sleep', 'Sleep seconds', values['sleep'])}"
-            f"{_checkbox('real', 'Use live advisories', bool(values['real']))}"
-            f"{_checkbox('overwrite', 'Overwrite existing files', bool(values['overwrite']))}"
-            '<button type="submit">Collect advisories</button></form>',
-        )
-    )
-
-    parts.append(
-        _action_card(
-            "GitHub",
-            "Collect GitHub activity and repository metadata for a plugin.",
-            '<form method="post" action="/run" class="form-grid form-grid--dense" data-plugin-strict="true">'
-            '<input type="hidden" name="active_tab" value="data">'
-            '<input type="hidden" name="command" value="collect-github">'
-            f"{_plugin_picker('plugin', 'Plugin ID', values['plugin'], plugin_options)}"
-            f"{_input_text('github_timeout_s', 'Timeout seconds', values['github_timeout_s'])}"
-            f"{_input_text('github_max_pages', 'Max pages', values['github_max_pages'])}"
-            f"{_input_text('github_commits_days', 'Commits lookback days', values['github_commits_days'])}"
-            f"{_checkbox('overwrite', 'Overwrite existing files', bool(values['overwrite']))}"
-            '<button type="submit">Collect GitHub data</button></form>',
-        )
-    )
-
-    parts.append(
-        _action_card(
-            "Health score + enrich",
-            "Refresh health score data or run the enrich batch flow.",
-            '<div class="result-stack">'
-            '<form method="post" action="/run" class="form-grid form-grid--dense">'
-            '<input type="hidden" name="active_tab" value="data">'
-            '<input type="hidden" name="command" value="collect-healthscore">'
-            f"{_input_text('healthscore_timeout_s', 'Timeout seconds', values['healthscore_timeout_s'])}"
-            f"{_checkbox('overwrite', 'Overwrite existing files', bool(values['overwrite']))}"
-            '<button type="submit">Collect health scores</button></form>'
-            '<form method="post" action="/run" class="form-grid form-grid--dense">'
-            '<input type="hidden" name="active_tab" value="data">'
-            '<input type="hidden" name="command" value="collect-enrich">'
-            f"{_select('only', 'Stage', values['only'], [('', 'Run all stages'), ('snapshot', 'snapshot'), ('advisories', 'advisories'), ('github', 'github'), ('healthscore', 'healthscore')])}"
-            f"{_input_text('max_plugins', 'Max plugins', values['max_plugins'], 'optional')}"
-            f"{_input_text('sleep', 'Sleep seconds', values['sleep'])}"
-            f"{_checkbox('real', 'Use live data', bool(values['real']))}"
-            '<button type="submit">Run enrich</button></form>'
-            "</div>",
-        )
-    )
-
-    parts.append(
-        _action_card(
-            "Monthly dataset build",
-            "Prepare the dense monthly features and labeled rows that feed the ML baseline.",
-            '<div class="result-stack">'
-            '<form method="post" action="/run" class="form-grid form-grid--dense">'
-            '<input type="hidden" name="active_tab" value="data">'
-            '<input type="hidden" name="command" value="build-monthly-features">'
-            f"{_input_text('monthly_start', 'Start month', values['monthly_start'], input_type='month')}"
-            f"{_input_text('monthly_end', 'End month', values['monthly_end'], input_type='month')}"
-            f"{_input_text('monthly_out', 'JSONL output', values['monthly_out'], readonly=True)}"
-            '<button type="submit">Build monthly features</button></form>'
-            '<form method="post" action="/run" class="form-grid form-grid--dense">'
-            '<input type="hidden" name="active_tab" value="data">'
-            '<input type="hidden" name="command" value="build-monthly-labels">'
-            f"{_input_text('labeled_in_path', 'Input features', values['labeled_in_path'], readonly=True)}"
-            f"{_input_text('horizons', 'Horizons (months)', values['horizons'])}"
-            f"{_input_text('labeled_out_path', 'Labeled output', values['labeled_out_path'], readonly=True)}"
-            '<button type="submit">Build monthly labels</button></form>'
-            "</div>",
-        )
-    )
-
-    parts.append("</div>")
-    if data_error:
-        parts.append(f'<div class="notice">{_escape(data_error)}</div>')
-    if result_html:
-        parts.append(
-            f'<section class="card"><div class="card__header"><div><p class="eyebrow">Latest action</p><h2>Console result</h2></div><span class="pill pill--muted">Exact CLI preview</span></div>{result_html}</section>'
-        )
-    return "".join(parts)
 
 
 def _metric_value(value: Any, *, digits: int = 3) -> str:
@@ -2503,8 +2024,7 @@ def render_page(
           </div>
         </div>
         <p class="hero__copy">
-          A lightweight zero-dependency web UI for scoring Jenkins plugins, running collection jobs,
-          and showing baseline ML results.
+          A lightweight web UI for scoring Jenkins plugins and exploring ML-based advisory risk.
         </p>
       </div>
     </header>
@@ -2569,8 +2089,6 @@ def _prepare_request_state(
 def _public_validation_error(path: str) -> str:
     if path == "/score":
         return "The scoring request could not be completed. Check the form values and try again."
-    if path == "/run":
-        return "Data collection is not available in this web deployment."
     return (
         "The machine learning request could not be completed. Check the form values and try again."
     )
@@ -2624,7 +2142,6 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                             score_plugin_ml(
                                 plugin,
                                 scorer=_ml_scorer,
-                                data_raw_dir=values.get("data_dir") or DEFAULT_DATA_DIR,
                             )
                         )
                         score_result["ml"] = ml_score_result
