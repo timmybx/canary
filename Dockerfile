@@ -17,9 +17,9 @@ RUN python -m pip install --no-cache-dir --require-hashes -r requirements-build.
 
 # OS deps (optional: pin version if you want full immutability)
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libatomic1 libgomp1 jq \
+ && apt-get install -y --no-install-recommends libatomic1 libgomp1 jq rsync \
  && rm -rf /var/lib/apt/lists/*
-
+ 
 # Install locked Python deps (immutable)
 COPY requirements.txt requirements-dev.txt /app/
 RUN python -m pip install --no-cache-dir --require-hashes -r requirements.txt \
