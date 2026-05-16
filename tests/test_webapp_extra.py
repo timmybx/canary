@@ -18,7 +18,6 @@ from canary.webapp import (
     _model_output_dir_parts,
     _optional_str,
     _plugin_known,
-    _public_validation_error,
     _render_confusion_matrix,
     _render_ml_metrics,
     _select,
@@ -105,10 +104,10 @@ def test_merge_defaults_returns_defaults_with_no_form():
 
 def test_merge_defaults_applies_form_values():
     result = _merge_defaults(
-        {"plugin": "my-plugin", "model_out_dir_new": "data/processed/models/run"}
+        {"plugin": "my-plugin", "score_model_dir": "data/processed/models/run"}
     )
     assert result["plugin"] == "my-plugin"
-    assert result["model_out_dir_new"] == "data/processed/models/run"
+    assert result["score_model_dir"] == "data/processed/models/run"
 
 
 def test_merge_defaults_handles_bool_fields():
@@ -382,28 +381,6 @@ def test_parse_form_invalid_content_length():
     assert result == {}
 
 
-# ---------------------------------------------------------------------------
-# _public_validation_error
-# ---------------------------------------------------------------------------
-
-
-def test_public_validation_error_score():
-    msg = _public_validation_error("/score")
-    assert "scoring" in msg.lower() or "score" in msg.lower()
-
-
-def test_public_validation_error_train():
-    msg = _public_validation_error("/train")
-    assert "machine learning" in msg.lower() or "ml" in msg.lower()
-
-
-def test_public_validation_error_other():
-    msg = _public_validation_error("/other")
-    assert isinstance(msg, str)
-    assert len(msg) > 0
-
-
-# ---------------------------------------------------------------------------
 # _plugin_known
 # ---------------------------------------------------------------------------
 
@@ -474,11 +451,6 @@ def test_render_page_score_error_escaped():
     assert "&lt;script&gt;" in html
     # The unescaped XSS payload should not appear in the notice element
     assert '<div class="notice"><script>' not in html
-
-
-def test_render_page_ml_error_shown():
-    html = render_page({"active_tab": "ml"}, ml_error="ML error occurred")
-    assert "ML error occurred" in html
 
 
 def test_render_page_contains_csrf_free_form():

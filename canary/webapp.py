@@ -1,28 +1,22 @@
 from __future__ import annotations
 
 # ruff: noqa: E501
-import argparse
 import html
-import io
 import json
 import logging
 import mimetypes
 import os
 import re
-import shlex
 import urllib.parse
-from contextlib import redirect_stdout
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol, cast
 from wsgiref.simple_server import make_server
 
-from canary.cli import _cmd_train_baseline
 from canary.scoring.baseline import ScoreResult, score_plugin_baseline
 from canary.scoring.ml import MLScorer, MLScoreResult, load_ml_scorer, score_plugin_ml
 
 DEFAULT_REGISTRY_PATH = "data/raw/registry/plugins.jsonl"
-DEFAULT_LABELED_PATH = "data/processed/features/plugins.monthly.labeled.jsonl"
 DEFAULT_MODEL_DIR = "data/processed/models/baseline_6m"
 MODEL_OUTPUTS_ROOT = Path("data/processed/models").resolve()
 MODEL_OUTPUTS_ROOT_PARTS = Path("data/processed/models").parts
@@ -35,15 +29,8 @@ DEFAULTS: dict[str, Any] = {
     "real": True,
     "overwrite": False,
     "registry_path": DEFAULT_REGISTRY_PATH,
-    "target_col": "label_advisory_within_6m",
-    "model_in_path": DEFAULT_LABELED_PATH,
     "model_out_dir": DEFAULT_MODEL_DIR,
-    "model_out_dir_new": "",
     "score_model_dir": DEFAULT_MODEL_DIR,
-    "test_start_month": "2025-10",
-    "exclude_cols": "",
-    "include_prefixes": "",
-    "ml_action": "train",
 }
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -321,87 +308,6 @@ def _merge_defaults(form: dict[str, str] | None = None) -> dict[str, Any]:
     return values
 
 
-def _capture_command(func: Any, args: argparse.Namespace) -> dict[str, Any]:
-    buffer = io.StringIO()
-    with redirect_stdout(buffer):
-        exit_code = int(func(args))
-    return {"exit_code": exit_code, "output": buffer.getvalue().strip()}
-
-
-def _namespace_for_train(form: dict[str, str]) -> argparse.Namespace:
-    # Prefer the "new directory" text input when the user has filled it in
-    _raw_dir = (
-        (form.get("model_out_dir_new") or "").strip()
-        or (form.get("model_out_dir") or "").strip()
-        or DEFAULT_MODEL_DIR
-    )
-    model_out_dir = _normalize_model_output_dir(_raw_dir)
-    return argparse.Namespace(
-        in_path=(form.get("model_in_path") or DEFAULT_LABELED_PATH).strip(),
-        target_col=(form.get("target_col") or "label_advisory_within_6m").strip(),
-        out_dir=model_out_dir,
-        test_start_month=(form.get("test_start_month") or "2025-10").strip(),
-        exclude_cols=(form.get("exclude_cols") or "").strip(),
-        include_prefixes=(form.get("include_prefixes") or "").strip(),
-    )
-
-
-def _argv_preview_train(args: argparse.Namespace) -> list[str]:
-    parts = [
-        "--in-path",
-        args.in_path,
-        "--target-col",
-        args.target_col,
-        "--out-dir",
-        args.out_dir,
-        "--test-start-month",
-        args.test_start_month,
-    ]
-    if args.exclude_cols:
-        parts += ["--exclude-cols", args.exclude_cols]
-    if args.include_prefixes:
-        parts += ["--include-prefixes", args.include_prefixes]
-    return parts
-
-
-def _run_train_action(form: dict[str, str]) -> dict[str, Any]:
-    args = _namespace_for_train(form)
-    result = _capture_command(_cmd_train_baseline, args)
-    metrics_path = _model_metrics_path(args.out_dir)
-    metrics = _load_model_metrics(args.out_dir)
-    return {
-        "command": " ".join(
-            shlex.quote(part)
-            for part in ["canary", "train", "baseline"] + _argv_preview_train(args)
-        ),
-        "exit_code": result["exit_code"],
-        "output": result["output"],
-        "metrics": metrics,
-        "metrics_path": str(metrics_path),
-        "action": "train",
-    }
-
-
-def _run_load_metrics_action(form: dict[str, str]) -> dict[str, Any]:
-    # Load metrics uses the dropdown selection only (must be an existing run)
-    out_dir = _normalize_model_output_dir(
-        (form.get("model_out_dir") or "").strip() or DEFAULT_MODEL_DIR
-    )
-    metrics_path = _model_metrics_path(out_dir)
-    metrics = _load_model_metrics(out_dir)
-    if not metrics:
-        raise ValueError(f"No metrics.json was found under {metrics_path}.")
-    return {
-        "command": f"load metrics from {metrics_path}",
-        "exit_code": 0,
-        "output": f"Loaded metrics from {metrics_path}",
-        "metrics": metrics,
-        "metrics_path": str(metrics_path),
-        "action": "load",
-    }
-
-
-@lru_cache(maxsize=256)
 def _load_registry_plugin_choices_cached(registry_path: str, mtime_ns: int) -> tuple[str, ...]:
     path = Path(registry_path)
     plugin_ids: list[str] = []
@@ -1887,84 +1793,88 @@ def _render_confusion_matrix(confusion: Any) -> str:
 
 def _render_ml_tab(
     values: dict[str, Any],
-    ml_result: dict[str, Any] | None,
-    ml_error: str | None,
     latest_metrics: dict[str, Any] | None,
     model_dir_options: list[str],
 ) -> str:
-    metrics = None
-    if ml_result and ml_result.get("metrics"):
-        metrics = ml_result["metrics"]
-    elif latest_metrics:
-        metrics = latest_metrics
+    """Read-only ML results tab — model selector + metrics display + feature selection."""
+    metrics = latest_metrics
 
-    parts = [
-        '<div class="grid--two">',
-        '<section class="card">',
-        '<div class="card__header"><div><p class="eyebrow">ML / evaluation</p><h2>Run the baseline model</h2><p class="kicker">Configure baseline training with a compact form and review the results in readable metric cards.</p></div><span class="pill">Training metrics</span></div>',
-        '<form method="post" action="/train" class="form-grid">',
-        '<input type="hidden" name="active_tab" value="ml">',
-        _input_text("model_in_path", "Labeled dataset", values["model_in_path"], readonly=True),
-        _select(
-            "target_col",
-            "Target label",
-            values["target_col"],
-            [
-                ("label_advisory_within_1m", "Advisory within 1 month"),
-                ("label_advisory_within_3m", "Advisory within 3 months"),
-                ("label_advisory_within_6m", "Advisory within 6 months"),
-                ("label_advisory_within_12m", "Advisory within 12 months"),
-            ],
-        ),
-        _input_text(
-            "test_start_month", "Test start month", values["test_start_month"], input_type="month"
-        ),
-        # Existing runs dropdown — for loading metrics or continuing from a saved run
-        _select(
-            "model_out_dir",
-            "Model directory",
-            values["model_out_dir"],
-            [("", "— select an existing run —")] + [(d, Path(d).name) for d in model_dir_options],
-        ),
-        _input_text(
-            "model_out_dir_new",
-            "Or enter a new output directory for training",
-            values.get("model_out_dir_new", ""),
-            "data/processed/models/my_run",
-        ),
-        _input_text(
-            "include_prefixes",
-            "Feature prefixes (optional)",
-            values["include_prefixes"],
-            "gharchive_,window_",
-        ),
-        _input_text(
-            "exclude_cols", "Extra excluded columns", values["exclude_cols"], "comma,separated"
-        ),
-        '<div class="button-row">'
-        '<button type="submit" name="ml_action" value="train">Train baseline</button>'
-        '<button type="submit" name="ml_action" value="load" class="secondary">Load metrics</button>'
-        "</div></form>",
-    ]
-    if ml_error:
-        parts.append(f'<div class="notice">{_escape(ml_error)}</div>')
-    if ml_result:
-        parts.append(_render_command_result(ml_result, "Training command"))
-    parts.append("</section>")
-
-    status_text = '<p class="muted">No metrics loaded yet.</p>'
-    if metrics:
-        source = (
-            ml_result.get("metrics_path")
-            if ml_result and ml_result.get("metrics_path")
-            else str(Path(values["model_out_dir"]) / "metrics.json")
-        )
-        status_text = f'<p class="small muted">Metrics source: <code>{_escape(source)}</code></p>'
-    parts.append(
-        f'<section class="card"><div class="card__header"><div><p class="eyebrow">Model performance</p><h2>Readable metrics</h2></div><span class="pill pill--muted">Metrics view</span></div>{status_text}{_render_ml_metrics(metrics)}</section>'
+    # ── Left column: model selector (read-only GET form) ─────────────────────
+    selector_card = "".join(
+        [
+            '<section class="card" style="align-self:start">',
+            '<div class="card__header"><div>',
+            '<p class="eyebrow">ML / evaluation</p>',
+            "<h2>Select a model</h2>",
+            '<p class="kicker">Choose a pre-trained model to view its metrics, '
+            "feature importance, and feature selection results.</p>",
+            '</div><span class="pill pill--muted">Results viewer</span></div>',
+            '<form method="get" action="/" class="form-grid">',
+            '<input type="hidden" name="tab" value="ml">',
+            _select(
+                "model_out_dir",
+                "Model directory",
+                values["model_out_dir"],
+                [("", "— select a model —")] + [(d, Path(d).name) for d in model_dir_options],
+            ),
+            '<button type="submit">Load metrics</button>',
+            "</form>",
+            "</section>",
+        ]
     )
-    parts.append("</div>")
-    return "".join(parts)
+
+    # ── Right column: metrics + feature selection ─────────────────────────────
+    output_parts: list[str] = []
+
+    status_text = '<p class="muted">Select a model directory on the left to view results.</p>'
+    if metrics:
+        source = str(Path(values["model_out_dir"]) / "metrics.json")
+        status_text = f'<p class="small muted">Metrics source: <code>{_escape(source)}</code></p>'
+
+    output_parts.append(
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">Model performance</p>'
+        "<h2>Readable metrics</h2>"
+        '</div><span class="pill pill--muted">Metrics view</span></div>'
+        + status_text
+        + _render_ml_metrics(metrics)
+        + "</section>"
+    )
+
+    # Feature selection panel — shown when feature_selection.json exists
+    model_dir_for_fs = values.get("model_out_dir") or ""
+    fs_data = None
+    if fs_data:
+        fs_content = ""
+        output_parts.append(
+            '<section class="card">'
+            '<div class="card__header"><div>'
+            '<p class="eyebrow">Feature selection</p>'
+            "<h2>Principled feature selection (H3)</h2>"
+            '<p class="kicker">SHAP-ranked feature subsets — smallest set retaining '
+            "&#x2265;90% of full-model average precision.</p>"
+            '</div><span class="pill pill--muted">Empirical H3 test</span></div>'
+            + fs_content
+            + "</section>"
+        )
+    elif model_dir_for_fs:
+        output_parts.append(
+            '<section class="card">'
+            '<div class="card__header"><div>'
+            '<p class="eyebrow">Feature selection</p>'
+            "<h2>Principled feature selection (H3)</h2>"
+            '</div><span class="pill pill--muted">Not yet run</span></div>'
+            '<p class="muted" style="padding:.6rem 0">Run '
+            "<strong>canary train feature-select --model-dir "
+            + _escape(model_dir_for_fs)
+            + "</strong> to generate the feature selection report.</p>"
+            "</section>"
+        )
+
+    right_col = '<div class="score-output">' + "".join(output_parts) + "</div>"
+
+    return '<div class="grid--score">' + selector_card + right_col + "</div>"
 
 
 def render_page(
@@ -1973,8 +1883,6 @@ def render_page(
     plugin_options: list[str] | None = None,
     score_result: dict[str, Any] | None = None,
     score_error: str | None = None,
-    ml_result: dict[str, Any] | None = None,
-    ml_error: str | None = None,
     latest_metrics: dict[str, Any] | None = None,
     model_dir_options: list[str] | None = None,
 ) -> str:
@@ -1986,7 +1894,7 @@ def render_page(
         active_tab = "score"
     tabs = [
         ("score", "Scoring", "Plugin score and rationale"),
-        ("ml", "Machine learning", "Train baseline and review metrics"),
+        ("ml", "Machine learning", "Model results and metrics"),
     ]
     tab_links = "".join(
         f'<a href="/?tab={_escape(tab_key)}" class="tab-link {"is-active" if tab_key == active_tab else ""}" data-tab-link="{_escape(tab_key)}"><strong>{_escape(title)}</strong><span>{_escape(subtitle)}</span></a>'
@@ -1998,9 +1906,7 @@ def render_page(
             values, plugin_options, score_result, score_error, model_dir_options
         )
     else:
-        active_panel_html = _render_ml_tab(
-            values, ml_result, ml_error, latest_metrics, model_dir_options
-        )
+        active_panel_html = _render_ml_tab(values, latest_metrics, model_dir_options)
     return f"""<!doctype html>
 <html lang="en">
   <head>
@@ -2075,23 +1981,15 @@ def _prepare_request_state(
     latest_metrics = None
     # Always discover model dirs — needed by both the ML tab and the Score tab dropdown
     model_dir_options: list[str] = _discover_model_output_dirs()
-    if active_tab == "ml":
+    if active_tab == "ml" and values.get("model_out_dir"):
         try:
             values["model_out_dir"] = _normalize_model_output_dir(
                 values.get("model_out_dir") or DEFAULT_MODEL_DIR
             )
+            latest_metrics = _load_model_metrics(values["model_out_dir"])
         except ValueError:
             values["model_out_dir"] = DEFAULT_MODEL_DIR
-        latest_metrics = _load_model_metrics(values["model_out_dir"])
     return plugin_options, latest_metrics, model_dir_options
-
-
-def _public_validation_error(path: str) -> str:
-    if path == "/score":
-        return "The scoring request could not be completed. Check the form values and try again."
-    return (
-        "The machine learning request could not be completed. Check the form values and try again."
-    )
 
 
 def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
@@ -2107,19 +2005,22 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         return _serve_static_asset(asset_name, start_response)
 
     query = urllib.parse.parse_qs(environ.get("QUERY_STRING", ""), keep_blank_values=True)
-    values = _merge_defaults({"active_tab": query.get("tab", [DEFAULTS["active_tab"]])[-1]})
+    values = _merge_defaults(
+        {
+            "active_tab": query.get("tab", [DEFAULTS["active_tab"]])[-1],
+            "model_out_dir": query.get("model_out_dir", [""])[-1],
+        }
+    )
     plugin_options, latest_metrics, model_dir_options = _prepare_request_state(values)
     score_result = None
     score_error = None
-    ml_result = None
-    ml_error = None
 
-    # /run (data collection) is disabled in the public deployment
-    if path == "/run":
+    # /run and /train are disabled in the public deployment
+    if path in {"/run", "/train"}:
         start_response("404 Not Found", [("Content-Type", "text/plain; charset=utf-8")])
         return [b"Not found"]
 
-    if method == "POST" and path in {"/score", "/train"}:
+    if method == "POST" and path == "/score":
         form = parse_form(environ)
         values = _merge_defaults(form)
         plugin_options, latest_metrics, model_dir_options = _prepare_request_state(values)
@@ -2151,24 +2052,12 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 else:
                     score_result["ml"] = None
                 values["active_tab"] = "score"
-            else:
-                ml_action = (form.get("ml_action") or "train").strip().lower()
-                if ml_action == "load":
-                    ml_result = _run_load_metrics_action(form)
-                else:
-                    ml_result = _run_train_action(form)
-                    model_dir_options = _discover_model_output_dirs()
-                latest_metrics = ml_result.get("metrics") or latest_metrics
-                values["active_tab"] = "ml"
         except ValueError as exc:
             logger.warning("Rejected webapp request for %s: %s", path, exc)
             if path == "/score":
-                score_error = _public_validation_error(path)
+                score_error = "The scoring request could not be completed. Check the form values and try again."
                 values["active_tab"] = "score"
 
-            else:
-                ml_error = _public_validation_error(path)
-                values["active_tab"] = "ml"
         except Exception:  # pragma: no cover
             logger.exception("Unhandled webapp error while processing %s", path)
             public_error = (
@@ -2178,17 +2067,11 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 score_error = public_error
                 values["active_tab"] = "score"
 
-            else:
-                ml_error = public_error
-                values["active_tab"] = "ml"
-
     html_body = render_page(
         values,
         plugin_options=plugin_options,
         score_result=score_result,
         score_error=score_error,
-        ml_result=ml_result,
-        ml_error=ml_error,
         latest_metrics=latest_metrics,
         model_dir_options=model_dir_options,
     )

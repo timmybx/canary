@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 from io import BytesIO
 from pathlib import Path
 
@@ -8,7 +7,6 @@ import pytest  # pyright: ignore[reportMissingImports]
 
 import canary.webapp as webapp
 from canary.webapp import (
-    _argv_preview_train,
     _load_plugin_choices,
     _normalize_model_output_dir,
     _plugin_known,
@@ -115,73 +113,6 @@ def test_load_plugin_choices_alphabetically_sorted(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _argv_preview_train
-# ---------------------------------------------------------------------------
-
-
-def test_argv_preview_train_basic() -> None:
-    args = argparse.Namespace(
-        in_path="data/processed/features/plugins.monthly.labeled.jsonl",
-        target_col="label_advisory_within_6m",
-        out_dir="data/processed/models/baseline_6m",
-        test_start_month="2025-10",
-        exclude_cols="",
-        include_prefixes="",
-    )
-    result = _argv_preview_train(args)
-    assert "--in-path" in result
-    assert "--target-col" in result
-    assert "--out-dir" in result
-    assert "--test-start-month" in result
-    assert "--exclude-cols" not in result
-    assert "--include-prefixes" not in result
-
-
-def test_argv_preview_train_with_exclude_cols() -> None:
-    args = argparse.Namespace(
-        in_path="data/processed/features/plugins.monthly.labeled.jsonl",
-        target_col="label_advisory_within_6m",
-        out_dir="data/processed/models/baseline_6m",
-        test_start_month="2025-10",
-        exclude_cols="col_a,col_b",
-        include_prefixes="",
-    )
-    result = _argv_preview_train(args)
-    assert "--exclude-cols" in result
-    assert "col_a,col_b" in result
-    assert "--include-prefixes" not in result
-
-
-def test_argv_preview_train_with_include_prefixes() -> None:
-    args = argparse.Namespace(
-        in_path="data/processed/features/plugins.monthly.labeled.jsonl",
-        target_col="label_advisory_within_6m",
-        out_dir="data/processed/models/baseline_6m",
-        test_start_month="2025-10",
-        exclude_cols="",
-        include_prefixes="gharchive_,window_",
-    )
-    result = _argv_preview_train(args)
-    assert "--include-prefixes" in result
-    assert "gharchive_,window_" in result
-    assert "--exclude-cols" not in result
-
-
-def test_argv_preview_train_with_both_filters() -> None:
-    args = argparse.Namespace(
-        in_path="data/processed/features/plugins.monthly.labeled.jsonl",
-        target_col="label_advisory_within_3m",
-        out_dir="data/processed/models/run2",
-        test_start_month="2024-01",
-        exclude_cols="col_x",
-        include_prefixes="snapshot_",
-    )
-    result = _argv_preview_train(args)
-    assert "--exclude-cols" in result
-    assert "--include-prefixes" in result
-
-
-# ---------------------------------------------------------------------------
 # _normalize_model_output_dir
 # ---------------------------------------------------------------------------
 
@@ -240,10 +171,10 @@ def test_data_get_returns_200() -> None:
     assert len(body) > 0
 
 
-def test_train_get_returns_200() -> None:
+def test_train_get_returns_404() -> None:
     status, _headers, body = _run_app("GET", "/train")
-    assert status == "200 OK"
-    assert len(body) > 0
+    assert status == "404 Not Found"
+    assert body == b"Not found"
 
 
 def test_favicon_ico_returns_200() -> None:
