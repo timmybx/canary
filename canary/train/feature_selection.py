@@ -68,9 +68,14 @@ def compute_shap_global_importance(
     Return features ranked by mean absolute SHAP value (descending).
 
     Window features are excluded from the returned ranking.
-    Falls back to built-in feature_importances_ / coef_ if SHAP is not
-    available or fails — so the study can still run without SHAP installed,
-    albeit with a less accurate ranking.
+
+    Random Forest models use sklearn's built-in feature_importances_ (mean
+    decrease in impurity) instead of SHAP TreeExplainer.  SHAP's exact
+    algorithm is O(TLD²) for tree ensembles and can take hours on a large RF;
+    MDI is instantaneous and is the standard ranking method for RF anyway.
+
+    Falls back to built-in feature_importances_ / coef_ for any model where
+    SHAP is unavailable or fails — so the study can always produce a ranking.
 
     Parameters
     ----------
@@ -98,6 +103,37 @@ def compute_shap_global_importance(
         X_imp = imputer_step.transform(X_test)
     else:
         X_imp = X_test.values
+
+    # --- Fast path for Random Forest -----------------------------------------
+    # SHAP TreeExplainer on a large Random Forest is O(TLD²) and can take
+    # hours on a full test set.  sklearn's feature_importances_ (mean decrease
+    # in impurity, MDI) is computed instantly and gives an equivalent ranking
+    # for RF — it is the standard approach and is methodologically defensible.
+    # XGBoost and LightGBM are fast enough for exact SHAP and benefit more
+    # from it, so only RF gets this short-circuit.
+    clf_for_check = model_step
+    if hasattr(clf_for_check, "named_steps"):
+        clf_for_check = list(clf_for_check.named_steps.values())[-1]
+
+    if "Forest" in type(clf_for_check).__name__ and hasattr(clf_for_check, "feature_importances_"):
+        LOGGER.info(
+            "Random Forest detected — using feature_importances_ (MDI) instead of "
+            "SHAP TreeExplainer.  SHAP is prohibitively slow for large RF ensembles; "
+            "MDI is the standard ranking method for Random Forest."
+        )
+        mean_abs = np.array(clf_for_check.feature_importances_)
+
+        pairs = [
+            (col, float(score))
+            for col, score in zip(feature_cols, mean_abs, strict=False)
+            if col not in _WINDOW_FEATURES
+        ]
+        pairs.sort(key=lambda x: x[1], reverse=True)
+
+        return [
+            {"feature": col, "mean_abs_shap": score, "rank": rank}
+            for rank, (col, score) in enumerate(pairs, start=1)
+        ]
 
     # --- SHAP path -----------------------------------------------------------
     try:
