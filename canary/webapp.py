@@ -625,12 +625,37 @@ def _render_score_section(
     score_error: str | None,
     model_dir_options: list[str] | None = None,
 ) -> str:
-    # Build model dropdown — all discovered dirs, no existence filter
+    # Build model dropdown with human-readable labels grouped by algorithm.
+    # Uses the same parser as the ML tab picker so names are consistent.
     from pathlib import Path as _Path
 
     ml_model_options: list[tuple[str, str]] = [("", "— none / heuristic only —")]
+
+    # Group parsed models by algorithm for a logical ordering
+    grouped: dict[str, list[tuple[str, str]]] = {a: [] for a in _ALGO_ORDER}
+    ungrouped: list[tuple[str, str]] = []
+
     for d in model_dir_options or []:
-        ml_model_options.append((d, _Path(d).name))
+        parsed = _parse_model_dir(d)
+        if parsed is not None:
+            algo, feat, split = parsed
+            feat_label = _FEATURE_LABELS.get(feat, feat)
+            split_label = _SPLIT_LABELS.get(split, split)
+            label = f"{feat_label}  ({split_label})"
+            grouped.setdefault(algo, []).append((d, label))
+        else:
+            # Fallback for dirs that don't match the naming convention
+            ungrouped.append((d, _Path(d).name))
+
+    for algo in _ALGO_ORDER:
+        entries = sorted(grouped.get(algo, []), key=lambda x: x[1])
+        if entries:
+            algo_label = _ALGO_LABELS.get(algo, algo)
+            for val, label in entries:
+                ml_model_options.append((val, f"{algo_label} — {label}"))
+
+    for val, label in ungrouped:
+        ml_model_options.append((val, label))
 
     # ── Left column: form card ────────────────────────────────────────────────
     form_card = "".join(
