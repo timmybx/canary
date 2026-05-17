@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 # ruff: noqa: E501
+import collections
 import html
 import json
 import logging
 import mimetypes
 import os
 import re
+import threading
+import time as _time
 import urllib.parse
 from functools import lru_cache
 from pathlib import Path
@@ -35,6 +38,14 @@ DEFAULTS: dict[str, Any] = {
 
 STATIC_DIR = Path(__file__).with_name("static")
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# In-page AI explanation — rate limiter constants
+# ---------------------------------------------------------------------------
+_EXPLAIN_RATE_LIMIT_LOCK = threading.Lock()
+_EXPLAIN_RATE_LIMIT: dict[str, list[float]] = collections.defaultdict(list)
+_EXPLAIN_RATE_WINDOW = 3600  # 1 hour window
+_EXPLAIN_RATE_MAX = 3  # max requests per IP per window
 
 
 class _WaitressServe(Protocol):
@@ -623,64 +634,57 @@ def _build_explain_prompt(
     score_result: dict[str, Any],
     ml: dict[str, Any] | None,
 ) -> str:
-    """
-    Build a plain-English prompt that summarises the CANARY score data
-    and asks an LLM to explain it to a security analyst.
-
-    The prompt is designed to be pasted into Claude, ChatGPT, or any
-    other LLM.  No API calls are made by the webapp itself.
-    """
-    lines: list[str] = []
-
-    lines.append(
-        "You are a cybersecurity analyst assistant.  A tool called CANARY has just "
-        "assessed the near-term advisory risk for a Jenkins plugin.  Please explain "
+    """Assemble a structured LLM prompt from the score data."""
+    lines: list[str] = [
+        "You are a cybersecurity analyst assistant. A tool called CANARY has just "
+        "assessed the near-term advisory risk for a Jenkins plugin. Please explain "
         "the results below in plain English for a software security analyst who is "
-        "not familiar with machine learning.  Focus on:"
-    )
-    lines.append("  1. What the overall risk level means practically")
-    lines.append("  2. The two or three most important reasons driving the score")
-    lines.append("  3. What concrete actions the analyst should consider")
-    lines.append("  4. Any caveats or limitations worth mentioning")
-    lines.append("")
-    lines.append("Keep the explanation concise — three to five short paragraphs.")
-    lines.append("")
-    lines.append("=" * 60)
-    lines.append(f"CANARY ASSESSMENT — Plugin: {plugin}")
-    lines.append("=" * 60)
-    lines.append("")
+        "not familiar with machine learning. Focus on:",
+        "  1. What the overall risk level means practically",
+        "  2. The two or three most important reasons driving the score",
+        "  3. What concrete actions the analyst should consider",
+        "  4. Any caveats or limitations worth mentioning",
+        "",
+        "Keep the explanation concise — three to five short paragraphs.",
+        "",
+        "=" * 60,
+        f"CANARY ASSESSMENT — Plugin: {plugin}",
+        "=" * 60,
+        "",
+    ]
 
-    # Heuristic score section
     score = score_result.get("score", "?")
     reasons = score_result.get("reasons", [])
     lines.append(f"HEURISTIC SCORE: {score} / 100")
     lines.append("")
     lines.append("Scoring rationale:")
     for r in reasons:
-        lines.append(f"  • {r}")
+        lines.append(f"  * {r}")
     lines.append("")
 
-    # Score components if present
     components = score_result.get("features", {}).get("score_components")
     if components:
         lines.append("Score breakdown by component:")
         for k, v in components.items():
-            lines.append(f"  • {k.replace('_', ' ').title()}: {v} pts")
+            lines.append(f"  * {k.replace('_', ' ').title()}: {v} pts")
         lines.append("")
 
-    # ML score section
     if ml:
         prob = ml.get("probability", "?")
         risk_cat = ml.get("risk_category", "?")
-        model_dir = ml.get("model_dir", "")
-        model_name = ml.get("model_name", "")
+        model_nm = ml.get("model_name", "")
+        model_dr = (ml.get("model_dir") or "").split("/")[-1]
+        try:
+            prob_pct = f"{float(prob) * 100:.1f}%"
+        except (TypeError, ValueError):
+            prob_pct = str(prob)
         lines.append(
-            f"ML ADVISORY RISK SCORE: {prob} ({float(prob) * 100:.1f}% probability of "
-            f"a security advisory within 180 days)"
+            f"ML ADVISORY RISK SCORE: {prob} ({prob_pct} probability of "
+            "a security advisory within 180 days)"
         )
         lines.append(f"Risk category: {risk_cat}")
-        if model_name:
-            lines.append(f"Model: {model_name} ({model_dir.split('/')[-1]})")
+        if model_nm:
+            lines.append(f"Model: {model_nm} ({model_dr})")
         lines.append("")
         drivers = ml.get("drivers") or []
         if drivers:
@@ -690,93 +694,216 @@ def _build_explain_prompt(
                 val = d.get("value")
                 dirn = d.get("direction", "")
                 arrow = (
-                    "▲ increases risk"
+                    "increases risk"
                     if dirn == "increases_risk"
-                    else ("▼ decreases risk" if dirn == "decreases_risk" else "— neutral")
+                    else "decreases risk"
+                    if dirn == "decreases_risk"
+                    else "neutral"
                 )
-                val_str = f"{val:.4g}" if val is not None else "n/a"
-                lines.append(f"  • {name} = {val_str}  [{arrow}]")
+                val_s = f"{val:.4g}" if val is not None else "n/a"
+                lines.append(f"  * {name} = {val_s}  [{arrow}]")
             lines.append("")
 
-    lines.append("=" * 60)
-    lines.append("Please provide your plain-English explanation now.")
-
+    lines += ["=" * 60, "Please provide your plain-English explanation now."]
     return "\n".join(lines)
 
 
-def _render_explain_card(plugin: str, score_result: dict[str, Any]) -> str:
-    """Render the Explain with AI card — copy-prompt approach, zero API cost."""
+def _check_explain_rate_limit(ip: str) -> bool:
+    """Return True if this IP is within the allowed request rate."""
+    now = _time.monotonic()
+    with _EXPLAIN_RATE_LIMIT_LOCK:
+        timestamps = _EXPLAIN_RATE_LIMIT[ip]
+        cutoff = now - _EXPLAIN_RATE_WINDOW
+        # Prune old timestamps
+        _EXPLAIN_RATE_LIMIT[ip] = [t for t in timestamps if t > cutoff]
+        if len(_EXPLAIN_RATE_LIMIT[ip]) >= _EXPLAIN_RATE_MAX:
+            return False
+        _EXPLAIN_RATE_LIMIT[ip].append(now)
+        return True
+
+
+def _call_anthropic_explain(prompt: str) -> str:
+    """
+    Call the Anthropic API and return the explanation text.
+    Uses a tight token cap to bound cost.
+    Raises on any API or network error.
+    """
+    import os
+    import urllib.parse
+    import urllib.request
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY environment variable is not set.")
+
+    payload = json.dumps(
+        {
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 500,
+            "system": (
+                "You are a concise cybersecurity analyst assistant. "
+                "Explain CANARY risk scores in plain English. "
+                "Keep responses to 3-5 short paragraphs. Be direct and actionable."
+            ),
+            "messages": [{"role": "user", "content": prompt}],
+        }
+    ).encode()
+
+    api_url = "https://api.anthropic.com/v1/messages"
+    parsed = urllib.parse.urlparse(api_url)
+    if parsed.scheme != "https" or parsed.netloc != "api.anthropic.com":
+        raise ValueError("Refusing to call non-allowlisted Anthropic API URL.")
+
+    req = urllib.request.Request(
+        api_url,
+        data=payload,
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
+        data = json.loads(resp.read().decode())
+
+    blocks = data.get("content") or []
+    return "\n\n".join(b["text"] for b in blocks if b.get("type") == "text").strip()
+
+
+def _render_explain_card(
+    plugin: str,
+    score_result: dict[str, Any],
+    ai_result: str | None = None,
+    ai_error: str | None = None,
+    rate_limited: bool = False,
+) -> str:
+    """
+    Render the Explain with AI card.
+    Shows copy-prompt buttons plus an optional in-page AI response panel.
+    """
     import urllib.parse as _up
 
     ml = score_result.get("ml")
     prompt = _build_explain_prompt(plugin, score_result, ml)
-    prompt_escaped = _escape(prompt)
 
     claude_url = "https://claude.ai/new?q=" + _up.quote(prompt, safe="")
     chatgpt_url = "https://chatgpt.com/?q=" + _up.quote(prompt, safe="")
 
     btn_copy = (
-        '<button type="button" id="explain-copy-btn"'
-        ' onclick="(function(btn){'
-        "navigator.clipboard.writeText(document.getElementById('explain-prompt').value)"
-        ".then(function(){var o=btn.textContent;btn.textContent='Copied!';"
-        "setTimeout(function(){btn.textContent=o;},2000);})"
-        ".catch(function(){document.getElementById('explain-prompt').select();"
+        '<button type="button"'
+        ' onclick="(function(b){navigator.clipboard.writeText('
+        "document.getElementById('ep').value)"
+        ".then(function(){var o=b.textContent;b.textContent='Copied!';"
+        "setTimeout(function(){b.textContent=o;},2000);})"
+        ".catch(function(){document.getElementById('ep').select();"
         "document.execCommand('copy');});})(this)\""
-        ' style="background:var(--accent);border:none;color:#fff;padding:.5rem 1rem;'
-        'border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem">'
-        "Copy prompt"
-        "</button>"
+        ' style="background:var(--accent);border:none;color:#fff;'
+        "padding:.45rem .9rem;border-radius:8px;cursor:pointer;"
+        'font-weight:600;font-size:.85rem">Copy prompt</button>'
     )
     btn_claude = (
         f'<a href="{claude_url}" target="_blank" rel="noopener noreferrer"'
-        ' style="display:inline-flex;align-items:center;gap:.4rem;'
+        ' style="display:inline-flex;align-items:center;'
         "background:rgba(204,153,51,.15);border:1px solid rgba(204,153,51,.3);"
-        "color:#cc9933;padding:.5rem 1rem;border-radius:8px;"
-        'text-decoration:none;font-weight:600;font-size:.9rem">'
-        "Open in Claude"
-        "</a>"
+        "color:#cc9933;padding:.45rem .9rem;border-radius:8px;"
+        'text-decoration:none;font-weight:600;font-size:.85rem">Open in Claude</a>'
     )
     btn_chatgpt = (
         f'<a href="{chatgpt_url}" target="_blank" rel="noopener noreferrer"'
-        ' style="display:inline-flex;align-items:center;gap:.4rem;'
+        ' style="display:inline-flex;align-items:center;'
         "background:rgba(16,163,127,.12);border:1px solid rgba(16,163,127,.3);"
-        "color:#10a37f;padding:.5rem 1rem;border-radius:8px;"
-        'text-decoration:none;font-weight:600;font-size:.9rem">'
-        "Open in ChatGPT"
-        "</a>"
+        "color:#10a37f;padding:.45rem .9rem;border-radius:8px;"
+        'text-decoration:none;font-weight:600;font-size:.85rem">Open in ChatGPT</a>'
     )
+
+    # In-page "Explain now" button — POSTs to /explain
+    btn_inpage = (
+        '<form method="post" action="/explain" style="display:inline">'
+        f'<input type="hidden" name="plugin" value="{_escape(plugin)}">'
+        '<input type="hidden" name="active_tab" value="score">'
+        f'<input type="hidden" name="score_model_dir" '
+        f'value="{_escape(score_result.get("score_model_dir") or "")}">'
+        '<button type="submit"'
+        ' style="background:rgba(120,80,220,.2);border:1px solid rgba(120,80,220,.4);'
+        "color:#a78bfa;padding:.45rem .9rem;border-radius:8px;cursor:pointer;"
+        'font-weight:600;font-size:.85rem">Explain now (AI)</button>'
+        "</form>"
+    )
+
     textarea = (
-        '<div style="margin-top:.4rem">'
-        '<textarea id="explain-prompt" readonly'
-        ' style="width:100%;min-height:220px;background:var(--panel2);'
-        "border:1px solid var(--line);border-radius:10px;padding:.75rem;"
-        "font-family:var(--mono);font-size:.78rem;line-height:1.5;"
-        'color:var(--text);resize:vertical;box-sizing:border-box">'
-        f"{prompt_escaped}"
-        "</textarea>"
-        "</div>"
+        '<details style="margin-top:.6rem">'
+        '<summary style="cursor:pointer;font-size:.82rem;color:var(--muted);'
+        'padding:.25rem 0">Show / edit raw prompt</summary>'
+        '<textarea id="ep" readonly'
+        ' style="width:100%;min-height:160px;margin-top:.4rem;'
+        "background:var(--panel2);border:1px solid var(--line);"
+        "border-radius:8px;padding:.6rem;font-family:var(--mono);"
+        "font-size:.75rem;line-height:1.5;color:var(--text);"
+        'resize:vertical;box-sizing:border-box">'
+        f"{_escape(prompt)}</textarea>"
+        "</details>"
     )
+
+    # In-page AI result panel
+    ai_panel = ""
+    if rate_limited:
+        ai_panel = (
+            '<div style="margin-top:.8rem;padding:.7rem .9rem;'
+            "background:rgba(220,80,60,.1);border:1px solid rgba(220,80,60,.3);"
+            'border-radius:8px;font-size:.88rem;color:#e05c5c">'
+            "Rate limit reached — you can request up to "
+            f"{_EXPLAIN_RATE_MAX} AI explanations per hour. "
+            "Use the Copy or Open buttons to continue in your own AI session."
+            "</div>"
+        )
+    elif ai_error:
+        ai_panel = (
+            '<div style="margin-top:.8rem;padding:.7rem .9rem;'
+            "background:rgba(220,80,60,.1);border:1px solid rgba(220,80,60,.3);"
+            'border-radius:8px;font-size:.88rem;color:#e05c5c">'
+            f"AI explanation error: {_escape(ai_error)}"
+            "</div>"
+        )
+    elif ai_result:
+        # Render the AI response — convert newlines to <p> tags
+        paras = "".join(
+            f"<p style='margin:.5rem 0'>{_escape(p.strip())}</p>"
+            for p in ai_result.split("\n\n")
+            if p.strip()
+        )
+        ai_panel = (
+            '<div style="margin-top:.8rem;padding:.8rem 1rem;'
+            "background:rgba(120,80,220,.08);border:1px solid rgba(120,80,220,.25);"
+            'border-radius:10px">'
+            '<p style="font-size:.78rem;color:#a78bfa;font-weight:600;margin:0 0 .5rem">'
+            "AI explanation (Claude)</p>"
+            f"{paras}"
+            "</div>"
+        )
+
     tip = (
-        '<p style="font-size:.78rem;color:var(--muted);margin-top:.5rem">'
-        "Tip: The &ldquo;Open in&rdquo; buttons pre-fill the prompt automatically. "
-        "You can also copy and edit the prompt before sending."
+        '<p style="font-size:.76rem;color:var(--muted);margin-top:.5rem">'
+        '"Explain now" uses the server API key (max 3/hr). '
+        '"Open in" buttons use your own account with no limits.'
         "</p>"
     )
 
     return (
-        '<section class="card">'
+        '<section class="card" style="align-self:start">'
         '<div class="card__header"><div>'
         '<p class="eyebrow">AI explanation</p>'
         "<h2>Explain this score</h2>"
-        '<p class="kicker">Copy the prompt below into any AI assistant for a plain-English '
-        "explanation of these results. No data leaves this page automatically.</p>"
+        '<p class="kicker">Get a plain-English summary from an AI assistant. '
+        "No data leaves automatically — you choose what to share.</p>"
         '</div><span class="pill pill--muted">Bring your own AI</span></div>'
-        '<div style="display:flex;gap:.75rem;flex-wrap:wrap;margin:.8rem 0">'
+        '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin:.7rem 0">'
+        + btn_inpage
         + btn_copy
         + btn_claude
         + btn_chatgpt
         + "</div>"
+        + ai_panel
         + textarea
         + tip
         + "</section>"
@@ -789,6 +916,9 @@ def _render_score_section(
     score_result: dict[str, Any] | None,
     score_error: str | None,
     model_dir_options: list[str] | None = None,
+    ai_result: str | None = None,
+    ai_error: str | None = None,
+    rate_limited: bool = False,
 ) -> str:
     # Build model dropdown with human-readable labels grouped by algorithm.
     # Uses the same parser as the ML tab picker so names are consistent.
@@ -840,6 +970,16 @@ def _render_score_section(
             '<button type="submit">Score plugin</button></form>',
             f'<div class="notice">{_escape(score_error)}</div>' if score_error else "",
             "</section>",
+            # Explain card always shown in left column after scoring
+            _render_explain_card(
+                score_result["plugin"],
+                score_result,
+                ai_result=ai_result,
+                ai_error=ai_error,
+                rate_limited=rate_limited,
+            )
+            if score_result
+            else "",
         ]
     )
 
@@ -894,9 +1034,6 @@ def _render_score_section(
                 "<strong>canary train baseline</strong> to create one.</p>"
                 "</section>"
             )
-
-        # AI explanation card — always shown after scoring
-        output_parts.append(_render_explain_card(score_result["plugin"], score_result))
     else:
         output_parts.append(
             '<section class="card">'
@@ -2344,6 +2481,9 @@ def render_page(
     score_error: str | None = None,
     latest_metrics: dict[str, Any] | None = None,
     model_dir_options: list[str] | None = None,
+    ai_result: str | None = None,
+    ai_error: str | None = None,
+    rate_limited: bool = False,
 ) -> str:
     values = {**DEFAULTS, **values}
     plugin_options = plugin_options or []
@@ -2362,7 +2502,14 @@ def render_page(
     active_panel_html = ""
     if active_tab == "score":
         active_panel_html = _render_score_section(
-            values, plugin_options, score_result, score_error, model_dir_options
+            values,
+            plugin_options,
+            score_result,
+            score_error,
+            model_dir_options,
+            ai_result=ai_result,
+            ai_error=ai_error,
+            rate_limited=rate_limited,
         )
     else:
         active_panel_html = _render_ml_tab(values, latest_metrics, model_dir_options)
@@ -2473,11 +2620,58 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
     plugin_options, latest_metrics, model_dir_options = _prepare_request_state(values)
     score_result = None
     score_error = None
+    ai_result: str | None = None
+    ai_error: str | None = None
+    rate_limited: bool = False
 
     # /run and /train are disabled in the public deployment
     if path in {"/run", "/train"}:
         start_response("404 Not Found", [("Content-Type", "text/plain; charset=utf-8")])
         return [b"Not found"]
+
+    if method == "POST" and path == "/explain":
+        form = parse_form(environ)
+        values = _merge_defaults(form)
+        plugin_options, latest_metrics, model_dir_options = _prepare_request_state(values)
+        # Re-score the plugin to get fresh score_result for the explain card
+        plugin = (form.get("plugin") or values.get("plugin") or "").strip()
+        if plugin:
+            try:
+                score_result = _score_payload(score_plugin_baseline(plugin, real=True))
+                _score_model_dir = values.get("score_model_dir") or values.get("model_dir") or ""
+                _ml_scorer = _get_ml_scorer(_score_model_dir) if _score_model_dir else None
+                if _ml_scorer is not None:
+                    try:
+                        ml_score_result = _ml_score_payload(
+                            score_plugin_ml(plugin, scorer=_ml_scorer)
+                        )
+                        score_result["ml"] = ml_score_result
+                    except Exception as _ml_exc:  # noqa: BLE001
+                        logger.warning("ML scoring failed for %s: %s", plugin, _ml_exc)
+                        score_result["ml"] = None
+                else:
+                    score_result["ml"] = None
+            except Exception as exc:  # noqa: BLE001
+                score_error = str(exc)
+        # Now call the Anthropic API with rate limiting
+        if score_result is not None:
+            client_ip = environ.get("HTTP_X_FORWARDED_FOR", "").split(",")[
+                0
+            ].strip() or environ.get("REMOTE_ADDR", "unknown")
+            if not _check_explain_rate_limit(client_ip):
+                rate_limited = True  # noqa: F841
+            else:
+                try:
+                    prompt = _build_explain_prompt(
+                        plugin,
+                        score_result,
+                        score_result.get("ml"),
+                    )
+                    ai_result = _call_anthropic_explain(prompt)  # noqa: F841
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Anthropic explain call failed: %s", exc)
+                    ai_error = "AI explanation unavailable — please use Copy or Open buttons."  # noqa: F841
+        values["active_tab"] = "score"
 
     if method == "POST" and path == "/score":
         form = parse_form(environ)
@@ -2533,6 +2727,9 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         score_error=score_error,
         latest_metrics=latest_metrics,
         model_dir_options=model_dir_options,
+        ai_result=ai_result,
+        ai_error=ai_error,
+        rate_limited=rate_limited,
     )
     start_response("200 OK", [("Content-Type", "text/html; charset=utf-8")])
     return [html_body.encode("utf-8")]
