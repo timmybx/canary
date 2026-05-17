@@ -1791,6 +1791,253 @@ def _render_confusion_matrix(confusion: Any) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Feature selection loader and renderer
+# ---------------------------------------------------------------------------
+
+
+def _load_feature_selection(model_out_dir: str | Path) -> dict[str, Any] | None:
+    """Load feature_selection.json from a model directory if it exists."""
+    try:
+        parts = _model_output_dir_parts(model_out_dir)
+    except ValueError:
+        return None
+    target = MODEL_OUTPUTS_ROOT.joinpath(*parts, "feature_selection.json")
+    if not target.exists():
+        return None
+    try:
+        return json.loads(target.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _render_feature_selection_panel(fs: dict[str, Any]) -> str:
+    """Render the feature selection results as a card body."""
+    full_n = fs.get("full_model_feature_count", "?")
+    full_ap = fs.get("full_model_average_precision")
+    h3_ok = fs.get("h3_satisfied", False)
+    h3_info = fs.get("h3_smallest_qualifying_subset")
+    results = fs.get("subset_results", [])
+    ranking = fs.get("feature_ranking", [])
+
+    if h3_ok and h3_info:
+        verdict_cls = "pill pill--warn"
+        verdict = (
+            f"H3 SATISFIED &#x2014; {h3_info['size']}-feature model retains "
+            f"{h3_info['ap_retention'] * 100:.1f}% of full AP "
+            f"({h3_info['average_precision']:.4f})"
+        )
+    else:
+        verdict_cls = "pill pill--muted"
+        verdict = "H3 not satisfied at evaluated subset sizes"
+
+    rows_html = ""
+    for res in results:
+        label = _escape(res.get("subset_label", "?"))
+        n = res.get("actual_feature_count", "?")
+        ap = res.get("average_precision")
+        ret = res.get("ap_retention_vs_full")
+        h3_flag = res.get("meets_h3_threshold")
+        ap_str = f"{ap:.4f}" if ap is not None else "n/a"
+        ret_str = f"{ret * 100:.1f}%" if ret is not None else "—"
+        h3_cell = (
+            '<span style="color:#5ce0a0;font-weight:700">&#x2713;</span>'
+            if h3_flag is True
+            else ('<span style="color:var(--muted)">&#x2014;</span>' if h3_flag is False else "")
+        )
+        is_full = "full" in str(res.get("subset_label", ""))
+        row_style = 'style="background:rgba(255,255,255,.04)"' if is_full else ""
+        rows_html += (
+            f"<tr {row_style}>"
+            f"<td><code>{label}</code></td>"
+            f"<td style='text-align:right'>{n}</td>"
+            f"<td style='text-align:right'>{ap_str}</td>"
+            f"<td style='text-align:right'>{ret_str}</td>"
+            f"<td style='text-align:center'>{h3_cell}</td>"
+            f"</tr>"
+        )
+
+    table_html = (
+        '<table style="width:100%;border-collapse:collapse;font-size:.9rem;margin-top:.6rem">'
+        "<thead><tr>"
+        "<th style='text-align:left;padding:.3rem .5rem;color:var(--muted)'>Subset</th>"
+        "<th style='text-align:right;padding:.3rem .5rem;color:var(--muted)'>Features</th>"
+        "<th style='text-align:right;padding:.3rem .5rem;color:var(--muted)'>Avg Precision</th>"
+        "<th style='text-align:right;padding:.3rem .5rem;color:var(--muted)'>% of Full</th>"
+        "<th style='text-align:center;padding:.3rem .5rem;color:var(--muted)'>H3 &#x2265;90%</th>"
+        "</tr></thead>"
+        f"<tbody>{rows_html}</tbody>"
+        "</table>"
+    )
+
+    top10_html = ""
+    if ranking:
+        max_score = ranking[0].get("mean_abs_shap", 1.0) or 1.0
+        for item in ranking[:10]:
+            rank = item.get("rank", "")
+            feat = _escape(str(item.get("feature", "")))
+            score = item.get("mean_abs_shap", 0.0)
+            bar_w = max(4, int(score / max_score * 180))
+            top10_html += (
+                f'<li style="display:flex;align-items:center;gap:.5rem;padding:.25rem 0;'
+                f'border-bottom:1px solid rgba(255,255,255,.04)">'
+                f'<span style="color:var(--muted);width:1.6rem;text-align:right;font-size:.8rem">{rank}</span>'
+                f'<code style="flex:1;font-size:.82rem">{feat}</code>'
+                f'<span style="width:{bar_w}px;height:6px;background:#3266ad;border-radius:3px;flex-shrink:0"></span>'
+                f'<span style="color:var(--muted);font-size:.8rem;width:4.5rem;text-align:right">{score:.5f}</span>'
+                f"</li>"
+            )
+
+    return (
+        f'<span class="{verdict_cls}" style="margin-bottom:.6rem;display:inline-block">'
+        f"{verdict}</span>"
+        f'<div class="metrics-row" style="margin:.6rem 0">'
+        f'<div class="metric"><span class="metric__label">Full model features</span>'
+        f'<span class="metric__value">{full_n}</span></div>'
+        f'<div class="metric"><span class="metric__label">Full model AP</span>'
+        f'<span class="metric__value">{f"{full_ap:.4f}" if full_ap is not None else "n/a"}</span></div>'
+        f'<div class="metric"><span class="metric__label">H3 satisfied</span>'
+        f'<span class="metric__value">{"Yes" if h3_ok else "No"}</span></div>'
+        f"</div>"
+        f'<div class="panel" style="margin-top:.6rem">'
+        f"<h4>AP retention by feature subset</h4>{table_html}</div>"
+        + (
+            f'<div class="panel" style="margin-top:.6rem">'
+            f"<h4>Top 10 features by importance</h4>"
+            f'<ul style="list-style:none;padding:0;margin:0">{top10_html}</ul></div>'
+            if top10_html
+            else ""
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Structured model picker
+# ---------------------------------------------------------------------------
+
+_ALGO_LABELS: dict[str, str] = {
+    "logistic": "Logistic Regression",
+    "xgb": "XGBoost",
+    "lgb": "LightGBM",
+    "rf": "Random Forest",
+}
+_FEATURE_LABELS: dict[str, str] = {
+    "advisory_only": "Advisory history only",
+    "gharchive_only": "GHArchive only",
+    "swh_only": "Software Heritage only",
+    "advisory_gharchive": "Advisory + GHArchive",
+    "advisory_swh": "Advisory + SWH",
+    "gharchive_swh": "GHArchive + SWH",
+    "full_no_time": "Full (no window features)",
+    "full_cleaned": "Full (all features)",
+}
+_SPLIT_LABELS: dict[str, str] = {
+    "time": "Time split",
+    "gt": "Group-time split",
+}
+_ALGO_ORDER = ["logistic", "xgb", "lgb", "rf"]
+_FEATURE_ORDER = [
+    "advisory_only",
+    "gharchive_only",
+    "swh_only",
+    "advisory_gharchive",
+    "advisory_swh",
+    "gharchive_swh",
+    "full_no_time",
+    "full_cleaned",
+]
+_SPLIT_ORDER = ["time", "gt"]
+
+
+def _parse_model_dir(name: str) -> tuple[str, str, str] | None:
+    """Parse a directory name into (algo, feature_set, split) or None."""
+    stem = Path(name).name
+    for algo in _ALGO_LABELS:
+        prefix = f"{algo}_6m_"
+        if not stem.startswith(prefix):
+            continue
+        rest = stem[len(prefix) :]
+        for feat in _FEATURE_LABELS:
+            if rest == feat:
+                return (algo, feat, "time")
+            if rest == f"{feat}_time":
+                return (algo, feat, "time")
+            if rest == f"{feat}_gt":
+                return (algo, feat, "gt")
+    return None
+
+
+def _build_model_index(model_dir_options: list[str]) -> dict[tuple[str, str, str], str]:
+    """Map (algo, feature_set, split) → directory path."""
+    index: dict[tuple[str, str, str], str] = {}
+    for d in model_dir_options:
+        parsed = _parse_model_dir(d)
+        if parsed is not None:
+            index[parsed] = d
+    return index
+
+
+def _render_model_picker(values: dict[str, Any], model_dir_options: list[str]) -> str:
+    """Three cascading dropdowns that resolve to a model directory."""
+    index = _build_model_index(model_dir_options)
+    current = values.get("model_out_dir") or ""
+    parsed_current = _parse_model_dir(current)
+    cur_algo = parsed_current[0] if parsed_current else ""
+    cur_feature = parsed_current[1] if parsed_current else ""
+    cur_split = parsed_current[2] if parsed_current else ""
+
+    def _opt(val: str, label: str, selected: str) -> str:
+        sel = " selected" if val == selected else ""
+        return f'<option value="{_escape(val)}"{sel}>{_escape(label)}</option>'
+
+    algo_opts = '<option value="">— choose —</option>' + "".join(
+        _opt(a, _ALGO_LABELS[a], cur_algo) for a in _ALGO_ORDER
+    )
+    feat_opts = '<option value="">— choose —</option>' + "".join(
+        _opt(f, _FEATURE_LABELS[f], cur_feature) for f in _FEATURE_ORDER
+    )
+    split_opts = '<option value="">— choose —</option>' + "".join(
+        _opt(s, _SPLIT_LABELS[s], cur_split) for s in _SPLIT_ORDER
+    )
+
+    js_map = json.dumps(
+        {f"{a}|{f}|{s}": d for (a, f, s), d in index.items()},
+        ensure_ascii=False,
+    )
+    resolved_label = Path(current).name if current else ""
+    resolved_html = (
+        f'<code style="color:var(--accent)">{_escape(resolved_label)}</code>'
+        if current
+        else '<span style="color:var(--muted)">— select all three dimensions —</span>'
+    )
+
+    return (
+        '<div class="form-grid" style="margin-top:.8rem">'
+        f'<label>Algorithm<select id="pick-algo" onchange="updatePicker()">{algo_opts}</select></label>'
+        f'<label>Feature set<select id="pick-feat" onchange="updatePicker()">{feat_opts}</select></label>'
+        f'<label>Evaluation<select id="pick-split" onchange="updatePicker()">{split_opts}</select></label>'
+        "</div>"
+        '<div style="margin:.75rem 0;padding:.6rem .8rem;background:var(--panel2);'
+        'border:1px solid var(--line);border-radius:10px;font-size:.9rem">'
+        f'<span style="color:var(--muted)">Resolved model: </span>'
+        f'<span id="pick-resolved">{resolved_html}</span></div>'
+        f'<input type="hidden" id="pick-model-dir" name="model_out_dir" value="{_escape(current)}">'
+        f"<script>const _PICKER_MAP={js_map};"
+        "function updatePicker(){{"
+        'const a=document.getElementById("pick-algo").value;'
+        'const f=document.getElementById("pick-feat").value;'
+        'const s=document.getElementById("pick-split").value;'
+        'const key=a+"|"+f+"|"+s;'
+        'const dir=_PICKER_MAP[key]||"";'
+        'document.getElementById("pick-model-dir").value=dir;'
+        'const lbl=dir?dir.split("/").pop():"";'
+        'document.getElementById("pick-resolved").innerHTML=dir'
+        '?`<code style="color:var(--accent)">${lbl}</code>`'
+        ':`<span style="color:var(--muted)">— combination not yet available —</span>`;}}'
+        "</script>"
+    )
+
+
 def _render_ml_tab(
     values: dict[str, Any],
     latest_metrics: dict[str, Any] | None,
@@ -1799,25 +2046,22 @@ def _render_ml_tab(
     """Read-only ML results tab — model selector + metrics display + feature selection."""
     metrics = latest_metrics
 
-    # ── Left column: model selector (read-only GET form) ─────────────────────
+    # ── Left column: structured model picker (GET form) ──────────────────────
     selector_card = "".join(
         [
             '<section class="card" style="align-self:start">',
             '<div class="card__header"><div>',
             '<p class="eyebrow">ML / evaluation</p>',
             "<h2>Select a model</h2>",
-            '<p class="kicker">Choose a pre-trained model to view its metrics, '
-            "feature importance, and feature selection results.</p>",
+            '<p class="kicker">Choose algorithm, feature set, and evaluation strategy '
+            "to view pre-computed metrics, feature importance, and feature selection results.</p>",
             '</div><span class="pill pill--muted">Results viewer</span></div>',
-            '<form method="get" action="/" class="form-grid">',
+            '<form method="get" action="/">',
             '<input type="hidden" name="tab" value="ml">',
-            _select(
-                "model_out_dir",
-                "Model directory",
-                values["model_out_dir"],
-                [("", "— select a model —")] + [(d, Path(d).name) for d in model_dir_options],
-            ),
+            _render_model_picker(values, model_dir_options),
+            '<div style="margin-top:.9rem">',
             '<button type="submit">Load metrics</button>',
+            "</div>",
             "</form>",
             "</section>",
         ]
@@ -1844,9 +2088,8 @@ def _render_ml_tab(
 
     # Feature selection panel — shown when feature_selection.json exists
     model_dir_for_fs = values.get("model_out_dir") or ""
-    fs_data = None
+    fs_data = _load_feature_selection(model_dir_for_fs) if model_dir_for_fs else None
     if fs_data:
-        fs_content = ""
         output_parts.append(
             '<section class="card">'
             '<div class="card__header"><div>'
@@ -1855,20 +2098,40 @@ def _render_ml_tab(
             '<p class="kicker">SHAP-ranked feature subsets — smallest set retaining '
             "&#x2265;90% of full-model average precision.</p>"
             '</div><span class="pill pill--muted">Empirical H3 test</span></div>'
-            + fs_content
+            + _render_feature_selection_panel(fs_data)
             + "</section>"
         )
     elif model_dir_for_fs:
+        # Determine if this is a single-family model where selection isn't meaningful
+        parsed = _parse_model_dir(model_dir_for_fs)
+        single_family = parsed is not None and parsed[1] in {
+            "advisory_only",
+            "gharchive_only",
+            "swh_only",
+        }
+        if single_family:
+            fs_msg = (
+                "Feature selection is not applicable for single-family feature sets — "
+                "the model is already restricted to one signal family and there is "
+                "nothing to select down from. Choose a multi-family or full-feature "
+                "model to view feature selection results."
+            )
+        else:
+            fs_msg = (
+                "Feature selection has not yet been run for this model. "
+                "Run <strong>canary train feature-select --model-dir "
+                + _escape(model_dir_for_fs)
+                + "</strong> to generate the H3 report."
+            )
         output_parts.append(
             '<section class="card">'
             '<div class="card__header"><div>'
             '<p class="eyebrow">Feature selection</p>'
             "<h2>Principled feature selection (H3)</h2>"
-            '</div><span class="pill pill--muted">Not yet run</span></div>'
-            '<p class="muted" style="padding:.6rem 0">Run '
-            "<strong>canary train feature-select --model-dir "
-            + _escape(model_dir_for_fs)
-            + "</strong> to generate the feature selection report.</p>"
+            '</div><span class="pill pill--muted">'
+            + ("Not applicable" if single_family else "Not yet run")
+            + "</span></div>"
+            f'<p class="muted" style="padding:.6rem 0">{fs_msg}</p>'
             "</section>"
         )
 

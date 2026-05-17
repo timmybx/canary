@@ -37,6 +37,12 @@
 #   bash tools/run_monthly_ablation_experiments.sh --section 5
 #   bash tools/run_monthly_ablation_experiments.sh --section 6
 #
+#  # Run only gap-fill experiments (new full matrix):
+#  bash tools/run_monthly_ablation_experiments.sh --section 7
+#
+#  # Run only feature-select for multi-family models (requires section 7 first):
+#  bash tools/run_monthly_ablation_experiments.sh --section 8
+#
 #   # Skip rebuilding filtered files if they already exist:
 #   bash tools/run_monthly_ablation_experiments.sh --skip-filter
 #
@@ -48,7 +54,9 @@
 #   Logistic experiments (~12):        ~6 min
 #   Tree model experiments (~17):     ~50 min
 #   Feature selection (4 runs × ~7):  ~30 min
-#   Total:                            ~90 min
+#   Section 7 — gap fills (~35):      ~3 hrs  (RF runs are slow)
+#   Section 8 — feature-select (~36): ~45 min (RF uses fast MDI path)
+#   Total (all sections):             ~5.5 hrs
 #
 # =============================================================================
 set -euo pipefail
@@ -388,9 +396,158 @@ if _section_active 6; then
   _train random_forest group_time "$FULL_CLEANED"  "$MODEL_BASE/rf_6m_full_cleaned_gt"
 fi
 
+# =============================================================================
+# Section 7 — Gap fills: complete the full 4×8×2 experiment matrix
+# =============================================================================
+# Adds the missing combinations so every algorithm × feature-family × split
+# cell is populated.  This allows the webapp model picker to offer all
+# combinations without any missing-model states.
+#
+# Run order: logistic (fastest) → xgb → lgb → rf (slowest, run last).
+# Use --section 7 to run only these without re-running sections 1–6.
+# =============================================================================
+
+if _section_active 7; then
+  echo ""
+  echo "======================================================================="
+  echo "Section 7 — Gap fills: completing the full experiment matrix"
+  echo "Adds missing algorithm × feature-family × split combinations."
+  echo "======================================================================="
+
+  # ── Logistic — missing group_time variants ─────────────────────────────────
+  echo ""
+  echo "--- Logistic / group_time gap fills ---"
+  _train logistic group_time "$GHARCHIVE_ONLY" "$MODEL_BASE/logistic_6m_gharchive_only_gt"
+  _train logistic group_time "$ADV_GHA"        "$MODEL_BASE/logistic_6m_advisory_gharchive_gt"
+  _train logistic group_time "$ADV_SWH"        "$MODEL_BASE/logistic_6m_advisory_swh_gt"
+  _train logistic group_time "$GHA_SWH"        "$MODEL_BASE/logistic_6m_gharchive_swh_gt"
+
+  # ── XGBoost — missing combined-family and group_time variants ──────────────
+  echo ""
+  echo "--- XGBoost gap fills ---"
+  _train xgboost time       "$ADV_GHA"        "$MODEL_BASE/xgb_6m_advisory_gharchive_time"
+  _train xgboost time       "$ADV_SWH"        "$MODEL_BASE/xgb_6m_advisory_swh_time"
+  _train xgboost time       "$GHA_SWH"        "$MODEL_BASE/xgb_6m_gharchive_swh_time"
+  _train xgboost group_time "$GHARCHIVE_ONLY" "$MODEL_BASE/xgb_6m_gharchive_only_gt"
+  _train xgboost group_time "$ADV_GHA"        "$MODEL_BASE/xgb_6m_advisory_gharchive_gt"
+  _train xgboost group_time "$ADV_SWH"        "$MODEL_BASE/xgb_6m_advisory_swh_gt"
+  _train xgboost group_time "$GHA_SWH"        "$MODEL_BASE/xgb_6m_gharchive_swh_gt"
+
+  # ── LightGBM — missing single-family and combined-family variants ──────────
+  echo ""
+  echo "--- LightGBM gap fills ---"
+  _train lightgbm time       "$ADVISORY_ONLY"  "$MODEL_BASE/lgb_6m_advisory_only_time"
+  _train lightgbm time       "$GHARCHIVE_ONLY" "$MODEL_BASE/lgb_6m_gharchive_only_time"
+  _train lightgbm time       "$ADV_GHA"        "$MODEL_BASE/lgb_6m_advisory_gharchive_time"
+  _train lightgbm time       "$ADV_SWH"        "$MODEL_BASE/lgb_6m_advisory_swh_time"
+  _train lightgbm time       "$GHA_SWH"        "$MODEL_BASE/lgb_6m_gharchive_swh_time"
+  _train lightgbm group_time "$ADVISORY_ONLY"  "$MODEL_BASE/lgb_6m_advisory_only_gt"
+  _train lightgbm group_time "$GHARCHIVE_ONLY" "$MODEL_BASE/lgb_6m_gharchive_only_gt"
+  _train lightgbm group_time "$ADV_GHA"        "$MODEL_BASE/lgb_6m_advisory_gharchive_gt"
+  _train lightgbm group_time "$ADV_SWH"        "$MODEL_BASE/lgb_6m_advisory_swh_gt"
+  _train lightgbm group_time "$GHA_SWH"        "$MODEL_BASE/lgb_6m_gharchive_swh_gt"
+  _train lightgbm group_time "$FULL_NO_TIME"   "$MODEL_BASE/lgb_6m_full_no_time_gt"
+
+  # ── Random Forest — missing variants (run last; RF is the slowest) ─────────
+  echo ""
+  echo "--- Random Forest gap fills (slowest — run last) ---"
+  _train random_forest time       "$ADVISORY_ONLY"  "$MODEL_BASE/rf_6m_advisory_only_time"
+  _train random_forest time       "$GHARCHIVE_ONLY" "$MODEL_BASE/rf_6m_gharchive_only_time"
+  _train random_forest time       "$ADV_GHA"        "$MODEL_BASE/rf_6m_advisory_gharchive_time"
+  _train random_forest time       "$ADV_SWH"        "$MODEL_BASE/rf_6m_advisory_swh_time"
+  _train random_forest time       "$GHA_SWH"        "$MODEL_BASE/rf_6m_gharchive_swh_time"
+  _train random_forest time       "$FULL_NO_TIME"   "$MODEL_BASE/rf_6m_full_no_time_time"
+  _train random_forest group_time "$ADVISORY_ONLY"  "$MODEL_BASE/rf_6m_advisory_only_gt"
+  _train random_forest group_time "$GHARCHIVE_ONLY" "$MODEL_BASE/rf_6m_gharchive_only_gt"
+  _train random_forest group_time "$SWH_ONLY"       "$MODEL_BASE/rf_6m_swh_only_gt"
+  _train random_forest group_time "$ADV_GHA"        "$MODEL_BASE/rf_6m_advisory_gharchive_gt"
+  _train random_forest group_time "$ADV_SWH"        "$MODEL_BASE/rf_6m_advisory_swh_gt"
+  _train random_forest group_time "$GHA_SWH"        "$MODEL_BASE/rf_6m_gharchive_swh_gt"
+  _train random_forest group_time "$FULL_NO_TIME"   "$MODEL_BASE/rf_6m_full_no_time_gt"
+  _train random_forest group_time "$FULL_CLEANED"   "$MODEL_BASE/rf_6m_full_cleaned_gt"
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
+
+# =============================================================================
+# Section 8 — Feature selection for multi-family models (completeness)
+# =============================================================================
+# Runs feature-select on all multi-family and full-feature model directories
+# so the webapp shows H3 results rather than "Not yet run" for most models.
+# Single-family models (advisory_only, gharchive_only, swh_only) are skipped
+# intentionally — feature selection is not meaningful when the feature set
+# is already a single restricted family.
+#
+# IMPORTANT: Run section 7 before section 8 — many model directories
+# referenced here are created by the section 7 gap-fill runs.
+#
+# RF uses the fast MDI (feature_importances_) path automatically;
+# no risk of multi-hour SHAP hangs.
+# =============================================================================
+
+if _section_active 8; then
+  echo ""
+  echo "======================================================================="
+  echo "Section 8 — Feature selection for multi-family models"
+  echo "Adds H3 results for all qualifying models (multi-family / full-feature)."
+  echo "Skips single-family models where selection is not meaningful."
+  echo "NOTE: Run section 7 first — these dirs may not exist otherwise."
+  echo "======================================================================="
+
+  # ── Logistic ───────────────────────────────────────────────────────────────
+  echo ""
+  echo "--- Feature selection: logistic ---"
+  _feature_select "$MODEL_BASE/logistic_6m_advisory_gharchive"    time
+  _feature_select "$MODEL_BASE/logistic_6m_advisory_gharchive_gt" group_time
+  _feature_select "$MODEL_BASE/logistic_6m_advisory_swh"          time
+  _feature_select "$MODEL_BASE/logistic_6m_advisory_swh_gt"       group_time
+  _feature_select "$MODEL_BASE/logistic_6m_gharchive_swh"         time
+  _feature_select "$MODEL_BASE/logistic_6m_gharchive_swh_gt"      group_time
+  _feature_select "$MODEL_BASE/logistic_6m_full_no_time"          time
+  _feature_select "$MODEL_BASE/logistic_6m_full_no_time_gt"       group_time
+  _feature_select "$MODEL_BASE/logistic_6m_full_cleaned"          time
+  _feature_select "$MODEL_BASE/logistic_6m_full_cleaned_gt"       group_time
+
+  # ── XGBoost ────────────────────────────────────────────────────────────────
+  echo ""
+  echo "--- Feature selection: xgboost ---"
+  _feature_select "$MODEL_BASE/xgb_6m_advisory_gharchive_time"   time
+  _feature_select "$MODEL_BASE/xgb_6m_advisory_gharchive_gt"     group_time
+  _feature_select "$MODEL_BASE/xgb_6m_advisory_swh_time"         time
+  _feature_select "$MODEL_BASE/xgb_6m_advisory_swh_gt"           group_time
+  _feature_select "$MODEL_BASE/xgb_6m_gharchive_swh_time"        time
+  _feature_select "$MODEL_BASE/xgb_6m_gharchive_swh_gt"          group_time
+  _feature_select "$MODEL_BASE/xgb_6m_full_no_time_gt"           group_time
+  _feature_select "$MODEL_BASE/xgb_6m_full_cleaned_gt"           group_time
+
+  # ── LightGBM ───────────────────────────────────────────────────────────────
+  echo ""
+  echo "--- Feature selection: lightgbm ---"
+  _feature_select "$MODEL_BASE/lgb_6m_advisory_gharchive_time"   time
+  _feature_select "$MODEL_BASE/lgb_6m_advisory_gharchive_gt"     group_time
+  _feature_select "$MODEL_BASE/lgb_6m_advisory_swh_time"         time
+  _feature_select "$MODEL_BASE/lgb_6m_advisory_swh_gt"           group_time
+  _feature_select "$MODEL_BASE/lgb_6m_gharchive_swh_time"        time
+  _feature_select "$MODEL_BASE/lgb_6m_gharchive_swh_gt"          group_time
+  _feature_select "$MODEL_BASE/lgb_6m_full_no_time_time"         time
+  _feature_select "$MODEL_BASE/lgb_6m_full_no_time_gt"           group_time
+  _feature_select "$MODEL_BASE/lgb_6m_full_cleaned_gt"           group_time
+
+  # ── Random Forest (MDI fast path — no SHAP timeout risk) ───────────────────
+  echo ""
+  echo "--- Feature selection: random_forest (uses MDI fast path) ---"
+  _feature_select "$MODEL_BASE/rf_6m_advisory_gharchive_time"    time
+  _feature_select "$MODEL_BASE/rf_6m_advisory_gharchive_gt"      group_time
+  _feature_select "$MODEL_BASE/rf_6m_advisory_swh_time"          time
+  _feature_select "$MODEL_BASE/rf_6m_advisory_swh_gt"            group_time
+  _feature_select "$MODEL_BASE/rf_6m_gharchive_swh_time"         time
+  _feature_select "$MODEL_BASE/rf_6m_gharchive_swh_gt"           group_time
+  _feature_select "$MODEL_BASE/rf_6m_full_no_time_time"          time
+  _feature_select "$MODEL_BASE/rf_6m_full_no_time_gt"            group_time
+  _feature_select "$MODEL_BASE/rf_6m_full_cleaned_gt"            group_time
+fi
 
 echo ""
 echo "======================================================================="
@@ -440,9 +597,22 @@ echo "  lgb_6m_swh_only_gt"
 echo "  lgb_6m_full_cleaned_gt"
 echo "  rf_6m_full_cleaned_gt"
 echo ""
+echo "Section 8 — Feature selection (multi-family models, all algorithms)"
+echo "  Covers: advisory_gharchive, advisory_swh, gharchive_swh,"
+echo "          full_no_time, full_cleaned × {logistic,xgb,lgb,rf} × {time,gt}"
+echo "  Single-family models skipped (not meaningful for selection)."
+echo ""
 echo "Feature selection (H3 empirical test) — written to feature_selection.json"
 echo "  xgb_6m_full_cleaned_time    primary H3 test (full feature set)"
 echo "  xgb_6m_full_no_time_time    methodologically clean reference (no window features)"
 echo "  lgb_6m_full_cleaned_time    LightGBM cross-model comparison"
 echo "  rf_6m_full_cleaned_time     Random Forest cross-model comparison"
+echo ""
+echo "Section 7 — Gap fills (completes full 4×8×2 matrix)"
+echo "  logistic: gharchive_only_gt, advisory_gharchive_gt, advisory_swh_gt, gharchive_swh_gt"
+echo "  xgb:      advisory_gharchive_time/gt, advisory_swh_time/gt, gharchive_swh_time/gt, gharchive_only_gt"
+echo "  lgb:      advisory_only, gharchive_only, advisory_gharchive, advisory_swh,"
+echo "            gharchive_swh (both splits) + full_no_time_gt"
+echo "  rf:       advisory_only, gharchive_only, swh_only_gt, advisory_gharchive,"
+echo "            advisory_swh, gharchive_swh (both splits) + full_no_time_time/gt + full_cleaned_gt"
 echo "======================================================================="
