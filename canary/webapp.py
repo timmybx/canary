@@ -539,10 +539,11 @@ def _validation_script(plugin_options: list[str], active_tab: str) -> str:
 """
 
 
-def _score_payload(result: ScoreResult) -> dict[str, Any]:
+def _score_payload(result: ScoreResult, score_model_dir: str = "") -> dict[str, Any]:
     payload = result.to_dict()
     payload["pretty_json"] = json.dumps(payload, indent=2, ensure_ascii=False)
     payload["pretty_features"] = json.dumps(payload["features"], indent=2, ensure_ascii=False)
+    payload["score_model_dir"] = score_model_dir  # preserved for explain round-trip
     return payload
 
 
@@ -743,7 +744,8 @@ def _call_anthropic_explain(prompt: str) -> str:
             "system": (
                 "You are a concise cybersecurity analyst assistant. "
                 "Explain CANARY risk scores in plain English. "
-                "Keep responses to 3-5 short paragraphs. Be direct and actionable."
+                "Keep responses to 3-5 short paragraphs. Be direct and actionable. "
+                "Do not use markdown headers or bullet lists — write in flowing prose only."
             ),
             "messages": [{"role": "user", "content": prompt}],
         }
@@ -871,8 +873,24 @@ def _render_explain_card(
         )
     elif ai_result:
         # Render the AI response — convert newlines to <p> tags
+        def _md_to_html(text: str) -> str:
+            """Convert basic markdown to HTML for AI response display."""
+            import re as _re
+
+            # Escape HTML first
+            t = _escape(text)
+            # ## Heading → bold header
+            t = _re.sub(r"^##\s+(.+)$", r"<strong>\1</strong>", t, flags=_re.MULTILINE)
+            # **bold** → <strong>
+            t = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", t)
+            # *italic* → <em>
+            t = _re.sub(r"\*(.+?)\*", r"<em>\1</em>", t)
+            # Numbered list items
+            t = _re.sub(r"^\d+\.\s+", r"&nbsp;&nbsp;• ", t, flags=_re.MULTILINE)
+            return t
+
         paras = "".join(
-            f"<p style='margin:.5rem 0'>{_escape(p.strip())}</p>"
+            f"<p style='margin:.5rem 0'>{_md_to_html(p.strip())}</p>"
             for p in ai_result.split("\n\n")
             if p.strip()
         )
@@ -2656,8 +2674,11 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         plugin = (form.get("plugin") or values.get("plugin") or "").strip()
         if plugin:
             try:
-                score_result = _score_payload(score_plugin_baseline(plugin, real=True))
                 _score_model_dir = values.get("score_model_dir") or values.get("model_dir") or ""
+                score_result = _score_payload(
+                    score_plugin_baseline(plugin, real=True),
+                    score_model_dir=_score_model_dir,
+                )
                 _ml_scorer = _get_ml_scorer(_score_model_dir) if _score_model_dir else None
                 if _ml_scorer is not None:
                     try:
@@ -2693,6 +2714,9 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                         f"AI explanation unavailable ({exc}) — use Copy or Open buttons below."  # noqa: F841
                     )
         values["active_tab"] = "score"
+        # Restore score_model_dir in values so the ML dropdown stays selected
+        if _score_model_dir:
+            values["score_model_dir"] = _score_model_dir
 
     if method == "POST" and path == "/score":
         form = parse_form(environ)
@@ -2705,11 +2729,14 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                     raise ValueError("Please enter a plugin ID to score.")
                 if not _plugin_known(plugin, values["registry_path"]):
                     raise ValueError("Please choose a plugin ID from the current registry list.")
-                score_result = _score_payload(score_plugin_baseline(plugin, real=True))
-                # Also run the ML scorer if a trained model is available
                 _score_model_dir = (
                     values.get("score_model_dir") or values.get("model_dir") or DEFAULT_MODEL_DIR
                 )
+                score_result = _score_payload(
+                    score_plugin_baseline(plugin, real=True),
+                    score_model_dir=_score_model_dir,
+                )
+                # Also run the ML scorer if a trained model is available
                 _ml_scorer = _get_ml_scorer(_score_model_dir) if _score_model_dir else None
                 if _ml_scorer is not None:
                     try:
