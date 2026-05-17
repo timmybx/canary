@@ -1061,7 +1061,9 @@ def _render_score_section(
 
     right_col = '<div class="score-output">' + "".join(output_parts) + "</div>"
 
-    return '<div class="grid--score">' + form_card + right_col + "</div>"
+    left_col = '<div class="score-output">' + form_card + "</div>"
+
+    return '<div class="grid--score">' + left_col + right_col + "</div>"
 
 
 def _metric_value(value: Any, *, digits: int = 3) -> str:
