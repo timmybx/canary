@@ -1798,14 +1798,17 @@ def _render_confusion_matrix(confusion: Any) -> str:
 
 def _load_feature_selection(model_out_dir: str | Path) -> dict[str, Any] | None:
     """Load feature_selection.json from a model directory if it exists."""
-    try:
-        parts = _model_output_dir_parts(model_out_dir)
-    except ValueError:
-        return None
-    target = MODEL_OUTPUTS_ROOT.joinpath(*parts, "feature_selection.json")
-    if not target.exists():
+    if not model_out_dir:
         return None
     try:
+        # Build the path directly from MODEL_OUTPUTS_ROOT + the final directory
+        # name rather than going through _model_output_dir_parts, which uses
+        # an absolute-path prefix check that can fail when the working directory
+        # differs between environments (e.g. local dev vs Render deployment).
+        stem = Path(str(model_out_dir)).name  # just "lgb_6m_full_cleaned_time"
+        target = MODEL_OUTPUTS_ROOT / stem / "feature_selection.json"
+        if not target.exists():
+            return None
         return json.loads(target.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return None
