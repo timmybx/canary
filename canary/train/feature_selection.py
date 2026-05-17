@@ -383,9 +383,10 @@ def run_feature_selection(
 
             # Compute retention relative to the full model AP
             retention: float | None = None
-            ref_ap = full_ap if not is_full else ap
-            if ref_ap and ap is not None and ref_ap > 0:
-                retention = round(ap / ref_ap, 4) if not is_full else 1.0
+            if not is_full and ap is not None and full_ap is not None and full_ap > 0:
+                retention = round(ap / full_ap, 4)
+            elif is_full:
+                retention = 1.0
 
             result = {
                 "subset_label": label,
@@ -394,7 +395,9 @@ def run_feature_selection(
                 "average_precision": round(ap, 4) if ap is not None else None,
                 "roc_auc": round(roc, 4) if roc is not None else None,
                 "ap_retention_vs_full": retention,
-                "meets_h3_threshold": (ap is not None and ap >= (full_ap or 0) * 0.90)
+                "meets_h3_threshold": (
+                    ap is not None and full_ap is not None and full_ap > 0 and ap >= full_ap * 0.90
+                )
                 if not is_full
                 else None,
                 "features_used": subset_cols,
@@ -402,12 +405,14 @@ def run_feature_selection(
             subset_results.append(result)
 
             status = ""
-            if not is_full and ap is not None and full_ap is not None:
-                pct = 100 * ap / full_ap if full_ap > 0 else 0
+            if not is_full and ap is not None and full_ap is not None and full_ap > 0:
+                pct = 100 * ap / full_ap
                 h3_flag = "✓ H3" if ap >= full_ap * 0.90 else "  —"
                 status = f"  AP={ap:.4f}  ({pct:.1f}% of full)  {h3_flag}"
+            elif not is_full and ap is not None:
+                status = f"  AP={ap:.4f}  (full model AP unavailable for comparison)"
             else:
-                status = f"  AP={ap:.4f}  (full model baseline)"
+                status = f"  AP={ap:.4f if ap is not None else 'n/a'}  (full model baseline)"
             LOGGER.info("  %s: %d features%s", label, actual_features, status)
 
         except Exception as exc:  # noqa: BLE001
@@ -427,36 +432,58 @@ def run_feature_selection(
             )
 
     # --- Find the smallest subset that meets H3 (>=90% of full AP) -----------
-    h3_result: dict[str, Any] | None = None
-    for res in subset_results:
-        if res.get("meets_h3_threshold") is True:
-            h3_result = res
-            break  # results are ordered by size ascending — take the smallest
+    try:
+        h3_result: dict[str, Any] | None = None
+        for res in subset_results:
+            if res.get("meets_h3_threshold") is True:
+                h3_result = res
+                break  # results are ordered by size ascending — take the smallest
 
-    # --- Build and write output -----------------------------------------------
-    output: dict[str, Any] = {
-        "model_dir": str(model_dir),
-        "model_name": model_name,
-        "full_model_feature_count": len(full_feature_cols),
-        "full_model_average_precision": full_ap,
-        "target_col": target_col,
-        "split_strategy": split_strategy,
-        "test_start_month": test_start_month,
-        "h3_threshold": 0.90,
-        "h3_satisfied": h3_result is not None,
-        "h3_smallest_qualifying_subset": (
-            {
-                "size": h3_result["actual_feature_count"],
-                "average_precision": h3_result["average_precision"],
-                "ap_retention": h3_result["ap_retention_vs_full"],
-                "label": h3_result["subset_label"],
-            }
-            if h3_result
-            else None
-        ),
-        "feature_ranking": ranked_features,
-        "subset_results": subset_results,
-    }
+        # --- Build and write output -------------------------------------------
+        output: dict[str, Any] = {
+            "model_dir": str(model_dir),
+            "model_name": model_name,
+            "full_model_feature_count": len(full_feature_cols),
+            "full_model_average_precision": full_ap,
+            "target_col": target_col,
+            "split_strategy": split_strategy,
+            "test_start_month": test_start_month,
+            "h3_threshold": 0.90,
+            "h3_satisfied": h3_result is not None,
+            "h3_smallest_qualifying_subset": (
+                {
+                    "size": h3_result["actual_feature_count"],
+                    "average_precision": h3_result["average_precision"],
+                    "ap_retention": h3_result["ap_retention_vs_full"],
+                    "label": h3_result["subset_label"],
+                }
+                if h3_result
+                else None
+            ),
+            "feature_ranking": ranked_features,
+            "subset_results": subset_results,
+        }
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.error(
+            "Failed to build output dict after subset loop: %s — writing partial results.",
+            exc,
+            exc_info=True,
+        )
+        output = {
+            "model_dir": str(model_dir),
+            "model_name": model_name,
+            "full_model_feature_count": len(full_feature_cols),
+            "full_model_average_precision": full_ap,
+            "target_col": target_col,
+            "split_strategy": split_strategy,
+            "test_start_month": test_start_month,
+            "h3_threshold": 0.90,
+            "h3_satisfied": False,
+            "h3_smallest_qualifying_subset": None,
+            "feature_ranking": ranked_features,
+            "subset_results": subset_results,
+            "error": str(exc),
+        }
 
     out_path = model_dir / "feature_selection.json"
     out_path.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
