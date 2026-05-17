@@ -23,7 +23,7 @@ DEFAULT_REGISTRY_PATH = "data/raw/registry/plugins.jsonl"
 DEFAULT_MODEL_DIR = "data/processed/models/baseline_6m"
 MODEL_OUTPUTS_ROOT = Path("data/processed/models").resolve()
 MODEL_OUTPUTS_ROOT_PARTS = Path("data/processed/models").parts
-VALID_TABS = frozenset({"score", "ml"})
+VALID_TABS = frozenset({"score", "ml", "about"})
 MODEL_OUTPUT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 DEFAULTS: dict[str, Any] = {
@@ -2510,6 +2510,215 @@ def _render_ml_tab(
     return '<div class="grid--score">' + selector_card + right_col + "</div>"
 
 
+def _render_about_tab() -> str:
+    """Render the About / Help tab — lightweight context for new visitors."""
+    github_url = "https://github.com/timmybx/canary"
+
+    risk_rows = "".join(
+        f"<tr><td style='padding:.5rem .75rem'><span class='pill {cls}'>{label}</span></td>"
+        f"<td style='padding:.5rem .75rem;color:var(--muted);font-size:.9rem'>{threshold}</td>"
+        f"<td style='padding:.5rem .75rem;font-size:.9rem'>{action}</td></tr>"
+        for label, cls, threshold, action in [
+            (
+                "Low",
+                "pill--muted",
+                "Score &lt; 0.05",
+                "Normal patch hygiene — no special action needed.",
+            ),
+            (
+                "Medium",
+                "pill--warn",
+                "0.05 – 0.20",
+                "Monitor advisories; include in scheduled patch cycles.",
+            ),
+            (
+                "High",
+                "pill--danger",
+                "Score &ge; 0.20",
+                "Prioritize review; consider alternatives for new pipelines.",
+            ),
+        ]
+    )
+
+    signal_rows = "".join(
+        f"<tr><td style='padding:.4rem .75rem;font-size:.88rem'><code>{sig}</code></td>"
+        f"<td style='padding:.4rem .75rem;font-size:.88rem;color:var(--muted)'>{desc}</td></tr>"
+        for sig, desc in [
+            (
+                "Days since last commit",
+                "How long ago the repository was last updated — stale repos carry higher risk.",
+            ),
+            (
+                "Archive age",
+                "How long the plugin has been publicly archived — older projects tend to be better-hardened.",
+            ),
+            (
+                "Release recency",
+                "Time since the last published release — infrequent releases correlate with elevated risk.",
+            ),
+            (
+                "Security-fix commit count",
+                "Commits whose messages reference security fixes — a positive maintenance signal.",
+            ),
+            (
+                "Advisory history",
+                "Number and recency of previously published Jenkins security advisories.",
+            ),
+            (
+                "Governance artifacts",
+                "Presence of SECURITY.md, Dependabot config, changelog, and CI workflows.",
+            ),
+            ("Dependency risk", "Whether the plugin's dependencies have known advisories."),
+        ]
+    )
+
+    return (
+        '<div style="max-width:860px;margin:0 auto;display:grid;gap:1.2rem">'
+        # ── What is CANARY ────────────────────────────────────────────────────
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">About this tool</p>'
+        "<h2>What is CANARY?</h2>"
+        "</div></div>"
+        '<p style="margin-top:.6rem;line-height:1.7">CANARY (<em>Component Analytics &amp; '
+        "Near-term Advisory Risk Yardstick</em>) predicts near-term security advisory risk for "
+        "Jenkins plugins using publicly observable project signals. Rather than waiting for a "
+        "vulnerability to be disclosed, CANARY estimates the likelihood that a plugin will "
+        "appear in a Jenkins security advisory within the next 180 days — giving security "
+        "teams a proactive prioritization signal.</p>"
+        '<p style="margin-top:.6rem;line-height:1.7">This is a research prototype developed '
+        "as part of a Doctor of Engineering praxis at "
+        "<strong>The George Washington University</strong>. It is intended as a "
+        "decision-support tool, not a replacement for security review.</p>"
+        "</section>"
+        # ── Quick start ───────────────────────────────────────────────────────
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">Getting started</p>'
+        "<h2>Score a plugin in 30 seconds</h2>"
+        "</div></div>"
+        '<ol style="margin:.6rem 0 0;padding-left:1.4rem;line-height:2;font-size:.95rem">'
+        "<li>Click the <strong>Scoring</strong> tab.</li>"
+        "<li>Type a Jenkins plugin name in the <strong>Plugin ID</strong> field "
+        "(autocomplete is populated from the live registry).</li>"
+        "<li>Optionally select an <strong>ML model</strong> from the dropdown "
+        "to add a probabilistic score alongside the heuristic one.</li>"
+        "<li>Click <strong>Score plugin</strong>.</li>"
+        "<li>Review the heuristic score, ML advisory probability, and SHAP-based "
+        "feature drivers. Use <strong>Explain now (AI)</strong> for a plain-English summary.</li>"
+        "</ol>"
+        "</section>"
+        # ── Score meanings ────────────────────────────────────────────────────
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">Interpreting results</p>'
+        "<h2>What the scores mean</h2>"
+        "</div></div>"
+        '<p style="margin-top:.4rem;font-size:.9rem;color:var(--muted)">'
+        "The <strong>heuristic score</strong> (0–100) is a rule-based signal using advisory "
+        "history, maintenance staleness, governance artifacts, and dependency risk. "
+        "The <strong>ML score</strong> (0.0–1.0) is the model's estimated probability of "
+        "a Jenkins security advisory within 180 days.</p>"
+        '<table style="width:100%;border-collapse:collapse;margin-top:.8rem">'
+        "<thead><tr>"
+        "<th style='text-align:left;padding:.5rem .75rem;color:var(--muted);font-size:.85rem'>Risk level</th>"
+        "<th style='text-align:left;padding:.5rem .75rem;color:var(--muted);font-size:.85rem'>ML score</th>"
+        "<th style='text-align:left;padding:.5rem .75rem;color:var(--muted);font-size:.85rem'>Suggested action</th>"
+        "</tr></thead>"
+        f"<tbody>{risk_rows}</tbody>"
+        "</table>"
+        "</section>"
+        # ── Signals ───────────────────────────────────────────────────────────
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">How it works</p>'
+        "<h2>Key signals used</h2>"
+        "</div></div>"
+        '<p style="margin-top:.4rem;font-size:.9rem;color:var(--muted)">'
+        "CANARY uses only publicly observable data — no private telemetry or credentials "
+        "are required. The most predictive signals come from Software Heritage archival "
+        "data and GitHub Archive event history.</p>"
+        '<table style="width:100%;border-collapse:collapse;margin-top:.8rem">'
+        "<thead><tr>"
+        "<th style='text-align:left;padding:.4rem .75rem;color:var(--muted);font-size:.85rem'>Signal</th>"
+        "<th style='text-align:left;padding:.4rem .75rem;color:var(--muted);font-size:.85rem'>What it captures</th>"
+        "</tr></thead>"
+        f"<tbody>{signal_rows}</tbody>"
+        "</table>"
+        "</section>"
+        # ── ML models ─────────────────────────────────────────────────────────
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">Machine learning tab</p>'
+        "<h2>Exploring model results</h2>"
+        "</div></div>"
+        '<p style="margin-top:.6rem;line-height:1.7;font-size:.95rem">'
+        "The <strong>Machine learning</strong> tab lets you explore pre-computed results "
+        "across 29 model configurations. Use the three dropdowns to select an algorithm "
+        "(XGBoost, LightGBM, Random Forest, Logistic Regression), a feature set "
+        "(from advisory-history-only up to all 154 features), and an evaluation strategy "
+        "(time split or group-time split). "
+        "Where available, a <strong>feature selection panel</strong> shows which features "
+        "are most important and whether a compact subset can match full-model performance.</p>"
+        '<p style="margin-top:.6rem;line-height:1.7;font-size:.95rem">'
+        "<strong>Time split</strong> evaluates models where the same plugins appear in "
+        "both training and testing — a continuous monitoring scenario. "
+        "<strong>Group-time split</strong> withholds entire plugins from training, testing "
+        "whether the model generalises to previously unseen plugins. The group-time design "
+        "is the more conservative and realistic evaluation of the two.</p>"
+        "</section>"
+        # ── Limitations ───────────────────────────────────────────────────────
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">Limitations</p>'
+        "<h2>What CANARY is not</h2>"
+        "</div></div>"
+        '<ul style="margin:.6rem 0 0;padding-left:1.4rem;line-height:2;font-size:.95rem">'
+        "<li>CANARY is scoped to the <strong>Jenkins plugin ecosystem</strong> only — "
+        "it does not score npm, PyPI, Maven, or other package registries.</li>"
+        "<li>Scores reflect <strong>near-term advisory likelihood</strong>, not exploitability "
+        "or severity in your specific environment.</li>"
+        "<li>A low score does not mean a plugin is safe — it means CANARY sees no strong "
+        "signal of an imminent advisory based on publicly observable data.</li>"
+        "<li>Data is updated periodically, not in real time. "
+        "Always consult the official "
+        '<a href="https://www.jenkins.io/security/advisories/" target="_blank" '
+        'rel="noopener noreferrer" style="color:var(--accent)">Jenkins security advisories</a> '
+        "for the authoritative source.</li>"
+        "</ul>"
+        "</section>"
+        # ── Learn more ────────────────────────────────────────────────────────
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">Learn more</p>'
+        "<h2>Going deeper</h2>"
+        "</div></div>"
+        '<p style="margin-top:.6rem;line-height:1.7;font-size:.95rem">'
+        "The full source code, data pipeline, and research documentation are available "
+        "on GitHub. The praxis document provides a detailed description of the methodology, "
+        "ablation results, and future research directions.</p>"
+        '<div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-top:.8rem">'
+        f'<a href="{github_url}" target="_blank" rel="noopener noreferrer" '
+        'style="display:inline-flex;align-items:center;gap:.5rem;'
+        "background:rgba(111,177,255,.12);border:1px solid rgba(111,177,255,.3);"
+        "color:var(--accent);padding:.55rem 1.1rem;border-radius:10px;"
+        'text-decoration:none;font-weight:600;font-size:.92rem">'
+        "&#128279; View on GitHub"
+        "</a>"
+        '<a href="https://www.jenkins.io/security/advisories/" target="_blank" '
+        'rel="noopener noreferrer" '
+        'style="display:inline-flex;align-items:center;gap:.5rem;'
+        "background:rgba(255,255,255,.05);border:1px solid var(--line);"
+        "color:var(--muted);padding:.55rem 1.1rem;border-radius:10px;"
+        'text-decoration:none;font-weight:600;font-size:.92rem">'
+        "Jenkins Security Advisories"
+        "</a>"
+        "</div>"
+        "</section>"
+        "</div>"
+    )
+
+
 def render_page(
     values: dict[str, Any],
     *,
@@ -2531,6 +2740,7 @@ def render_page(
     tabs = [
         ("score", "Scoring", "Plugin score and rationale"),
         ("ml", "Machine learning", "Model results and metrics"),
+        ("about", "About", "What is CANARY and how to use it"),
     ]
     tab_links = "".join(
         f'<a href="/?tab={_escape(tab_key)}" class="tab-link {"is-active" if tab_key == active_tab else ""}" data-tab-link="{_escape(tab_key)}"><strong>{_escape(title)}</strong><span>{_escape(subtitle)}</span></a>'
@@ -2548,6 +2758,8 @@ def render_page(
             ai_error=ai_error,
             rate_limited=rate_limited,
         )
+    elif active_tab == "about":
+        active_panel_html = _render_about_tab()
     else:
         active_panel_html = _render_ml_tab(values, latest_metrics, model_dir_options)
     return f"""<!doctype html>
