@@ -330,10 +330,25 @@ def run_feature_selection(
         LOGGER.warning("Could not look up '%s' in registry; cloned fitted estimator.", model_name)
 
     # --- Evaluate each subset size -------------------------------------------
-    # Include the full feature count as the reference baseline
-    all_sizes = sorted(set(list(subset_sizes) + [len(ranked_col_names)]))
-    # Cap sizes at the actual number of ranked features
-    all_sizes = [s for s in all_sizes if s <= len(ranked_col_names)]
+    # We do NOT retrain the full feature set — we already have its AP from
+    # metrics.json and retraining it is expensive and adds no new information.
+    # Instead we record the original model's AP as the "full" baseline entry
+    # directly, without spawning another training job.
+    #
+    # For Random Forest we also cap the subset sizes at 50 to avoid OOM
+    # errors during retraining — RF is memory-intensive and the full retrain
+    # would require as much RAM as the original training run.
+    is_rf = (
+        "Forest"
+        in type(
+            pipeline.named_steps.get("model") or list(pipeline.named_steps.values())[-1]
+        ).__name__
+    )
+
+    eval_sizes = sorted(s for s in subset_sizes if s <= len(ranked_col_names))
+    if is_rf:
+        eval_sizes = [s for s in eval_sizes if s <= 50]
+        LOGGER.info("Random Forest: capping subset sizes at 50 to avoid OOM.")
 
     # Compute the full available feature set once — used to derive exclusion
     # sets for each subset.  We do this outside the loop so it is not
@@ -346,10 +361,9 @@ def run_feature_selection(
 
     subset_results: list[dict[str, Any]] = []
 
-    for size in all_sizes:
+    for size in eval_sizes:
         subset_cols = ranked_col_names[:size]
-        is_full = size == len(ranked_col_names)
-        label = "full" if is_full else f"top_{size}"
+        label = f"top_{size}"
 
         LOGGER.info(
             "Training %s model on %d features (subset: %s) …",
@@ -359,9 +373,7 @@ def run_feature_selection(
         )
 
         try:
-            # Exclude every available column that is NOT in this subset.
-            # For the full subset, extra_exclude is empty (train on everything).
-            cols_to_exclude = all_available_cols - set(subset_cols) if not is_full else None
+            cols_to_exclude = all_available_cols - set(subset_cols)
 
             subset_metrics = train_model(
                 estimator=clone(estimator),
@@ -383,10 +395,8 @@ def run_feature_selection(
 
             # Compute retention relative to the full model AP
             retention: float | None = None
-            if not is_full and ap is not None and full_ap is not None and full_ap > 0:
+            if ap is not None and full_ap is not None and full_ap > 0:
                 retention = round(ap / full_ap, 4)
-            elif is_full:
-                retention = 1.0
 
             result = {
                 "subset_label": label,
@@ -397,22 +407,17 @@ def run_feature_selection(
                 "ap_retention_vs_full": retention,
                 "meets_h3_threshold": (
                     ap is not None and full_ap is not None and full_ap > 0 and ap >= full_ap * 0.90
-                )
-                if not is_full
-                else None,
+                ),
                 "features_used": subset_cols,
             }
             subset_results.append(result)
 
-            status = ""
-            if not is_full and ap is not None and full_ap is not None and full_ap > 0:
+            if ap is not None and full_ap is not None and full_ap > 0:
                 pct = 100 * ap / full_ap
                 h3_flag = "✓ H3" if ap >= full_ap * 0.90 else "  —"
                 status = f"  AP={ap:.4f}  ({pct:.1f}% of full)  {h3_flag}"
-            elif not is_full and ap is not None:
-                status = f"  AP={ap:.4f}  (full model AP unavailable for comparison)"
             else:
-                status = f"  AP={ap:.4f if ap is not None else 'n/a'}  (full model baseline)"
+                status = f"  AP={ap:.4f if ap is not None else 'n/a'}"
             LOGGER.info("  %s: %d features%s", label, actual_features, status)
 
         except Exception as exc:  # noqa: BLE001
@@ -430,6 +435,23 @@ def run_feature_selection(
                     "error": str(exc),
                 }
             )
+
+    # --- Add full model baseline entry (no retrain needed) -----------------
+    # Use the AP from the original metrics.json as the full-model reference.
+    # This avoids an expensive and memory-intensive full retrain.
+    subset_results.append(
+        {
+            "subset_label": "full",
+            "requested_size": len(ranked_col_names),
+            "actual_feature_count": len(full_feature_cols),
+            "average_precision": round(full_ap, 4) if full_ap is not None else None,
+            "roc_auc": None,
+            "ap_retention_vs_full": 1.0,
+            "meets_h3_threshold": None,
+            "features_used": list(ranked_col_names),
+            "note": "Original trained model — no retrain performed",
+        }
+    )
 
     # --- Find the smallest subset that meets H3 (>=90% of full AP) -----------
     try:

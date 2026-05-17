@@ -618,6 +618,171 @@ def _render_ml_score_panel(ml: dict[str, Any]) -> str:
     )
 
 
+def _build_explain_prompt(
+    plugin: str,
+    score_result: dict[str, Any],
+    ml: dict[str, Any] | None,
+) -> str:
+    """
+    Build a plain-English prompt that summarises the CANARY score data
+    and asks an LLM to explain it to a security analyst.
+
+    The prompt is designed to be pasted into Claude, ChatGPT, or any
+    other LLM.  No API calls are made by the webapp itself.
+    """
+    lines: list[str] = []
+
+    lines.append(
+        "You are a cybersecurity analyst assistant.  A tool called CANARY has just "
+        "assessed the near-term advisory risk for a Jenkins plugin.  Please explain "
+        "the results below in plain English for a software security analyst who is "
+        "not familiar with machine learning.  Focus on:"
+    )
+    lines.append("  1. What the overall risk level means practically")
+    lines.append("  2. The two or three most important reasons driving the score")
+    lines.append("  3. What concrete actions the analyst should consider")
+    lines.append("  4. Any caveats or limitations worth mentioning")
+    lines.append("")
+    lines.append("Keep the explanation concise — three to five short paragraphs.")
+    lines.append("")
+    lines.append("=" * 60)
+    lines.append(f"CANARY ASSESSMENT — Plugin: {plugin}")
+    lines.append("=" * 60)
+    lines.append("")
+
+    # Heuristic score section
+    score = score_result.get("score", "?")
+    reasons = score_result.get("reasons", [])
+    lines.append(f"HEURISTIC SCORE: {score} / 100")
+    lines.append("")
+    lines.append("Scoring rationale:")
+    for r in reasons:
+        lines.append(f"  • {r}")
+    lines.append("")
+
+    # Score components if present
+    components = score_result.get("features", {}).get("score_components")
+    if components:
+        lines.append("Score breakdown by component:")
+        for k, v in components.items():
+            lines.append(f"  • {k.replace('_', ' ').title()}: {v} pts")
+        lines.append("")
+
+    # ML score section
+    if ml:
+        prob = ml.get("probability", "?")
+        risk_cat = ml.get("risk_category", "?")
+        model_dir = ml.get("model_dir", "")
+        model_name = ml.get("model_name", "")
+        lines.append(
+            f"ML ADVISORY RISK SCORE: {prob} ({float(prob) * 100:.1f}% probability of "
+            f"a security advisory within 180 days)"
+        )
+        lines.append(f"Risk category: {risk_cat}")
+        if model_name:
+            lines.append(f"Model: {model_name} ({model_dir.split('/')[-1]})")
+        lines.append("")
+        drivers = ml.get("drivers") or []
+        if drivers:
+            lines.append("Top contributing features (from ML model):")
+            for d in drivers[:8]:
+                name = d.get("name", "")
+                val = d.get("value")
+                dirn = d.get("direction", "")
+                arrow = (
+                    "▲ increases risk"
+                    if dirn == "increases_risk"
+                    else ("▼ decreases risk" if dirn == "decreases_risk" else "— neutral")
+                )
+                val_str = f"{val:.4g}" if val is not None else "n/a"
+                lines.append(f"  • {name} = {val_str}  [{arrow}]")
+            lines.append("")
+
+    lines.append("=" * 60)
+    lines.append("Please provide your plain-English explanation now.")
+
+    return "\n".join(lines)
+
+
+def _render_explain_card(plugin: str, score_result: dict[str, Any]) -> str:
+    """Render the Explain with AI card — copy-prompt approach, zero API cost."""
+    import urllib.parse as _up
+
+    ml = score_result.get("ml")
+    prompt = _build_explain_prompt(plugin, score_result, ml)
+    prompt_escaped = _escape(prompt)
+
+    claude_url = "https://claude.ai/new?q=" + _up.quote(prompt, safe="")
+    chatgpt_url = "https://chatgpt.com/?q=" + _up.quote(prompt, safe="")
+
+    btn_copy = (
+        '<button type="button" id="explain-copy-btn"'
+        ' onclick="(function(btn){'
+        "navigator.clipboard.writeText(document.getElementById('explain-prompt').value)"
+        ".then(function(){var o=btn.textContent;btn.textContent='Copied!';"
+        "setTimeout(function(){btn.textContent=o;},2000);})"
+        ".catch(function(){document.getElementById('explain-prompt').select();"
+        "document.execCommand('copy');});})(this)\""
+        ' style="background:var(--accent);border:none;color:#fff;padding:.5rem 1rem;'
+        'border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem">'
+        "Copy prompt"
+        "</button>"
+    )
+    btn_claude = (
+        f'<a href="{claude_url}" target="_blank" rel="noopener noreferrer"'
+        ' style="display:inline-flex;align-items:center;gap:.4rem;'
+        "background:rgba(204,153,51,.15);border:1px solid rgba(204,153,51,.3);"
+        "color:#cc9933;padding:.5rem 1rem;border-radius:8px;"
+        'text-decoration:none;font-weight:600;font-size:.9rem">'
+        "Open in Claude"
+        "</a>"
+    )
+    btn_chatgpt = (
+        f'<a href="{chatgpt_url}" target="_blank" rel="noopener noreferrer"'
+        ' style="display:inline-flex;align-items:center;gap:.4rem;'
+        "background:rgba(16,163,127,.12);border:1px solid rgba(16,163,127,.3);"
+        "color:#10a37f;padding:.5rem 1rem;border-radius:8px;"
+        'text-decoration:none;font-weight:600;font-size:.9rem">'
+        "Open in ChatGPT"
+        "</a>"
+    )
+    textarea = (
+        '<div style="margin-top:.4rem">'
+        '<textarea id="explain-prompt" readonly'
+        ' style="width:100%;min-height:220px;background:var(--panel2);'
+        "border:1px solid var(--line);border-radius:10px;padding:.75rem;"
+        "font-family:var(--mono);font-size:.78rem;line-height:1.5;"
+        'color:var(--text);resize:vertical;box-sizing:border-box">'
+        f"{prompt_escaped}"
+        "</textarea>"
+        "</div>"
+    )
+    tip = (
+        '<p style="font-size:.78rem;color:var(--muted);margin-top:.5rem">'
+        "Tip: The &ldquo;Open in&rdquo; buttons pre-fill the prompt automatically. "
+        "You can also copy and edit the prompt before sending."
+        "</p>"
+    )
+
+    return (
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">AI explanation</p>'
+        "<h2>Explain this score</h2>"
+        '<p class="kicker">Copy the prompt below into any AI assistant for a plain-English '
+        "explanation of these results. No data leaves this page automatically.</p>"
+        '</div><span class="pill pill--muted">Bring your own AI</span></div>'
+        '<div style="display:flex;gap:.75rem;flex-wrap:wrap;margin:.8rem 0">'
+        + btn_copy
+        + btn_claude
+        + btn_chatgpt
+        + "</div>"
+        + textarea
+        + tip
+        + "</section>"
+    )
+
+
 def _render_score_section(
     values: dict[str, Any],
     plugin_options: list[str],
@@ -729,6 +894,9 @@ def _render_score_section(
                 "<strong>canary train baseline</strong> to create one.</p>"
                 "</section>"
             )
+
+        # AI explanation card — always shown after scoring
+        output_parts.append(_render_explain_card(score_result["plugin"], score_result))
     else:
         output_parts.append(
             '<section class="card">'
