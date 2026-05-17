@@ -726,9 +726,9 @@ def _call_anthropic_explain(prompt: str) -> str:
     """
     Call the Anthropic API and return the explanation text.
     Uses a tight token cap to bound cost.
-    Raises on any API or network error.
+    Raises RuntimeError with the full API error body on failure.
     """
-    import os
+    import urllib.error
     import urllib.parse
     import urllib.request
 
@@ -738,7 +738,7 @@ def _call_anthropic_explain(prompt: str) -> str:
 
     payload = json.dumps(
         {
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-haiku-4-5-20251001",
             "max_tokens": 500,
             "system": (
                 "You are a concise cybersecurity analyst assistant. "
@@ -764,8 +764,12 @@ def _call_anthropic_explain(prompt: str) -> str:
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
-        data = json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")
+        raise RuntimeError(f"Anthropic API error {exc.code}: {body}") from exc
 
     blocks = data.get("content") or []
     return "\n\n".join(b["text"] for b in blocks if b.get("type") == "text").strip()
@@ -889,22 +893,35 @@ def _render_explain_card(
         "</p>"
     )
 
+    # ── "Bring your own AI" collapsible section ──────────────────────────────
+    byoai_section = (
+        '<details style="margin-top:.9rem;border-top:1px solid var(--line);padding-top:.8rem">'
+        '<summary style="cursor:pointer;font-size:.88rem;font-weight:600;color:var(--muted);'
+        'padding:.2rem 0">Bring your own AI</summary>'
+        '<p style="font-size:.82rem;color:var(--muted);margin:.5rem 0 .7rem">Copy the prompt '
+        "below and paste it into Claude, ChatGPT, or any other AI assistant. "
+        "You control what gets shared.</p>"
+        '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem">'
+        + btn_copy
+        + btn_claude
+        + btn_chatgpt
+        + "</div>"
+        + textarea
+        + "</details>"
+    )
+
     return (
         '<section class="card" style="align-self:start">'
         '<div class="card__header"><div>'
         '<p class="eyebrow">AI explanation</p>'
         "<h2>Explain this score</h2>"
-        '<p class="kicker">Get a plain-English summary from an AI assistant. '
-        "No data leaves automatically — you choose what to share.</p>"
-        '</div><span class="pill pill--muted">Bring your own AI</span></div>'
-        '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin:.7rem 0">'
+        "</div></div>"
+        # Primary action — in-page explanation
+        '<div style="margin:.6rem 0">'
         + btn_inpage
-        + btn_copy
-        + btn_claude
-        + btn_chatgpt
         + "</div>"
         + ai_panel
-        + textarea
+        + byoai_section
         + tip
         + "</section>"
     )
@@ -2670,7 +2687,9 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                     ai_result = _call_anthropic_explain(prompt)  # noqa: F841
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Anthropic explain call failed: %s", exc)
-                    ai_error = "AI explanation unavailable — please use Copy or Open buttons."  # noqa: F841
+                    ai_error = (
+                        f"AI explanation unavailable ({exc}) — use Copy or Open buttons below."  # noqa: F841
+                    )
         values["active_tab"] = "score"
 
     if method == "POST" and path == "/score":
