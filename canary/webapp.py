@@ -666,7 +666,7 @@ def _render_score_section(
             "<h2>Score a plugin</h2>"
             '<p class="kicker">Review the CANARY score, rationale, and supporting evidence.</p>'
             '</div><span class="pill">Core workflow</span></div>',
-            '<form method="post" action="/score" class="form-grid" data-plugin-strict="true">',
+            '<form method="post" action="/score" style="display:grid;gap:.9rem" data-plugin-strict="true">',
             '<input type="hidden" name="active_tab" value="score">',
             _plugin_picker("plugin", "Plugin ID", values["plugin"], plugin_options),
             _select(
