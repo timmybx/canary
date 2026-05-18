@@ -12,6 +12,8 @@ Workflow
     ranking (mean |SHAP| per feature, descending).
 3.  Iteratively retrain the *same model family* on progressively smaller
     feature subsets: top-5, top-10, top-15, top-20, top-30, top-50, full.
+    (Random Forest skips retraining entirely due to OOM risk — MDI ranking
+    only.)
 4.  Record average precision at each subset size.
 5.  Write feature_selection.json to the model directory.
 
@@ -347,8 +349,12 @@ def run_feature_selection(
 
     eval_sizes = sorted(s for s in subset_sizes if s <= len(ranked_col_names))
     if is_rf:
-        eval_sizes = [s for s in eval_sizes if s <= 50]
-        LOGGER.info("Random Forest: capping subset sizes at 50 to avoid OOM.")
+        eval_sizes = []
+        LOGGER.info(
+            "Random Forest: skipping subset retraining entirely to avoid OOM. "
+            "MDI importance ranking is recorded above. The full-model AP from "
+            "metrics.json is used as the sole baseline reference entry."
+        )
 
     # Compute the full available feature set once — used to derive exclusion
     # sets for each subset.  We do this outside the loop so it is not

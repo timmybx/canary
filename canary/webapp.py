@@ -600,10 +600,17 @@ def _render_ml_score_panel(ml: dict[str, Any]) -> str:
             else ("color:#5ce0a0" if direction == "decreases_risk" else "")
         )
         val = d.get("value")
-        val_str = f"{val:.3g}" if val is not None else "n/a"
+        feat_nm = d.get("name", "")
+        val_str = _fmt_driver_value(val, feat_nm)
+        feat_tip = _FEATURE_TIPS.get(feat_nm, "")
+        name_html = (
+            f'<span class="tip" data-tip="{_escape(feat_tip)}"><code>{_escape(feat_nm)}</code></span>'
+            if feat_tip
+            else f"<code>{_escape(feat_nm)}</code>"
+        )
         drivers_html += (
             f'<li style="display:flex;justify-content:space-between;padding:.3rem 0;border-bottom:1px solid rgba(255,255,255,.05)">'
-            f'<span><span style="{color};font-weight:700;margin-right:.4rem">{_escape(icon)}</span><code>{_escape(d["name"])}</code></span>'
+            f'<span><span style="{color};font-weight:700;margin-right:.4rem">{_escape(icon)}</span>{name_html}</span>'
             f'<span class="muted" style="font-size:.85rem">{_escape(val_str)}</span>'
             f"</li>"
         )
@@ -628,6 +635,63 @@ def _render_ml_score_panel(ml: dict[str, Any]) -> str:
         f'<div class="panel"><h4>ML result (JSON)</h4><pre>{_escape(ml["pretty_json"])}</pre></div>'
         "</div>"
     )
+
+
+def _fmt_driver_value(val: float | int | str | None, feature_name: str = "") -> str:
+    """
+    Format a driver feature value for human display.
+
+    Rules:
+    - None / missing  → "n/a"
+    - Days features   → "X days" or "X.X years" for large values
+    - Fraction/rate   → 2 decimal places as percentage where appropriate
+    - Count features  → integer with comma separator
+    - Small floats    → 3 significant figures, no scientific notation
+    - Large floats    → comma-separated integer
+    """
+    if val is None:
+        return "n/a"
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return str(val)
+
+    name = feature_name.lower()
+
+    # Days features — convert large values to years
+    if "days" in name or "age_days" in name:
+        days = int(round(v))
+        if abs(days) >= 730:
+            years = days / 365.25
+            return f"{years:.1f} yrs"
+        return f"{days:,} days"
+
+    # Fraction / rate features (0-1 range) — show as decimal, not %
+    # (These are model feature values, not probabilities shown to users)
+    if any(k in name for k in ("fraction", "ratio", "rate")):
+        return f"{v:.3f}"
+
+    # Count features — integer with commas
+    if any(k in name for k in ("count", "events", "visits", "days_active")):
+        return f"{int(round(v)):,}"
+
+    # Month staleness features — "X months"
+    if "months_since" in name:
+        months = int(round(v))
+        if months >= 24:
+            years = months / 12
+            return f"{years:.1f} yrs"
+        return f"{months} mo"
+
+    # Small values (< 1000) — 3 sig figs, no sci notation
+    if abs(v) < 1000:
+        # Avoid showing e.g. "4.00" for integers
+        if v == int(v):
+            return f"{int(v):,}"
+        return f"{v:.3g}"
+
+    # Large values — comma-separated integer
+    return f"{int(round(v)):,}"
 
 
 def _build_explain_prompt(
@@ -701,7 +765,7 @@ def _build_explain_prompt(
                     if dirn == "decreases_risk"
                     else "neutral"
                 )
-                val_s = f"{val:.4g}" if val is not None else "n/a"
+                val_s = _fmt_driver_value(val, name)
                 lines.append(f"  * {name} = {val_s}  [{arrow}]")
             lines.append("")
 
@@ -823,13 +887,15 @@ def _render_explain_card(
         'text-decoration:none;font-weight:600;font-size:.85rem">Open in ChatGPT</a>'
     )
 
-    # In-page "Explain now" button — POSTs to /explain
+    # In-page "Explain now" button — uses GET so corporate firewalls don't block it
+    _explain_model_dir = _escape(score_result.get("score_model_dir") or "")
+    _explain_plugin = _escape(plugin)
     btn_inpage = (
-        '<form method="post" action="/explain" style="display:inline">'
-        f'<input type="hidden" name="plugin" value="{_escape(plugin)}">'
-        '<input type="hidden" name="active_tab" value="score">'
-        f'<input type="hidden" name="score_model_dir" '
-        f'value="{_escape(score_result.get("score_model_dir") or "")}">'
+        '<form method="get" action="/" style="display:inline">'
+        '<input type="hidden" name="tab" value="score">'
+        f'<input type="hidden" name="plugin" value="{_explain_plugin}">'
+        f'<input type="hidden" name="score_model_dir" value="{_explain_model_dir}">'
+        '<input type="hidden" name="explain" value="1">'
         '<button type="submit"'
         ' style="background:rgba(120,80,220,.2);border:1px solid rgba(120,80,220,.4);'
         "color:#a78bfa;padding:.45rem .9rem;border-radius:8px;cursor:pointer;"
@@ -3029,6 +3095,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
             "score_model_dir": query.get("score_model_dir", [""])[-1],
         }
     )
+    _get_explain = query.get("explain", [""])[-1] == "1"
     plugin_options, latest_metrics, model_dir_options = _prepare_request_state(values)
     score_result = None
     score_error = None
@@ -3041,8 +3108,20 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         start_response("404 Not Found", [("Content-Type", "text/plain; charset=utf-8")])
         return [b"Not found"]
 
-    # /score redirect — corporate firewalls may block POST to /score;
-    # redirect to GET /?tab=score so scoring works as a normal page navigation.
+    # /score and /explain redirects — corporate firewalls block POST to explicit paths;
+    # redirect to GET equivalents so scoring and explain work as normal page navigation.
+    if path == "/explain":
+        qs = urllib.parse.urlencode(
+            {
+                "tab": "score",
+                "plugin": values.get("plugin") or "",
+                "score_model_dir": values.get("score_model_dir") or "",
+                "explain": "1",
+            }
+        )
+        start_response("302 Found", [("Location", f"/?{qs}"), ("Content-Type", "text/plain")])
+        return [b""]
+
     if path == "/score":
         qs = urllib.parse.urlencode(
             {
@@ -3054,8 +3133,55 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         start_response("302 Found", [("Location", f"/?{qs}"), ("Content-Type", "text/plain")])
         return [b""]
 
+    # GET explain — runs when explain=1 is in query string
+    # Same logic as the old POST /explain but triggered by GET so firewalls don't block it
+    if method == "GET" and _get_explain and values.get("plugin"):
+        plugin = values["plugin"].strip()
+        try:
+            _score_model_dir = values.get("score_model_dir") or ""
+            score_result = _score_payload(
+                score_plugin_baseline(plugin, real=True),
+                score_model_dir=_score_model_dir,
+            )
+            _ml_scorer = _get_ml_scorer(_score_model_dir) if _score_model_dir else None
+            if _ml_scorer is not None:
+                try:
+                    ml_score_result = _ml_score_payload(score_plugin_ml(plugin, scorer=_ml_scorer))
+                    score_result["ml"] = ml_score_result
+                except Exception as _ml_exc:  # noqa: BLE001
+                    logger.warning("ML scoring failed for %s: %s", plugin, _ml_exc)
+                    score_result["ml"] = None
+            else:
+                score_result["ml"] = None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Score failed during GET explain for %s: %s", plugin, exc)
+            score_error = str(exc)
+        # Call Anthropic API with rate limiting
+        if score_result is not None:
+            client_ip = environ.get("HTTP_X_FORWARDED_FOR", "").split(",")[
+                0
+            ].strip() or environ.get("REMOTE_ADDR", "unknown")
+            if not _check_explain_rate_limit(client_ip):
+                rate_limited = True  # noqa: F841
+            else:
+                try:
+                    prompt = _build_explain_prompt(plugin, score_result, score_result.get("ml"))
+                    ai_result = _call_anthropic_explain(prompt)  # noqa: F841
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Anthropic explain call failed: %s", exc)
+                    ai_error = (
+                        f"AI explanation unavailable ({exc}) — use Copy or Open buttons below."  # noqa: F841
+                    )
+        if _score_model_dir:
+            values["score_model_dir"] = _score_model_dir
+
     # GET scoring — runs when tab=score and a plugin is provided in the query string
-    if method == "GET" and values.get("active_tab") == "score" and values.get("plugin"):
+    if (
+        method == "GET"
+        and values.get("active_tab") == "score"
+        and values.get("plugin")
+        and not _get_explain
+    ):
         plugin = values["plugin"].strip()
         try:
             if not _plugin_known(plugin, values["registry_path"]):
