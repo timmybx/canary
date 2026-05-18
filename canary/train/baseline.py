@@ -423,6 +423,100 @@ def train_model(
             topk_summary[f"precision_at_{k}"] = float(sum(int(item[1]) for item in top_k) / k)
     metrics["ranking_metrics"] = topk_summary
 
+    # --- Operational scenario analysis ----------------------------------------
+    # Computes precision, recall, and lift at a range of k values so the webapp
+    # can present results in plain operational terms (e.g. "if your team reviews
+    # 50 plugins per cycle, CANARY identifies 46 of 77 future advisory plugins
+    # with 92% precision — a 49x improvement over random selection").
+    n_test = len(ranked)
+    n_pos = int(y_test.sum())
+    base_rate_v = n_pos / n_test if n_test > 0 else 0.0
+    cum_tp = 0
+    pk_rows: list[dict[str, Any]] = []
+    k_values = [5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200]
+
+    for i, (_, truth, _) in enumerate(ranked, start=1):
+        cum_tp += int(truth)
+        if i in k_values:
+            prec = cum_tp / i
+            rec = cum_tp / n_pos if n_pos > 0 else 0.0
+            lift = prec / base_rate_v if base_rate_v > 0 else 0.0
+            pk_rows.append(
+                {
+                    "k": i,
+                    "true_positives": cum_tp,
+                    "false_positives": i - cum_tp,
+                    "precision": round(prec, 4),
+                    "recall": round(rec, 4),
+                    "lift": round(lift, 2),
+                }
+            )
+
+    # Recall-target analysis: how many plugins to review to reach X% recall
+    recall_targets: list[dict[str, Any]] = []
+    for target in (0.25, 0.50, 0.75, 0.90):
+        target_tp = int(np.ceil(target * n_pos))
+        k_needed = n_test  # fallback
+        cum = 0
+        for i, (_, truth, _) in enumerate(ranked, start=1):
+            cum += int(truth)
+            if cum >= target_tp:
+                k_needed = i
+                break
+        prec_at = cum / k_needed if k_needed > 0 else 0.0
+        recall_targets.append(
+            {
+                "target_recall": target,
+                "plugins_to_review": k_needed,
+                "pct_of_ecosystem": round(k_needed / n_test * 100, 1) if n_test > 0 else None,
+                "true_positives": min(cum, n_pos),
+                "precision": round(prec_at, 4),
+            }
+        )
+
+    # Named operational scenarios
+    scenarios = [
+        ("Weekly triage \u2014 very tight capacity", 10),
+        ("Monthly review \u2014 small team", 25),
+        ("Quarterly review \u2014 moderate capacity", 50),
+        ("Semi-annual audit \u2014 larger team", 100),
+    ]
+    scenario_rows: list[dict[str, Any]] = []
+    for label, k in scenarios:
+        if len(ranked) >= k:
+            tp_k = sum(int(item[1]) for item in ranked[:k])
+            prec_k = tp_k / k
+            rec_k = tp_k / n_pos if n_pos > 0 else 0.0
+            lift_k = prec_k / base_rate_v if base_rate_v > 0 else 0.0
+            scenario_rows.append(
+                {
+                    "label": label,
+                    "k": k,
+                    "true_positives": tp_k,
+                    "precision": round(prec_k, 4),
+                    "recall": round(rec_k, 4),
+                    "lift": round(lift_k, 2),
+                }
+            )
+
+    operational: dict[str, Any] = {
+        "n_test": n_test,
+        "n_positive": n_pos,
+        "base_rate": round(base_rate_v, 6),
+        "model_name": model_name,
+        "split_strategy": split_strategy,
+        "test_start_month": test_start_month,
+        "precision_at_k": pk_rows,
+        "recall_targets": recall_targets,
+        "scenarios": scenario_rows,
+    }
+    metrics["operational_scenarios"] = {
+        "n_test": n_test,
+        "n_positive": n_pos,
+        "base_rate": round(base_rate_v, 6),
+        "scenarios": scenario_rows,
+    }
+
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
@@ -457,6 +551,11 @@ def train_model(
     joblib.dump(full_pipeline, out_path / "model.joblib")
     (out_path / "feature_columns.json").write_text(
         json.dumps(feature_cols, indent=2), encoding="utf-8"
+    )
+
+    # --- Operational precision@k analysis ------------------------------------
+    (out_path / "precision_at_k.json").write_text(
+        json.dumps(operational, indent=2, sort_keys=True), encoding="utf-8"
     )
 
     return metrics

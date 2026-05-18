@@ -2001,9 +2001,165 @@ def _render_feature_item(item: dict[str, Any], is_xgb: bool) -> str:
     )
 
 
-def _render_ml_metrics(metrics: dict[str, Any] | None) -> str:
+def _load_precision_at_k(model_out_dir: str | Path) -> dict[str, Any] | None:
+    """Load precision_at_k.json from a model directory if it exists."""
+    try:
+        parts = _model_output_dir_parts(model_out_dir)
+    except ValueError:
+        return None
+    # Try direct path first (works on Render where paths resolve consistently)
+    stem = Path(str(model_out_dir)).name
+    for target in [
+        MODEL_OUTPUTS_ROOT / stem / "precision_at_k.json",
+        MODEL_OUTPUTS_ROOT.joinpath(*parts, "precision_at_k.json"),
+    ]:
+        if target.exists():
+            try:
+                return json.loads(target.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                return None
+    return None
+
+
+def _render_operational_panel(pk: dict[str, Any]) -> str:
+    """
+    Render the operational scenario analysis panel.
+
+    Shows results in plain English: "if your team reviews X plugins per cycle,
+    CANARY identifies Y of Z future advisory plugins with P% precision."
+    This directly answers the question a security manager would actually ask.
+    """
+    n_pos = pk.get("n_positive", 0)
+    n_test = pk.get("n_test", 0)
+    base_rate = pk.get("base_rate", 0.0)
+    scenarios = pk.get("scenarios") or []
+    targets = pk.get("recall_targets") or []
+    split = pk.get("split_strategy", "time")
+
+    if not scenarios:
+        return ""
+
+    # Context note about evaluation strategy
+    split_label = "time split" if split == "time" else "group-time split"
+    context = (
+        f'<p style="font-size:.84rem;color:var(--muted);margin:.4rem 0 .9rem">'
+        f"Based on {n_test:,} test observations, {n_pos} future advisory plugins, "
+        f"base rate {base_rate * 100:.2f}% &mdash; evaluated under <strong>{split_label}</strong>. "
+        f"Time-split results represent continuous monitoring of a known plugin inventory."
+        f"</p>"
+    )
+
+    # Scenario table
+    rows_html = ""
+    for s in scenarios:
+        k = s.get("k", 0)
+        tp = s.get("true_positives", 0)
+        prec = s.get("precision", 0.0)
+        rec = s.get("recall", 0.0)
+        lift = s.get("lift", 0.0)
+        label = _escape(s.get("label", ""))
+        if prec >= 0.90:
+            prec_color = "color:#5ce0a0;font-weight:700"
+        elif prec >= 0.60:
+            prec_color = "color:#e6a01e;font-weight:700"
+        else:
+            prec_color = "color:var(--text)"
+        rows_html += (
+            f"<tr>"
+            f"<td style='padding:.5rem .75rem;font-size:.88rem'>{label}</td>"
+            f"<td style='padding:.5rem .75rem;text-align:right;font-size:.88rem'>{k}</td>"
+            f"<td style='padding:.5rem .75rem;text-align:right;font-size:.88rem'>"
+            f"{tp} of {n_pos}</td>"
+            f"<td style='padding:.5rem .75rem;text-align:right;{prec_color}'>"
+            f"{prec:.0%}</td>"
+            f"<td style='padding:.5rem .75rem;text-align:right;font-size:.88rem'>"
+            f"{rec:.0%}</td>"
+            f"<td style='padding:.5rem .75rem;text-align:right;font-size:.88rem;"
+            f"color:var(--muted)'>{lift:.1f}x</td>"
+            f"</tr>"
+        )
+
+    table_html = (
+        '<table style="width:100%;border-collapse:collapse">'
+        "<thead><tr>"
+        + "".join(
+            f"<th style='text-align:{align};padding:.4rem .75rem;"
+            f"font-size:.8rem;color:var(--muted);font-weight:600'>{h}</th>"
+            for h, align in [
+                ("Scenario", "left"),
+                ("Review", "right"),
+                ("Catch", "right"),
+                ("Precision", "right"),
+                ("Recall", "right"),
+                ("vs. random", "right"),
+            ]
+        )
+        + "</tr></thead>"
+        f"<tbody>{rows_html}</tbody>"
+        "</table>"
+    )
+
+    # Recall target callouts
+    callout_parts = []
+    for t in targets:
+        rec_pct = int(t.get("target_recall", 0) * 100)
+        k_need = t.get("plugins_to_review", 0)
+        pct_eco = t.get("pct_of_ecosystem")
+        tp_t = t.get("true_positives", 0)
+        prec_t = t.get("precision", 0.0)
+        eco_str = f" ({pct_eco:.1f}% of ecosystem)" if pct_eco is not None else ""
+        callout_parts.append(
+            f'<div style="padding:.5rem .75rem;background:var(--panel2);'
+            f'border-radius:8px;font-size:.84rem">'
+            f"<strong>{rec_pct}% recall</strong><br>"
+            f'<span style="color:var(--muted)">Review top {k_need}{eco_str} → '
+            f"catch {tp_t}/{n_pos} ({prec_t:.0%} precision)</span>"
+            f"</div>"
+        )
+    callouts_html = (
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));'
+        f'gap:.5rem;margin-top:.75rem">{"".join(callout_parts)}</div>'
+        if callout_parts
+        else ""
+    )
+
+    # Key headline finding (best scenario)
+    best = scenarios[2] if len(scenarios) > 2 else (scenarios[-1] if scenarios else None)
+    headline = ""
+    if best:
+        headline = (
+            '<div style="margin-bottom:.75rem;padding:.7rem .9rem;'
+            "background:rgba(82,196,26,.08);border:1px solid rgba(82,196,26,.25);"
+            'border-radius:10px;font-size:.9rem">'
+            f"<strong>Key finding:</strong> reviewing the top "
+            f"<strong>{best['k']}</strong> highest-scored plugins "
+            f"({best['k'] / n_test * 100:.1f}% of the ecosystem) identifies "
+            f"<strong>{best['true_positives']} of {n_pos}</strong> future advisory "
+            f"plugins with <strong>{best['precision']:.0%} precision</strong> "
+            f"&mdash; a <strong>{best['lift']:.0f}x</strong> improvement over random selection."
+            "</div>"
+        )
+
+    return (
+        "<div>"
+        "<h4>Operational scenario analysis</h4>"
+        + context
+        + headline
+        + table_html
+        + callouts_html
+        + '<p style="font-size:.78rem;color:var(--muted);margin-top:.6rem">'
+        "Precision = fraction of flagged plugins that had a future advisory. "
+        "Recall = fraction of all future advisory plugins that were flagged. "
+        "vs. random = improvement over baseline rate of selecting plugins at random."
+        "</p>"
+        "</div>"
+    )
+
+
+def _render_ml_metrics(metrics: dict[str, Any] | None, model_out_dir: str = "") -> str:
     if not metrics:
         return '<p class="muted">Train a baseline or load metrics from an existing model run to surface results here.</p>'
+    pk_data = _load_precision_at_k(model_out_dir) if model_out_dir else None
 
     raw_ranking = metrics.get("ranking_metrics")
     ranking = raw_ranking if isinstance(raw_ranking, dict) else {}
@@ -2089,6 +2245,10 @@ def _render_ml_metrics(metrics: dict[str, Any] | None) -> str:
         + "</div>"
     )
 
+    operational_panel_html = (
+        f'<div class="panel">{_render_operational_panel(pk_data)}</div>' if pk_data else ""
+    )
+
     return (
         '<div class="result-stack">'
         f"{header_meta}"
@@ -2104,6 +2264,7 @@ def _render_ml_metrics(metrics: dict[str, Any] | None) -> str:
         f"{_render_base_rate_bar(test_positive, test_total)}"
         # Ranking precision
         f'<div class="panel">{_render_ranking_row(ranking, base_rate)}</div>'
+        f"{operational_panel_html}"
         # Feature importance columns — always two columns
         '<div class="grid--two">'
         f'<div class="panel"><h4>{_escape(pos_label)}</h4><ul class="bullet-list">{positive_items}</ul></div>'
@@ -2452,7 +2613,7 @@ def _render_ml_tab(
         "<h2>Readable metrics</h2>"
         '</div><span class="pill pill--muted">Metrics view</span></div>'
         + status_text
-        + _render_ml_metrics(metrics)
+        + _render_ml_metrics(metrics, model_out_dir=values.get("model_out_dir") or "")
         + "</section>"
     )
 
