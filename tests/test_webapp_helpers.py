@@ -18,7 +18,9 @@ from canary.webapp import (
 # ---------------------------------------------------------------------------
 
 
-def _run_app(method: str, path: str, body: bytes = b"") -> tuple[str, list[tuple[str, str]], bytes]:
+def _run_app(
+    method: str, path: str, body: bytes = b"", query_string: str = ""
+) -> tuple[str, list[tuple[str, str]], bytes]:
     status: str | None = None
     headers: list[tuple[str, str]] = []
 
@@ -30,6 +32,7 @@ def _run_app(method: str, path: str, body: bytes = b"") -> tuple[str, list[tuple
     environ = {
         "REQUEST_METHOD": method,
         "PATH_INFO": path,
+        "QUERY_STRING": query_string,
         "CONTENT_LENGTH": str(len(body)),
         "wsgi.input": BytesIO(body),
     }
@@ -160,9 +163,27 @@ def test_normalize_model_output_dir_accepts_nested_path() -> None:
 
 def test_score_get_returns_200_with_console_content() -> None:
     status, headers, body = _run_app("GET", "/score")
-    text = body.decode("utf-8")
-    assert status == "200 OK"
-    assert "CANARY" in text
+    assert status == "302 Found"
+    assert (
+        "Location",
+        "/?tab=score&plugin=&score_model_dir=data%2Fprocessed%2Fmodels%2Fbaseline_6m",
+    ) in headers
+    assert body == b""
+
+
+def test_score_get_with_query_params_redirects_to_score_tab() -> None:
+    status, headers, body = _run_app(
+        "GET",
+        "/score",
+        query_string="plugin=cucumber-reports&score_model_dir=data%2Fprocessed%2Fmodels%2Frun",
+    )
+
+    assert status == "302 Found"
+    assert (
+        "Location",
+        "/?tab=score&plugin=cucumber-reports&score_model_dir=data%2Fprocessed%2Fmodels%2Frun",
+    ) in headers
+    assert body == b""
 
 
 def test_data_get_returns_200() -> None:
@@ -241,13 +262,16 @@ def test_static_path_traversal_returns_404() -> None:
 
 
 def test_score_post_with_missing_plugin_shows_error() -> None:
-    # Posting /score without a plugin should not crash but show an error page
+    # /score is retained as a redirect target; the scoring form now submits GET /.
     body = b"plugin=&real=true"
     status, headers, response = _run_app("POST", "/score", body)
-    text = response.decode("utf-8")
-    assert status == "200 OK"
-    assert ("Content-Type", "text/html; charset=utf-8") in headers
-    assert "The scoring request could not be completed" in text
+    assert status == "302 Found"
+    assert (
+        "Location",
+        "/?tab=score&plugin=&score_model_dir=data%2Fprocessed%2Fmodels%2Fbaseline_6m",
+    ) in headers
+    assert ("Content-Type", "text/plain") in headers
+    assert response == b""
 
 
 def test_score_post_with_unknown_plugin_shows_error(
@@ -259,7 +283,26 @@ def test_score_post_with_unknown_plugin_shows_error(
 
     body_str = f"plugin=nonexistent-plugin&real=true&registry_path={registry}"
     body = body_str.encode("utf-8")
-    status, _headers, response = _run_app("POST", "/score", body)
+    status, headers, response = _run_app("POST", "/score", body)
+    assert status == "302 Found"
+    assert (
+        "Location",
+        "/?tab=score&plugin=&score_model_dir=data%2Fprocessed%2Fmodels%2Fbaseline_6m",
+    ) in headers
+    assert response == b""
+
+
+def test_score_query_with_unknown_plugin_shows_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = tmp_path / "plugins.jsonl"
+    registry.write_text('{"plugin_id": "cucumber-reports"}\n', encoding="utf-8")
+    monkeypatch.setitem(webapp.DEFAULTS, "registry_path", str(registry))
+
+    status, _headers, response = _run_app(
+        "GET", "/", query_string="tab=score&plugin=nonexistent-plugin"
+    )
     text = response.decode("utf-8")
+
     assert status == "200 OK"
     assert "The scoring request could not be completed" in text

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import canary.webapp as webapp
+from canary.scoring.baseline import ScoreResult
 from canary.webapp import (
     _bool_from_form,
     _checkbox,
@@ -522,11 +523,13 @@ def test_app_static_path_traversal_blocked():
 
 def test_app_post_score_empty_plugin():
     body = b"plugin=&real=true"
-    status, _, response = _run_app("POST", "/score", body)
-    text = response.decode("utf-8")
-    assert status == "200 OK"
-    # Should show a validation error (not crash)
-    assert "CANARY" in text
+    status, headers, response = _run_app("POST", "/score", body)
+    assert status == "302 Found"
+    assert (
+        "Location",
+        "/?tab=score&plugin=&score_model_dir=data%2Fprocessed%2Fmodels%2Fbaseline_6m",
+    ) in headers
+    assert response == b""
 
 
 def test_app_post_score_unknown_plugin(tmp_path, monkeypatch):
@@ -535,11 +538,50 @@ def test_app_post_score_unknown_plugin(tmp_path, monkeypatch):
     registry.write_text('{"plugin_id": "known-plugin"}\n', encoding="utf-8")
 
     body = f"plugin=totally-unknown-plugin&real=true&registry_path={registry}".encode()
-    status, _, response = _run_app("POST", "/score", body)
+    status, headers, response = _run_app("POST", "/score", body)
+    assert status == "302 Found"
+    assert (
+        "Location",
+        "/?tab=score&plugin=&score_model_dir=data%2Fprocessed%2Fmodels%2Fbaseline_6m",
+    ) in headers
+    assert response == b""
+
+
+def test_app_get_score_query_renders_result(monkeypatch):
+    monkeypatch.setattr(
+        webapp,
+        "score_plugin_baseline",
+        lambda plugin, real: ScoreResult(
+            plugin=plugin,
+            score=37,
+            reasons=("fixture reason",),
+            features={"feature_a": 1},
+        ),
+    )
+    monkeypatch.setattr(webapp, "_get_ml_scorer", lambda model_dir: None)
+    monkeypatch.setattr(webapp, "_plugin_known", lambda plugin, registry_path: True)
+
+    status, _, response = _run_app("GET", "/", query_string="tab=score&plugin=known-plugin")
     text = response.decode("utf-8")
+
     assert status == "200 OK"
-    # Should show error message
-    assert "scoring request" in text.lower() or "CANARY" in text
+    assert "known-plugin" in text
+    assert "fixture reason" in text
+    assert "37" in text
+
+
+def test_app_get_score_query_unknown_plugin_shows_error(tmp_path, monkeypatch):
+    registry = tmp_path / "plugins.jsonl"
+    registry.write_text('{"plugin_id": "known-plugin"}\n', encoding="utf-8")
+    monkeypatch.setitem(webapp.DEFAULTS, "registry_path", str(registry))
+
+    status, _, response = _run_app(
+        "GET", "/", query_string="tab=score&plugin=totally-unknown-plugin"
+    )
+    text = response.decode("utf-8")
+
+    assert status == "200 OK"
+    assert "The scoring request could not be completed" in text
 
 
 def test_app_post_run_collect_registry():

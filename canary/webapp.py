@@ -996,8 +996,8 @@ def _render_score_section(
             "<h2>Score a plugin</h2>"
             '<p class="kicker">Review the CANARY score, rationale, and supporting evidence.</p>'
             '</div><span class="pill">Core workflow</span></div>',
-            '<form method="post" action="/score" style="display:grid;gap:.9rem" data-plugin-strict="true">',
-            '<input type="hidden" name="active_tab" value="score">',
+            '<form method="get" action="/" style="display:grid;gap:.9rem" data-plugin-strict="true">',
+            '<input type="hidden" name="tab" value="score">',
             _plugin_picker("plugin", "Plugin ID", values["plugin"], plugin_options),
             _select(
                 "score_model_dir", "ML model", values.get("score_model_dir", ""), ml_model_options
@@ -3025,6 +3025,8 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         {
             "active_tab": query.get("tab", [DEFAULTS["active_tab"]])[-1],
             "model_out_dir": query.get("model_out_dir", [""])[-1],
+            "plugin": query.get("plugin", [""])[-1],
+            "score_model_dir": query.get("score_model_dir", [""])[-1],
         }
     )
     plugin_options, latest_metrics, model_dir_options = _prepare_request_state(values)
@@ -3038,6 +3040,51 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
     if path in {"/run", "/train"}:
         start_response("404 Not Found", [("Content-Type", "text/plain; charset=utf-8")])
         return [b"Not found"]
+
+    # /score redirect — corporate firewalls may block POST to /score;
+    # redirect to GET /?tab=score so scoring works as a normal page navigation.
+    if path == "/score":
+        qs = urllib.parse.urlencode(
+            {
+                "tab": "score",
+                "plugin": values.get("plugin") or "",
+                "score_model_dir": values.get("score_model_dir") or "",
+            }
+        )
+        start_response("302 Found", [("Location", f"/?{qs}"), ("Content-Type", "text/plain")])
+        return [b""]
+
+    # GET scoring — runs when tab=score and a plugin is provided in the query string
+    if method == "GET" and values.get("active_tab") == "score" and values.get("plugin"):
+        plugin = values["plugin"].strip()
+        try:
+            if not _plugin_known(plugin, values["registry_path"]):
+                raise ValueError("Please choose a plugin ID from the current registry list.")
+            _score_model_dir = (
+                values.get("score_model_dir") or values.get("model_dir") or DEFAULT_MODEL_DIR
+            )
+            score_result = _score_payload(
+                score_plugin_baseline(plugin, real=True),
+                score_model_dir=_score_model_dir,
+            )
+            _ml_scorer = _get_ml_scorer(_score_model_dir) if _score_model_dir else None
+            if _ml_scorer is not None:
+                try:
+                    ml_score_result = _ml_score_payload(score_plugin_ml(plugin, scorer=_ml_scorer))
+                    score_result["ml"] = ml_score_result
+                except Exception as _ml_exc:  # noqa: BLE001
+                    logger.warning("ML scoring failed for %s: %s", plugin, _ml_exc)
+                    score_result["ml"] = None
+            else:
+                score_result["ml"] = None
+        except ValueError as exc:
+            logger.warning("Rejected GET score request for %s: %s", plugin, exc)
+            score_error = (
+                "The scoring request could not be completed. Check the plugin ID and try again."
+            )
+        except Exception:  # pragma: no cover
+            logger.exception("Unhandled error during GET scoring for %s", plugin)
+            score_error = "Something went wrong while processing your request."
 
     if method == "POST" and path == "/explain":
         form = parse_form(environ)
