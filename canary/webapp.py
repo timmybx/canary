@@ -2650,10 +2650,264 @@ def _render_model_picker(values: dict[str, Any], model_dir_options: list[str]) -
     )
 
 
+def _build_ml_explain_prompt(
+    metrics: dict[str, Any],
+    pk_data: dict[str, Any] | None,
+    fs_data: dict[str, Any] | None,
+    model_out_dir: str,
+) -> str:
+    """Build a focused LLM prompt from ML metrics for the ML tab explain feature."""
+    parsed = _parse_model_dir(model_out_dir)
+    algo = _ALGO_LABELS.get(parsed[0], parsed[0]) if parsed else "Unknown"
+    feat_set = _FEATURE_LABELS.get(parsed[1], parsed[1]) if parsed else "Unknown"
+    split = _SPLIT_LABELS.get(parsed[2], parsed[2]) if parsed else "Unknown"
+
+    roc = metrics.get("roc_auc")
+    ap = metrics.get("average_precision")
+    n_test = metrics.get("test_row_count", 0)
+    n_pos = metrics.get("test_positive_count", 0)
+    base = n_pos / n_test if n_test > 0 else 0.0
+    feat_cnt = metrics.get("feature_count", 0)
+    model_nm = metrics.get("model_name", algo)
+
+    ranking = metrics.get("ranking_metrics") or {}
+    p10 = ranking.get("precision_at_10")
+    p25 = ranking.get("precision_at_25")
+    p50 = ranking.get("precision_at_50")
+    p100 = ranking.get("precision_at_100")
+
+    top_pos = metrics.get("top_positive_features") or []
+
+    lines: list[str] = [
+        "You are a cybersecurity analyst assistant. The following are machine learning "
+        "evaluation results for CANARY, a tool that predicts near-term Jenkins plugin "
+        "advisory risk. Please explain what these results mean for a security manager "
+        "deciding whether to deploy this model in their Jenkins environment. Focus on:",
+        "  1. Whether the model is reliable enough to act on",
+        "  2. What the precision-at-K results mean for team sizing and workload",
+        "  3. What the top features reveal about what drives advisory risk",
+        "  4. Any important caveats about the evaluation design",
+        "",
+        "Keep the explanation to 3-5 short paragraphs. Write in plain prose — "
+        "no markdown headers or bullet lists.",
+        "",
+        "=" * 60,
+        f"MODEL: {model_nm} | Feature set: {feat_set} | Evaluation: {split}",
+        f"Features used: {feat_cnt}",
+        "=" * 60,
+        "",
+        "CORE METRICS:",
+        f"  ROC-AUC:           {roc:.4f}" if roc else "  ROC-AUC:           n/a",
+        f"  Average Precision: {ap:.4f}" if ap else "  Average Precision: n/a",
+        f"  Test set:          {n_test:,} observations, {n_pos} advisory plugins",
+        f"  Base rate:         {base * 100:.2f}% (random selection benchmark)",
+        "",
+    ]
+
+    if p10 is not None or p25 is not None:
+        lines.append("PRECISION AT K (top-K plugins reviewed per cycle):")
+        for k, v in [("10", p10), ("25", p25), ("50", p50), ("100", p100)]:
+            if v is not None:
+                lift = v / base if base > 0 else 0
+                lines.append(f"  Top {k:>3}: {v:.0%} precision  ({lift:.1f}x vs random)")
+        lines.append("")
+
+    if top_pos:
+        lines.append("TOP RISK-INCREASING FEATURES (SHAP importance):")
+        for item in top_pos[:5]:
+            name = item.get("feature") or item.get("name", "")
+            score = item.get("mean_abs_shap") or item.get("importance", 0.0)
+            lines.append(f"  {name}: {score:.5f}")
+        lines.append("")
+
+    if pk_data:
+        scenarios = pk_data.get("scenarios") or []
+        best = next((s for s in scenarios if s.get("k") == 50), None)
+        if best:
+            lines.append(
+                f"OPERATIONAL FINDING: reviewing the top {best['k']} plugins "
+                f"({best['k'] / n_test * 100:.1f}% of ecosystem) catches "
+                f"{best['true_positives']} of {n_pos} future advisory plugins "
+                f"with {best['precision']:.0%} precision — "
+                f"a {best['lift']:.0f}x improvement over random."
+            )
+            lines.append("")
+
+    if fs_data:
+        h3_ok = fs_data.get("h3_satisfied", False)
+        h3_info = fs_data.get("h3_smallest_qualifying_subset")
+        full_ap = fs_data.get("full_model_average_precision")
+        if h3_ok and h3_info:
+            lines.append(
+                f"FEATURE SELECTION (H3): a {h3_info['size']}-feature subset retains "
+                f"{h3_info['ap_retention'] * 100:.1f}% of full-model AP "
+                f"({h3_info['average_precision']:.4f} vs {full_ap:.4f}) — "
+                "H3 is satisfied."
+            )
+        else:
+            lines.append(
+                "FEATURE SELECTION (H3): no evaluated subset reached 90% of full-model AP — "
+                "H3 is not satisfied at tested subset sizes."
+            )
+        lines.append("")
+
+    lines += ["=" * 60, "Please provide your plain-English explanation now."]
+    return "\n".join(lines)
+
+
+def _render_ml_explain_card(
+    values: dict[str, Any],
+    metrics: dict[str, Any] | None,
+    pk_data: dict[str, Any] | None,
+    fs_data: dict[str, Any] | None,
+    ai_result: str | None = None,
+    ai_error: str | None = None,
+    rate_limited: bool = False,
+) -> str:
+    """Render the AI explanation card for the ML tab."""
+    import urllib.parse as _up
+
+    model_out_dir = values.get("model_out_dir") or ""
+    if not metrics or not model_out_dir:
+        return ""
+
+    prompt = _build_ml_explain_prompt(metrics, pk_data, fs_data, model_out_dir)
+    claude_url = "https://claude.ai/new?q=" + _up.quote(prompt, safe="")
+    chatgpt_url = "https://chatgpt.com/?q=" + _up.quote(prompt, safe="")
+
+    _mdir_esc = _escape(model_out_dir)
+    btn_inpage = (
+        '<form method="get" action="/" style="display:inline">'
+        '<input type="hidden" name="tab" value="ml">'
+        f'<input type="hidden" name="model_out_dir" value="{_mdir_esc}">'
+        '<input type="hidden" name="ml_explain" value="1">'
+        '<button type="submit"'
+        ' style="background:rgba(120,80,220,.2);border:1px solid rgba(120,80,220,.4);'
+        "color:#a78bfa;padding:.45rem .9rem;border-radius:8px;cursor:pointer;"
+        'font-weight:600;font-size:.85rem">Explain now (AI)</button>'
+        "</form>"
+    )
+    btn_copy = (
+        '<button type="button"'
+        ' onclick="(function(b){navigator.clipboard.writeText('
+        "document.getElementById('mlep').value)"
+        ".then(function(){var o=b.textContent;b.textContent='Copied!';"
+        "setTimeout(function(){b.textContent=o;},2000);})"
+        ".catch(function(){document.getElementById('mlep').select();"
+        "document.execCommand('copy');});})(this)\""
+        ' style="background:var(--accent);border:none;color:#fff;'
+        "padding:.45rem .9rem;border-radius:8px;cursor:pointer;"
+        'font-weight:600;font-size:.85rem">Copy prompt</button>'
+    )
+    btn_claude = (
+        f'<a href="{claude_url}" target="_blank" rel="noopener noreferrer"'
+        ' style="display:inline-flex;align-items:center;'
+        "background:rgba(204,153,51,.15);border:1px solid rgba(204,153,51,.3);"
+        "color:#cc9933;padding:.45rem .9rem;border-radius:8px;"
+        'text-decoration:none;font-weight:600;font-size:.85rem">Open in Claude</a>'
+    )
+    btn_chatgpt = (
+        f'<a href="{chatgpt_url}" target="_blank" rel="noopener noreferrer"'
+        ' style="display:inline-flex;align-items:center;'
+        "background:rgba(16,163,127,.12);border:1px solid rgba(16,163,127,.3);"
+        "color:#10a37f;padding:.45rem .9rem;border-radius:8px;"
+        'text-decoration:none;font-weight:600;font-size:.85rem">Open in ChatGPT</a>'
+    )
+
+    # AI result panel
+    ai_panel = ""
+    if rate_limited:
+        ai_panel = (
+            '<div style="margin-top:.8rem;padding:.7rem .9rem;'
+            "background:rgba(220,80,60,.1);border:1px solid rgba(220,80,60,.3);"
+            'border-radius:8px;font-size:.88rem;color:#e05c5c">'
+            f"Rate limit reached — max {_EXPLAIN_RATE_MAX} AI explanations per hour. "
+            "Use Copy or Open buttons to continue in your own AI session."
+            "</div>"
+        )
+    elif ai_error:
+        ai_panel = (
+            '<div style="margin-top:.8rem;padding:.7rem .9rem;'
+            "background:rgba(220,80,60,.1);border:1px solid rgba(220,80,60,.3);"
+            'border-radius:8px;font-size:.88rem;color:#e05c5c">'
+            f"AI explanation error: {_escape(ai_error)}"
+            "</div>"
+        )
+    elif ai_result:
+
+        def _md_simple(text: str) -> str:
+            import re as _re
+
+            t = _escape(text)
+            t = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", t)
+            return t
+
+        paras = "".join(
+            f"<p style='margin:.5rem 0'>{_md_simple(p.strip())}</p>"
+            for p in ai_result.split("\n\n")
+            if p.strip()
+        )
+        ai_panel = (
+            '<div style="margin-top:.8rem;padding:.8rem 1rem;'
+            "background:rgba(120,80,220,.08);border:1px solid rgba(120,80,220,.25);"
+            'border-radius:10px">'
+            '<p style="font-size:.78rem;color:#a78bfa;font-weight:600;margin:0 0 .5rem">'
+            "AI explanation (Claude)</p>"
+            f"{paras}"
+            "</div>"
+        )
+
+    byoai = (
+        '<details style="margin-top:.9rem;border-top:1px solid var(--line);padding-top:.8rem">'
+        '<summary style="cursor:pointer;font-size:.88rem;font-weight:600;color:var(--muted);'
+        'padding:.2rem 0">Bring your own AI</summary>'
+        '<p style="font-size:.82rem;color:var(--muted);margin:.5rem 0 .7rem">'
+        "Copy the prompt and paste into any AI assistant.</p>"
+        '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem">'
+        + btn_copy
+        + btn_claude
+        + btn_chatgpt
+        + "</div>"
+        '<textarea id="mlep" readonly'
+        ' style="width:100%;min-height:140px;background:var(--panel2);'
+        "border:1px solid var(--line);border-radius:8px;padding:.6rem;"
+        "font-family:var(--mono);font-size:.75rem;line-height:1.5;"
+        'color:var(--text);resize:vertical;box-sizing:border-box">'
+        f"{_escape(prompt)}</textarea>"
+        "</details>"
+    )
+    tip = (
+        '<p style="font-size:.76rem;color:var(--muted);margin-top:.5rem">'
+        '"Explain now" uses the server API key (max 3/hr). '
+        '"Open in" buttons use your own account with no limits.'
+        "</p>"
+    )
+
+    return (
+        '<section class="card" style="align-self:start">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">AI explanation</p>'
+        "<h2>Explain these results</h2>"
+        '<p class="kicker">Get a plain-English summary of what these ML results '
+        "mean operationally.</p>"
+        '</div><span class="pill pill--muted">Bring your own AI</span></div>'
+        '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin:.7rem 0">'
+        + btn_inpage
+        + "</div>"
+        + ai_panel
+        + byoai
+        + tip
+        + "</section>"
+    )
+
+
 def _render_ml_tab(
     values: dict[str, Any],
     latest_metrics: dict[str, Any] | None,
     model_dir_options: list[str],
+    ml_ai_result: str | None = None,
+    ml_ai_error: str | None = None,
+    ml_rate_limited: bool = False,
 ) -> str:
     """Read-only ML results tab — model selector + metrics display + feature selection."""
     metrics = latest_metrics
@@ -2678,6 +2932,28 @@ def _render_ml_tab(
             "</section>",
         ]
     )
+
+    # AI explain card — only shown when a model is selected
+    pk_data_for_explain = (
+        _load_precision_at_k(values.get("model_out_dir") or "")
+        if values.get("model_out_dir")
+        else None
+    )
+    fs_data_for_explain = (
+        _load_feature_selection(values.get("model_out_dir") or "")
+        if values.get("model_out_dir")
+        else None
+    )
+    ml_explain_card = _render_ml_explain_card(
+        values,
+        latest_metrics,
+        pk_data_for_explain,
+        fs_data_for_explain,
+        ai_result=ml_ai_result,
+        ai_error=ml_ai_error,
+        rate_limited=ml_rate_limited,
+    )
+    left_col = '<div class="score-output">' + selector_card + ml_explain_card + "</div>"
 
     # ── Right column: metrics + feature selection ─────────────────────────────
     output_parts: list[str] = []
@@ -2749,7 +3025,7 @@ def _render_ml_tab(
 
     right_col = '<div class="score-output">' + "".join(output_parts) + "</div>"
 
-    return '<div class="grid--score">' + selector_card + right_col + "</div>"
+    return '<div class="grid--score">' + left_col + right_col + "</div>"
 
 
 def _render_about_tab() -> str:
@@ -2972,6 +3248,9 @@ def render_page(
     ai_result: str | None = None,
     ai_error: str | None = None,
     rate_limited: bool = False,
+    ml_ai_result: str | None = None,
+    ml_ai_error: str | None = None,
+    ml_rate_limited: bool = False,
 ) -> str:
     values = {**DEFAULTS, **values}
     plugin_options = plugin_options or []
@@ -3003,7 +3282,14 @@ def render_page(
     elif active_tab == "about":
         active_panel_html = _render_about_tab()
     else:
-        active_panel_html = _render_ml_tab(values, latest_metrics, model_dir_options)
+        active_panel_html = _render_ml_tab(
+            values,
+            latest_metrics,
+            model_dir_options,
+            ml_ai_result=ml_ai_result,
+            ml_ai_error=ml_ai_error,
+            ml_rate_limited=ml_rate_limited,
+        )
     return f"""<!doctype html>
 <html lang="en">
   <head>
@@ -3111,20 +3397,35 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         }
     )
     _get_explain = query.get("explain", [""])[-1] == "1"
+    _get_ml_explain = query.get("ml_explain", [""])[-1] == "1"
     plugin_options, latest_metrics, model_dir_options = _prepare_request_state(values)
     score_result = None
     score_error = None
     ai_result: str | None = None
     ai_error: str | None = None
     rate_limited: bool = False
+    ml_ai_result: str | None = None
+    ml_ai_error: str | None = None
+    ml_rate_limited: bool = False
 
     # /run and /train are disabled in the public deployment
     if path in {"/run", "/train"}:
         start_response("404 Not Found", [("Content-Type", "text/plain; charset=utf-8")])
         return [b"Not found"]
 
-    # /score and /explain redirects — corporate firewalls block POST to explicit paths;
-    # redirect to GET equivalents so scoring and explain work as normal page navigation.
+    # /score, /explain, /ml_explain redirects — corporate firewalls block POST;
+    # redirect to GET equivalents so everything works as normal page navigation.
+    if path == "/ml_explain":
+        qs = urllib.parse.urlencode(
+            {
+                "tab": "ml",
+                "model_out_dir": values.get("model_out_dir") or "",
+                "ml_explain": "1",
+            }
+        )
+        start_response("302 Found", [("Location", f"/?{qs}"), ("Content-Type", "text/plain")])
+        return [b""]
+
     if path == "/explain":
         qs = urllib.parse.urlencode(
             {
@@ -3147,6 +3448,31 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         )
         start_response("302 Found", [("Location", f"/?{qs}"), ("Content-Type", "text/plain")])
         return [b""]
+
+    # GET ml_explain — runs when ml_explain=1 is in query string (ML tab)
+    if method == "GET" and _get_ml_explain and values.get("model_out_dir"):
+        _ml_explain_dir = values["model_out_dir"]
+        _ml_metrics = _load_model_metrics(_ml_explain_dir)
+        _ml_pk = _load_precision_at_k(_ml_explain_dir)
+        _ml_fs = _load_feature_selection(_ml_explain_dir)
+        if _ml_metrics:
+            client_ip = environ.get("HTTP_X_FORWARDED_FOR", "").split(",")[
+                0
+            ].strip() or environ.get("REMOTE_ADDR", "unknown")
+            if not _check_explain_rate_limit(client_ip):
+                ml_rate_limited = True  # noqa: F841
+            else:
+                try:
+                    _ml_prompt = _build_ml_explain_prompt(
+                        _ml_metrics, _ml_pk, _ml_fs, _ml_explain_dir
+                    )
+                    ml_ai_result = _call_anthropic_explain(_ml_prompt)  # noqa: F841
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("ML explain call failed: %s", exc)
+                    ml_ai_error = (
+                        f"AI explanation unavailable ({exc}) — use Copy or Open buttons below."  # noqa: F841
+                    )
+        values["active_tab"] = "ml"
 
     # GET explain — runs when explain=1 is in query string
     # Same logic as the old POST /explain but triggered by GET so firewalls don't block it
@@ -3339,6 +3665,9 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         ai_result=ai_result,
         ai_error=ai_error,
         rate_limited=rate_limited,
+        ml_ai_result=ml_ai_result,
+        ml_ai_error=ml_ai_error,
+        ml_rate_limited=ml_rate_limited,
     )
     start_response("200 OK", [("Content-Type", "text/html; charset=utf-8")])
     return [html_body.encode("utf-8")]
