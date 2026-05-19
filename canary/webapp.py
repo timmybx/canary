@@ -2498,12 +2498,17 @@ def _render_feature_selection_panel(fs: dict[str, Any]) -> str:
                 else f'<code style="flex:1;font-size:.82rem">{_escape(feat)}</code>'
             )
             # Items beyond 10 are hidden by default; JS toggles visibility
-            hidden = ' style="display:none"' if rank and int(rank) > 10 else ""
+            # Use a single consistent style — JS overrides display only
+            is_hidden = bool(rank and int(rank) > 10)
+            li_style = (
+                "display:none;align-items:center;gap:.5rem;padding:.25rem 0;"
+                "border-bottom:1px solid rgba(255,255,255,.04)"
+                if is_hidden
+                else "display:flex;align-items:center;gap:.5rem;padding:.25rem 0;"
+                "border-bottom:1px solid rgba(255,255,255,.04)"
+            )
             all_features_html += (
-                f'<li data-rank="{rank}"{hidden}'
-                f' style="display:{"none" if rank and int(rank) > 10 else "flex"};'
-                f"align-items:center;gap:.5rem;padding:.25rem 0;"
-                f'border-bottom:1px solid rgba(255,255,255,.04)">'
+                f'<li data-rank="{rank}" style="{li_style}">'
                 f'<span style="color:var(--muted);width:1.6rem;text-align:right;font-size:.8rem">{rank}</span>'
                 f"{name_html}"
                 f'<span style="width:{bar_w}px;height:6px;background:#3266ad;'
