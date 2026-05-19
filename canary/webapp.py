@@ -819,7 +819,7 @@ def _call_anthropic_explain(prompt: str) -> str:
     payload = json.dumps(
         {
             "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 500,
+            "max_tokens": 800,
             "system": (
                 "You are a concise cybersecurity analyst assistant. "
                 "Explain CANARY risk scores in plain English. "
@@ -2482,23 +2482,89 @@ def _render_feature_selection_panel(fs: dict[str, Any]) -> str:
         "</table>"
     )
 
-    top10_html = ""
+    all_features_html = ""
     if ranking:
         max_score = ranking[0].get("mean_abs_shap", 1.0) or 1.0
-        for item in ranking[:10]:
+        for item in ranking:
             rank = item.get("rank", "")
-            feat = _escape(str(item.get("feature", "")))
+            feat = str(item.get("feature", ""))
             score = item.get("mean_abs_shap", 0.0)
             bar_w = max(4, int(score / max_score * 180))
-            top10_html += (
-                f'<li style="display:flex;align-items:center;gap:.5rem;padding:.25rem 0;'
+            feat_tip = _FEATURE_TIPS.get(feat, "")
+            name_html = (
+                f'<span class="tip" data-tip="{_escape(feat_tip)}">'
+                f'<code style="flex:1;font-size:.82rem">{_escape(feat)}</code></span>'
+                if feat_tip
+                else f'<code style="flex:1;font-size:.82rem">{_escape(feat)}</code>'
+            )
+            # Items beyond 10 are hidden by default; JS toggles visibility
+            hidden = ' style="display:none"' if rank and int(rank) > 10 else ""
+            all_features_html += (
+                f'<li data-rank="{rank}"{hidden}'
+                f' style="display:{"none" if rank and int(rank) > 10 else "flex"};'
+                f"align-items:center;gap:.5rem;padding:.25rem 0;"
                 f'border-bottom:1px solid rgba(255,255,255,.04)">'
                 f'<span style="color:var(--muted);width:1.6rem;text-align:right;font-size:.8rem">{rank}</span>'
-                f'<code style="flex:1;font-size:.82rem">{feat}</code>'
-                f'<span style="width:{bar_w}px;height:6px;background:#3266ad;border-radius:3px;flex-shrink:0"></span>'
-                f'<span style="color:var(--muted);font-size:.8rem;width:4.5rem;text-align:right">{score:.5f}</span>'
+                f"{name_html}"
+                f'<span style="width:{bar_w}px;height:6px;background:#3266ad;'
+                f'border-radius:3px;flex-shrink:0"></span>'
+                f'<span style="color:var(--muted);font-size:.8rem;width:4.5rem;'
+                f'text-align:right">{score:.5f}</span>'
                 f"</li>"
             )
+
+    # Show-more button controls — only rendered when there are more than 10 features
+    n_features = len(ranking) if ranking else 0
+    show_controls = ""
+    if n_features > 10:
+        steps = [s for s in [10, 15, 20, 30, 50, n_features] if s <= n_features]
+        # deduplicate while preserving order
+        seen: set[int] = set()
+        steps = [s for s in steps if not (s in seen or seen.add(s))]  # type: ignore[func-returns-value]
+        btn_style = (
+            "background:none;border:1px solid var(--line);color:var(--muted);"
+            "padding:.25rem .7rem;border-radius:6px;cursor:pointer;font-size:.8rem;"
+            "margin:.1rem"
+        )
+        btns = "".join(
+            f'<button type="button" style="{btn_style}" '
+            f'onclick="fsShowTop(this,{s})">'
+            f"{'All' if s == n_features else f'Top {s}'}"
+            f"</button>"
+            for s in steps
+        )
+        show_controls = (
+            f'<div style="margin-top:.5rem;display:flex;align-items:center;'
+            f'flex-wrap:wrap;gap:.2rem">'
+            f'<span style="font-size:.78rem;color:var(--muted);margin-right:.3rem">Show:</span>'
+            f"{btns}"
+            f"</div>"
+            f"<script>"
+            f"function fsShowTop(btn,n){{"
+            f'var ul=btn.closest(".panel").querySelector("ul");'
+            f'ul.querySelectorAll("li[data-rank]").forEach(function(li){{'
+            f'var r=parseInt(li.getAttribute("data-rank"));'
+            f'li.style.display=r<=n?"flex":"none";}});'
+            f'btn.closest("div").querySelectorAll("button")'
+            f'.forEach(function(b){{b.style.fontWeight=b===btn?"700":"normal";}});'
+            f"}}"
+            f"</script>"
+        )
+
+    features_panel = (
+        (
+            f'<div class="panel" style="margin-top:.6rem">'
+            f"<h4>Top {min(10, n_features)} features by importance"
+            f'<span id="fs-feat-count" style="font-weight:normal;'
+            f'color:var(--muted);font-size:.82rem"> — hover a name for details</span>'
+            f"</h4>"
+            f'<ul style="list-style:none;padding:0;margin:0">{all_features_html}</ul>'
+            f"{show_controls}"
+            f"</div>"
+        )
+        if all_features_html
+        else ""
+    )
 
     return (
         f'<span class="{verdict_cls}" style="margin-bottom:.6rem;display:inline-block">'
@@ -2512,14 +2578,7 @@ def _render_feature_selection_panel(fs: dict[str, Any]) -> str:
         f'<span class="metric__value">{"Yes" if h3_ok else "No"}</span></div>'
         f"</div>"
         f'<div class="panel" style="margin-top:.6rem">'
-        f"<h4>AP retention by feature subset</h4>{table_html}</div>"
-        + (
-            f'<div class="panel" style="margin-top:.6rem">'
-            f"<h4>Top 10 features by importance</h4>"
-            f'<ul style="list-style:none;padding:0;margin:0">{top10_html}</ul></div>'
-            if top10_html
-            else ""
-        )
+        f"<h4>AP retention by feature subset</h4>{table_html}</div>" + features_panel
     )
 
 
