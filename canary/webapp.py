@@ -587,7 +587,17 @@ def _render_ml_score_panel(ml: dict[str, Any]) -> str:
     risk_pill_cls = risk_colors.get(ml.get("risk_category", ""), "pill--muted")
 
     drivers_html = ""
-    for d in ml.get("drivers") or []:
+    # Filter out drivers where the feature value is None — these were imputed
+    # to the training mean by the pipeline, so showing "n/a" gives the analyst
+    # nothing actionable. Fill from the next-ranked drivers that have real values.
+    all_drivers = ml.get("drivers") or []
+    drivers = [d for d in all_drivers if d.get("value") is not None]
+    # If fewer than 8 visible drivers remain, pad with null-value ones marked as such
+    if len(drivers) < 5 and len(all_drivers) > len(drivers):
+        null_drivers = [d for d in all_drivers if d.get("value") is None]
+        drivers = drivers + null_drivers[: max(0, 5 - len(drivers))]
+
+    for d in drivers:
         direction = d.get("direction", "neutral")
         icon = (
             "▲"
@@ -631,7 +641,12 @@ def _render_ml_score_panel(ml: dict[str, Any]) -> str:
         f'<div class="metric"><span class="metric__label">Risk category</span><span class="metric__value">{_escape(ml.get("risk_category", "?"))}</span></div>'
         f'<div class="metric"><span class="metric__label">Top drivers</span><span class="metric__value">{len(ml.get("drivers") or [])}</span></div>'
         "</div>"
-        f'<div class="panel"><h4>Top contributing features</h4><ul style="list-style:none;padding:0;margin:0">{drivers_html}</ul></div>'
+        f'<div class="panel"><h4>Top contributing features</h4>'
+        f'<p style="font-size:.78rem;color:var(--muted);margin:.2rem 0 .6rem">'
+        f'<span style="color:#e05c5c;font-weight:700">▲</span> increases risk &nbsp;&nbsp;'
+        f'<span style="color:#5ce0a0;font-weight:700">▼</span> decreases risk &nbsp;&nbsp;'
+        f"Hover a feature name for details.</p>"
+        f'<ul style="list-style:none;padding:0;margin:0">{drivers_html}</ul></div>'
         f'<div class="panel"><h4>ML result (JSON)</h4><pre>{_escape(ml["pretty_json"])}</pre></div>'
         "</div>"
     )
