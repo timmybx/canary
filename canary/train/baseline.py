@@ -376,6 +376,9 @@ def train_model(
         "include_prefixes": list(include_prefixes) if include_prefixes else [],
         "train_row_count": int(len(train_rows)),
         "test_row_count": int(len(test_rows)),
+        "train_start_month": (
+            min(_parse_month_value(r) for r in train_rows) if train_rows else None
+        ),
         "train_positive_count": int(y_train.sum()),
         "test_positive_count": int(y_test.sum()),
         "feature_count": int(len(feature_cols)),

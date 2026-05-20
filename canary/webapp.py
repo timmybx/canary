@@ -2324,6 +2324,15 @@ def _render_ml_metrics(metrics: dict[str, Any] | None, model_out_dir: str = "") 
             if test_month
             else ""
         )
+        + (
+            f'<span class="small muted">Trained from: <strong>{_escape(metrics.get("train_start_month") or "")}</strong></span>'
+            if metrics.get("train_start_month")
+            else (
+                f'<span class="small muted">Train rows: <strong>{_metric_value(metrics.get("train_row_count"), digits=0)}</strong></span>'
+                if metrics.get("train_row_count")
+                else ""
+            )
+        )
         + "</div>"
     )
 
@@ -2553,6 +2562,8 @@ def _render_feature_selection_panel(fs: dict[str, Any]) -> str:
             f'li.style.display=r<=n?"flex":"none";}});'
             f'btn.closest("div").querySelectorAll("button")'
             f'.forEach(function(b){{b.style.fontWeight=b===btn?"700":"normal";}});'
+            f'var h=btn.closest(".panel").querySelector("#fs-feat-title");'
+            f'if(h){{h.firstChild.textContent=(n>={n_features}?"All "+{n_features}:"Top "+n)+" features by importance";}}'
             f"}}"
             f"</script>"
         )
@@ -2560,10 +2571,8 @@ def _render_feature_selection_panel(fs: dict[str, Any]) -> str:
     features_panel = (
         (
             f'<div class="panel" style="margin-top:.6rem">'
-            f"<h4>Top {min(10, n_features)} features by importance"
-            f'<span id="fs-feat-count" style="font-weight:normal;'
-            f'color:var(--muted);font-size:.82rem"> — hover a name for details</span>'
-            f"</h4>"
+            f'<h4 id="fs-feat-title">Top {min(10, n_features)} features by importance'
+            f'<span style="font-weight:normal;color:var(--muted);font-size:.82rem"> — hover a name for details</span></h4>'
             f'<ul style="list-style:none;padding:0;margin:0">{all_features_html}</ul>'
             f"{show_controls}"
             f"</div>"
