@@ -22,8 +22,9 @@ from canary.scoring.ml import MLScorer, MLScoreResult, load_ml_scorer, score_plu
 DEFAULT_REGISTRY_PATH = "data/raw/registry/plugins.jsonl"
 DEFAULT_MODEL_DIR = "data/processed/models/baseline_6m"
 MODEL_OUTPUTS_ROOT = Path("data/processed/models").resolve()
+ADVISORY_DATA_ROOT = Path("data/raw/advisories").resolve()
 MODEL_OUTPUTS_ROOT_PARTS = Path("data/processed/models").parts
-VALID_TABS = frozenset({"score", "ml", "about"})
+VALID_TABS = frozenset({"score", "ml", "about", "casestudy"})
 MODEL_OUTPUT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 DEFAULTS: dict[str, Any] = {
@@ -3092,6 +3093,379 @@ def _render_ml_tab(
     return '<div class="grid--score">' + left_col + right_col + "</div>"
 
 
+def _load_plugin_advisories(plugin_id: str) -> list[dict[str, Any]]:
+    """Load advisory records for a plugin from the local advisory JSONL file."""
+    stem = plugin_id.replace("/", "_").replace(" ", "_")
+    target = ADVISORY_DATA_ROOT / f"{stem}.advisories.real.jsonl"
+    if not target.exists():
+        return []
+    try:
+        records = [
+            json.loads(line)
+            for line in target.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        return sorted(records, key=lambda r: r.get("published_date") or "")
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _advisories_in_window(
+    plugin_id: str,
+    after_date: str,
+    before_date: str,
+) -> list[dict[str, Any]]:
+    """Return advisory records for plugin_id that fall within (after_date, before_date]."""
+    records = _load_plugin_advisories(plugin_id)
+    return [r for r in records if after_date < (r.get("published_date") or "") <= before_date]
+
+
+def _render_case_study_tab(
+    values: dict[str, Any],
+    model_dir_options: list[str],
+) -> str:
+    """
+    Dynamic case study tab — shows top-ranked test predictions alongside
+    confirmed advisory outcomes drawn from the local advisory dataset.
+
+    The model picker mirrors the ML tab.  When a model is selected the tab:
+      - reads test_predictions.csv ranked by predicted probability
+      - joins against local advisory JSONL files to find confirmed advisories
+        within the 6-month prediction window
+      - renders a ranked table split into Confirmed and Unconfirmed sections
+    """
+    import csv
+    from datetime import datetime, timedelta
+
+    model_out_dir = values.get("model_out_dir") or ""
+
+    # ── Left column: model picker ─────────────────────────────────────────────
+    selector_card = "".join(
+        [
+            '<section class="card" style="align-self:start">',
+            '<div class="card__header"><div>',
+            '<p class="eyebrow">Case study</p>',
+            "<h2>Validated predictions</h2>",
+            '<p class="kicker">Choose a model to see how its top-ranked predictions ',
+            "compared against advisories subsequently published by Jenkins. "
+            "Confirmed rows show plugins CANARY flagged that received a real advisory "
+            "within the 6-month prediction window. Unconfirmed rows are CANARY's "
+            "current forward-looking recommendations.</p>",
+            '</div><span class="pill pill--muted">Live validation</span></div>',
+            '<form method="get" action="/">',
+            '<input type="hidden" name="tab" value="casestudy">',
+            _render_model_picker(values, model_dir_options),
+            '<div style="margin-top:.9rem">',
+            '<button type="submit">Load predictions</button>',
+            "</div>",
+            "</form>",
+            "</section>",
+        ]
+    )
+
+    # ── Right column: no model selected yet ───────────────────────────────────
+    if not model_out_dir:
+        right_col = (
+            '<section class="card">'
+            '<div class="card__header"><div>'
+            '<p class="eyebrow">Prediction outcomes</p>'
+            "<h2>Select a model to view results</h2>"
+            "</div></div>"
+            '<p class="muted" style="padding:.6rem 0">Choose an algorithm, '
+            "feature set, and evaluation strategy on the left, then click "
+            "<strong>Load predictions</strong>.</p>"
+            "</section>"
+        )
+        return (
+            '<div class="grid--score">'
+            + '<div class="score-output">'
+            + selector_card
+            + "</div>"
+            + '<div class="score-output">'
+            + right_col
+            + "</div>"
+            + "</div>"
+        )
+
+    # Load test predictions CSV
+    stem = Path(model_out_dir).name
+    pred_path = MODEL_OUTPUTS_ROOT / stem / "test_predictions.csv"
+    metrics = _load_model_metrics(model_out_dir)
+
+    if not pred_path.exists():
+        right_html = (
+            '<section class="card">'
+            + '<div class="card__header"><div>'
+            + '<p class="eyebrow">Prediction outcomes</p>'
+            + "<h2>No predictions file found</h2>"
+            + "</div></div>"
+            + '<p class="muted" style="padding:.6rem 0">Could not find '
+            + f"<code>test_predictions.csv</code> under <code>{_escape(stem)}</code>. "
+            "Re-run training to generate predictions.</p>" + "</section>"
+        )
+        return (
+            '<div class="grid--score">'
+            + '<div class="score-output">'
+            + selector_card
+            + "</div>"
+            + '<div class="score-output">'
+            + right_html
+            + "</div>"
+            + "</div>"
+        )
+
+    # Parse and sort predictions
+    rows: list[dict[str, Any]] = []
+    try:
+        reader = csv.DictReader(pred_path.read_text(encoding="utf-8").splitlines())
+        for row in reader:
+            rows.append(
+                {
+                    "plugin_id": row.get("plugin_id", ""),
+                    "month": row.get("month", ""),
+                    "y_true": int(row.get("y_true", 0)),
+                    "y_prob": float(row.get("y_prob", 0.0)),
+                }
+            )
+        rows.sort(key=lambda r: r["y_prob"], reverse=True)
+    except Exception:  # noqa: BLE001
+        rows = []
+
+    # Observation date and prediction window
+    obs_date = (metrics or {}).get("test_start_month") or (
+        min(r["month"] for r in rows) if rows else ""
+    )
+    window_end = ""
+    if obs_date:
+        try:
+            obs_dt = datetime.strptime(obs_date, "%Y-%m")
+            em = obs_dt.month + 6
+            ey = obs_dt.year + (em - 1) // 12
+            em = ((em - 1) % 12) + 1
+            end_dt = (datetime(ey, em, 1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+            window_end = end_dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    # Deduplicate by plugin_id — keep highest-scored row
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for row in rows:
+        if row["plugin_id"] not in seen:
+            seen.add(row["plugin_id"])
+            deduped.append(row)
+
+    top_rows = deduped[:25]
+    n_pos = (metrics or {}).get("test_positive_count", 0)
+    n_test = (metrics or {}).get("test_row_count", 1)
+    base_rate = n_pos / n_test if n_test > 0 else 0.0
+
+    # Enrich with advisory data
+    enriched: list[dict[str, Any]] = []
+    for rank, row in enumerate(top_rows, start=1):
+        pid = row["plugin_id"]
+        advisories = (
+            _advisories_in_window(pid, obs_date, window_end) if obs_date and window_end else []
+        )
+        confirmed = bool(advisories) or row["y_true"] == 1
+        adv_date = adv_sev = adv_url = ""
+        adv_cvss: float | None = None
+        sec_ids: list[str] = []
+        if advisories:
+            best = max(
+                advisories,
+                key=lambda a: (a.get("severity_summary") or {}).get("max_cvss_base_score") or 0,
+            )
+            adv_date = best.get("published_date", "")
+            sev_sum = best.get("severity_summary") or {}
+            adv_sev = (sev_sum.get("max_severity_label") or "").title()
+            adv_cvss = sev_sum.get("max_cvss_base_score")
+            adv_url = best.get("url", "")
+            sec_ids = best.get("security_warning_ids") or []
+        days_to_adv: int | None = None
+        if adv_date and obs_date:
+            try:
+                days_to_adv = (
+                    datetime.strptime(adv_date, "%Y-%m-%d") - datetime.strptime(obs_date, "%Y-%m")
+                ).days
+            except ValueError:
+                pass
+        enriched.append(
+            {
+                "rank": rank,
+                "plugin_id": pid,
+                "y_prob": row["y_prob"],
+                "confirmed": confirmed,
+                "adv_date": adv_date,
+                "adv_sev": adv_sev,
+                "adv_cvss": adv_cvss,
+                "adv_url": adv_url,
+                "sec_ids": sec_ids,
+                "days_to_adv": days_to_adv,
+            }
+        )
+
+    confirmed_rows = [r for r in enriched if r["confirmed"]]
+    unconfirmed_rows = [r for r in enriched if not r["confirmed"]]
+
+    def _sev_color(sev: str) -> str:
+        s = sev.lower()
+        return (
+            "#e05c5c"
+            if s in ("high", "critical")
+            else ("#e6a01e" if s == "medium" else "var(--muted)")
+        )
+
+    def _row_html(r: dict[str, Any], show_outcome: bool) -> str:
+        plugin_url = f"/?tab=score&plugin={_escape(r['plugin_id'])}"
+        plugin_cell = (
+            f'<a href="{plugin_url}" style="color:var(--accent);text-decoration:none">'
+            + f"<code>{_escape(r['plugin_id'])}</code></a>"
+        )
+        prob_cell = f"<strong>{r['y_prob']:.1%}</strong>"
+        if show_outcome and r["confirmed"]:
+            days_str = f"{r['days_to_adv']} days" if r["days_to_adv"] is not None else "—"
+            sev_cell = (
+                f'<span style="color:{_sev_color(r["adv_sev"])};font-weight:600">'
+                + _escape(r["adv_sev"])
+                + (f" ({r['adv_cvss']:.1f})" if r["adv_cvss"] is not None else "")
+                + "</span>"
+            )
+            adv_cell = (
+                (
+                    f'<a href="{_escape(r["adv_url"])}" target="_blank" rel="noopener noreferrer" '
+                    + f'style="color:var(--accent);font-size:.82rem">{_escape(r["sec_ids"][0])}</a>'
+                    + (
+                        f' <span style="color:var(--muted);font-size:.78rem">+{len(r["sec_ids"]) - 1} more</span>'
+                        if len(r["sec_ids"]) > 1
+                        else ""
+                    )
+                )
+                if r["adv_url"] and r["sec_ids"]
+                else '<span style="color:var(--muted)">—</span>'
+            )
+            outcome = (
+                "<td style='padding:.45rem .6rem;text-align:center'>"
+                '<span style="color:#5ce0a0;font-weight:700">&#x2713;</span></td>'
+                + f"<td style='padding:.45rem .6rem'>{sev_cell}</td>"
+                + f"<td style='padding:.45rem .6rem;font-size:.82rem'>{_escape(adv_date)}</td>"
+                + f"<td style='padding:.45rem .6rem;font-size:.82rem;color:var(--muted)'>{days_str}</td>"
+                + f"<td style='padding:.45rem .6rem;font-size:.82rem'>{adv_cell}</td>"
+            )
+        else:
+            outcome = (
+                "<td style='padding:.45rem .6rem;text-align:center'>"
+                '<span style="color:var(--muted)">?</span></td>'
+                + "<td colspan='4' style='padding:.45rem .6rem;color:var(--muted);"
+                "font-size:.82rem;font-style:italic'>No confirmed advisory in window</td>"
+            )
+        return (
+            "<tr>"
+            + f"<td style='padding:.45rem .6rem;text-align:right;color:var(--muted);font-size:.82rem'>{r['rank']}</td>"
+            + f"<td style='padding:.45rem .6rem'>{plugin_cell}</td>"
+            + f"<td style='padding:.45rem .6rem;text-align:right'>{prob_cell}</td>"
+            + outcome
+            + "</tr>"
+        )
+
+    thead = (
+        "<thead><tr>"
+        + "".join(
+            f"<th style='text-align:{a};padding:.4rem .6rem;color:var(--muted);font-size:.8rem;font-weight:600'>{h}</th>"
+            for h, a in [
+                ("#", "right"),
+                ("Plugin", "left"),
+                ("CANARY score", "right"),
+                ("Confirmed", "center"),
+                ("Severity", "left"),
+                ("Advisory date", "left"),
+                ("Lead time", "left"),
+                ("Advisory", "left"),
+            ]
+        )
+        + "</tr></thead>"
+    )
+
+    n_confirmed = len(confirmed_rows)
+    n_total = len(enriched)
+    prec = n_confirmed / n_total if n_total > 0 else 0.0
+    lift = prec / base_rate if base_rate > 0 else 0.0
+
+    headline = (
+        '<div style="margin-bottom:.8rem;padding:.7rem .9rem;'
+        + "background:rgba(82,196,26,.08);border:1px solid rgba(82,196,26,.25);"
+        + 'border-radius:10px;font-size:.9rem">'
+        + f"<strong>Observation date:</strong> {_escape(obs_date)} &nbsp;|&nbsp; "
+        + f"<strong>Prediction window:</strong> {_escape(obs_date)} &#8594; {_escape(window_end)} &nbsp;|&nbsp; "
+        + f"<strong>Top-{n_total} precision:</strong> {n_confirmed}/{n_total} ({prec:.0%}) &nbsp;|&nbsp; "
+        + f"<strong>Lift vs random:</strong> {lift:.1f}&#215;"
+        + "</div>"
+    )
+
+    confirmed_html = (
+        (
+            '<div class="panel" style="margin-top:.6rem">'
+            + f'<h4>Confirmed predictions <span style="color:#5ce0a0">({n_confirmed} of {n_total})</span></h4>'
+            + '<p style="font-size:.82rem;color:var(--muted);margin:.2rem 0 .5rem">Plugins CANARY ranked '
+            + f"in its top {n_total} that received a Jenkins security advisory within the 180-day window. "
+            "Plugin names link to their CANARY score page.</p>"
+            + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+            + thead
+            + "<tbody>"
+            + "".join(_row_html(r, show_outcome=True) for r in confirmed_rows)
+            + "</tbody></table></div></div>"
+        )
+        if confirmed_rows
+        else ""
+    )
+
+    unconfirmed_html = (
+        (
+            '<div class="panel" style="margin-top:.6rem">'
+            + f'<h4>Unconfirmed predictions <span style="color:var(--muted)">({len(unconfirmed_rows)})</span></h4>'
+            + '<p style="font-size:.82rem;color:var(--muted);margin:.2rem 0 .5rem">'
+            + "High-scored plugins with no confirmed advisory in the window. "
+            "In a live deployment these are CANARY's current forward-looking recommendations &#8212; "
+            "some may receive advisories after the window closes.</p>"
+            + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+            + thead
+            + "<tbody>"
+            + "".join(_row_html(r, show_outcome=False) for r in unconfirmed_rows)
+            + "</tbody></table></div></div>"
+        )
+        if unconfirmed_rows
+        else ""
+    )
+
+    right_html = (
+        '<section class="card">'
+        + '<div class="card__header"><div>'
+        + '<p class="eyebrow">Prediction outcomes</p>'
+        + f"<h2>Top-{n_total} predictions vs. confirmed advisories</h2>"
+        + f'<p class="kicker">Model: <strong>{_escape(stem)}</strong></p>'
+        + "</div>"
+        + '<span class="pill pill--muted">Empirical validation</span></div>'
+        + headline
+        + confirmed_html
+        + unconfirmed_html
+        + '<p style="font-size:.78rem;color:var(--muted);margin-top:.8rem">'
+        + "Advisory data sourced from local Jenkins advisory dataset. "
+        "Lead time = days from observation date to advisory publication. "
+        "Retrain on newer data and reload to see updated predictions.</p>" + "</section>"
+    )
+
+    return (
+        '<div class="grid--score">'
+        + '<div class="score-output">'
+        + selector_card
+        + "</div>"
+        + '<div class="score-output">'
+        + right_html
+        + "</div>"
+        + "</div>"
+    )
+
+
 def _render_about_tab() -> str:
     """Render the About / Help tab — lightweight context for new visitors."""
     github_url = "https://github.com/timmybx/canary"
@@ -3326,6 +3700,7 @@ def render_page(
         ("score", "Scoring", "Plugin score and rationale"),
         ("ml", "Machine learning", "Model results and metrics"),
         ("about", "About", "What is CANARY and how to use it"),
+        ("casestudy", "Case study", "Validated predictions vs. confirmed advisories"),
     ]
     tab_links = "".join(
         f'<a href="/?tab={_escape(tab_key)}" class="tab-link {"is-active" if tab_key == active_tab else ""}" data-tab-link="{_escape(tab_key)}"><strong>{_escape(title)}</strong><span>{_escape(subtitle)}</span></a>'
@@ -3345,6 +3720,8 @@ def render_page(
         )
     elif active_tab == "about":
         active_panel_html = _render_about_tab()
+    elif active_tab == "casestudy":
+        active_panel_html = _render_case_study_tab(values, model_dir_options or [])
     else:
         active_panel_html = _render_ml_tab(
             values,
