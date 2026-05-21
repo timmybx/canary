@@ -734,20 +734,11 @@ def _build_explain_prompt(
         "",
     ]
 
-    score = score_result.get("score", "?")
     reasons = score_result.get("reasons", [])
-    lines.append(f"HEURISTIC SCORE: {score} / 100")
-    lines.append("")
-    lines.append("Scoring rationale:")
-    for r in reasons:
-        lines.append(f"  * {r}")
-    lines.append("")
-
-    components = score_result.get("features", {}).get("score_components")
-    if components:
-        lines.append("Score breakdown by component:")
-        for k, v in components.items():
-            lines.append(f"  * {k.replace('_', ' ').title()}: {v} pts")
+    if reasons:
+        lines.append("SUPPORTING SIGNALS (maintenance, governance, dependency risk):")
+        for r in reasons:
+            lines.append(f"  * {r}")
         lines.append("")
 
     if ml:
@@ -1041,7 +1032,7 @@ def _render_score_section(
     # Uses the same parser as the ML tab picker so names are consistent.
     from pathlib import Path as _Path
 
-    ml_model_options: list[tuple[str, str]] = [("", "— none / heuristic only —")]
+    ml_model_options: list[tuple[str, str]] = [("", "— select a model —")]
 
     # Group parsed models by algorithm for a logical ordering
     grouped: dict[str, list[tuple[str, str]]] = {a: [] for a in _ALGO_ORDER}
@@ -1104,25 +1095,26 @@ def _render_score_section(
     output_parts: list[str] = []
 
     if score_result:
-        # Heuristic score card — compact, with collapsible raw sections
+        # Risk context panel — replaces the old heuristic score card.
+        # Shows supporting signals without a competing score number.
+        # The ML probability is now the primary CANARY score.
         reasons_html = "".join(f"<li>{_escape(r)}</li>" for r in score_result["reasons"])
         output_parts.append(
             '<section class="card">'
             '<div class="card__header"><div>'
-            '<p class="eyebrow">Heuristic score</p>'
+            '<p class="eyebrow">Risk context</p>'
             f"<h2>{_escape(score_result['plugin'])}</h2>"
-            '<p class="kicker">Rule-based score — independent of the ML model selection above.</p>'
-            "</div>"
-            f'<div class="score-number">{_escape(score_result["score"])}<span>/100</span></div>'
-            "</div>"
-            '<div class="metrics-row" style="margin-top:.8rem">'
-            f'<div class="metric"><span class="metric__label">Reasons</span><span class="metric__value">{len(score_result["reasons"])}</span></div>'
-            f'<div class="metric"><span class="metric__label">Features</span><span class="metric__value">{len(score_result["features"])}</span></div>'
-            "</div>"
-            f'<div class="panel" style="margin-top:.8rem"><h4>Why this score</h4><ul class="bullet-list">{reasons_html}</ul></div>'
+            '<p class="kicker">Supporting signals — maintenance history, '
+            "governance, and dependency risk indicators for this plugin.</p>"
+            "</div></div>"
+            f'<div class="panel" style="margin-top:.8rem">'
+            "<h4>Key risk signals</h4>"
+            f'<ul class="bullet-list">{reasons_html}</ul></div>'
             '<div style="margin-top:.8rem;display:grid;gap:.6rem">'
-            f"<details><summary>Feature details ({len(score_result['features'])} keys)</summary><pre>{_escape(score_result['pretty_features'])}</pre></details>"
-            f"<details><summary>JSON payload</summary><pre>{_escape(score_result['pretty_json'])}</pre></details>"
+            f"<details><summary>Feature details ({len(score_result['features'])} keys)</summary>"
+            f"<pre>{_escape(score_result['pretty_features'])}</pre></details>"
+            f"<details><summary>JSON payload</summary>"
+            f"<pre>{_escape(score_result['pretty_json'])}</pre></details>"
             "</div>"
             "</section>"
         )
@@ -1133,9 +1125,9 @@ def _render_score_section(
             output_parts.append(
                 '<section class="card">'
                 '<div class="card__header"><div>'
-                '<p class="eyebrow">Machine learning</p>'
-                "<h2>ML advisory risk score</h2>"
-                '<p class="kicker">Probability of a Jenkins security advisory within the next 180 days.</p>'
+                '<p class="eyebrow">CANARY score</p>'
+                "<h2>Advisory risk score</h2>"
+                '<p class="kicker">Estimated probability of a Jenkins security advisory within the next 180 days.</p>'
                 '</div><span class="pill pill--muted">Experimental</span></div>'
                 + _render_ml_score_panel(ml)
                 + "</section>"
@@ -3580,10 +3572,10 @@ def _render_about_tab() -> str:
         "<h2>What the scores mean</h2>"
         "</div></div>"
         '<p style="margin-top:.4rem;font-size:.9rem;color:var(--muted)">'
-        "The <strong>heuristic score</strong> (0–100) is a rule-based signal using advisory "
-        "history, maintenance staleness, governance artifacts, and dependency risk. "
-        "The <strong>ML score</strong> (0.0–1.0) is the model's estimated probability of "
-        "a Jenkins security advisory within 180 days.</p>"
+        "The <strong>CANARY score</strong> (0.0\u20131.0) is the model's estimated probability of "
+        "a Jenkins security advisory within the next 180 days. "
+        "Supporting signals — including maintenance history, governance artifacts, and dependency risk — "
+        "are shown alongside the score to provide interpretable context.</p>"
         '<table style="width:100%;border-collapse:collapse;margin-top:.8rem">'
         "<thead><tr>"
         "<th style='text-align:left;padding:.5rem .75rem;color:var(--muted);font-size:.85rem'>Risk level</th>"
