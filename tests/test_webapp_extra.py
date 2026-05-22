@@ -584,6 +584,54 @@ def test_app_get_score_query_unknown_plugin_shows_error(tmp_path, monkeypatch):
     assert "The scoring request could not be completed" in text
 
 
+def test_app_get_explain_scoring_failure_hides_exception_text(monkeypatch):
+    marker = "internal-scoring-message"
+
+    def _raise_scoring(plugin, real):
+        raise Exception(marker)
+
+    monkeypatch.setattr(webapp, "score_plugin_baseline", _raise_scoring)
+
+    status, _, response = _run_app(
+        "GET", "/", query_string="tab=score&plugin=known-plugin&explain=1"
+    )
+    text = response.decode("utf-8")
+
+    assert status == "200 OK"
+    assert "Unable to score the requested plugin right now." in text
+    assert marker not in text
+
+
+def test_app_get_explain_ai_failure_hides_exception_text(monkeypatch):
+    marker = "internal-explain-message"
+
+    monkeypatch.setattr(
+        webapp,
+        "score_plugin_baseline",
+        lambda plugin, real: ScoreResult(
+            plugin=plugin,
+            score=37,
+            reasons=("fixture reason",),
+            features={"feature_a": 1},
+        ),
+    )
+    monkeypatch.setattr(webapp, "_get_ml_scorer", lambda model_dir: None)
+
+    def _raise_explain(prompt: str):
+        raise Exception(marker)
+
+    monkeypatch.setattr(webapp, "_call_anthropic_explain", _raise_explain)
+
+    status, _, response = _run_app(
+        "GET", "/", query_string="tab=score&plugin=known-plugin&explain=1"
+    )
+    text = response.decode("utf-8")
+
+    assert status == "200 OK"
+    assert "AI explanation unavailable — use Copy or Open buttons below." in text
+    assert marker not in text
+
+
 def test_app_post_run_collect_registry():
     """POST to /run is disabled in the public webapp."""
     body = b"command=collect-registry&real=false&page_size=10"
