@@ -3891,7 +3891,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("ML explain call failed: %s", exc)
                     ml_ai_error = (
-                        f"AI explanation unavailable ({exc}) — use Copy or Open buttons below."  # noqa: F841
+                        "AI explanation unavailable — use Copy or Open buttons below."  # noqa: F841
                     )
         values["active_tab"] = "ml"
 
@@ -3917,7 +3917,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 score_result["ml"] = None
         except Exception as exc:  # noqa: BLE001
             logger.warning("Score failed during GET explain for %s: %s", plugin, exc)
-            score_error = str(exc)
+            score_error = "Unable to score the requested plugin right now."
         # Call Anthropic API with rate limiting
         if score_result is not None:
             client_ip = environ.get("HTTP_X_FORWARDED_FOR", "").split(",")[
@@ -3932,7 +3932,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Anthropic explain call failed: %s", exc)
                     ai_error = (
-                        f"AI explanation unavailable ({exc}) — use Copy or Open buttons below."  # noqa: F841
+                        "AI explanation unavailable — use Copy or Open buttons below."  # noqa: F841
                     )
         if _score_model_dir:
             values["score_model_dir"] = _score_model_dir
@@ -4000,7 +4000,8 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 else:
                     score_result["ml"] = None
             except Exception as exc:  # noqa: BLE001
-                score_error = str(exc)
+                logger.warning("Score failed during POST explain for %s: %s", plugin, exc)
+                score_error = "Unable to score the requested plugin right now."
         # Now call the Anthropic API with rate limiting
         if score_result is not None:
             client_ip = environ.get("HTTP_X_FORWARDED_FOR", "").split(",")[
@@ -4019,7 +4020,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Anthropic explain call failed: %s", exc)
                     ai_error = (
-                        f"AI explanation unavailable ({exc}) — use Copy or Open buttons below."  # noqa: F841
+                        "AI explanation unavailable — use Copy or Open buttons below."  # noqa: F841
                     )
         values["active_tab"] = "score"
         # Restore score_model_dir in values so the ML dropdown stays selected
