@@ -3890,9 +3890,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                     ml_ai_result = _call_anthropic_explain(_ml_prompt)  # noqa: F841
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("ML explain call failed: %s", exc)
-                    ml_ai_error = (
-                        "AI explanation unavailable — use Copy or Open buttons below."  # noqa: F841
-                    )
+                    ml_ai_error = "AI explanation unavailable — use Copy or Open buttons below."  # noqa: F841
         values["active_tab"] = "ml"
 
     # GET explain — runs when explain=1 is in query string
@@ -3931,9 +3929,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                     ai_result = _call_anthropic_explain(prompt)  # noqa: F841
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Anthropic explain call failed: %s", exc)
-                    ai_error = (
-                        "AI explanation unavailable — use Copy or Open buttons below."  # noqa: F841
-                    )
+                    ai_error = "AI explanation unavailable — use Copy or Open buttons below."  # noqa: F841
         if _score_model_dir:
             values["score_model_dir"] = _score_model_dir
 
@@ -4019,9 +4015,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                     ai_result = _call_anthropic_explain(prompt)  # noqa: F841
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Anthropic explain call failed: %s", exc)
-                    ai_error = (
-                        "AI explanation unavailable — use Copy or Open buttons below."  # noqa: F841
-                    )
+                    ai_error = "AI explanation unavailable — use Copy or Open buttons below."  # noqa: F841
         values["active_tab"] = "score"
         # Restore score_model_dir in values so the ML dropdown stays selected
         if _score_model_dir:
