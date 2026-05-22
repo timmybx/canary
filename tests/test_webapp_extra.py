@@ -617,7 +617,7 @@ def test_app_get_explain_ai_failure_hides_exception_text(monkeypatch):
     )
     monkeypatch.setattr(webapp, "_get_ml_scorer", lambda model_dir: None)
 
-    def _raise_explain(prompt: str) -> str:
+    def _raise_explain(prompt: str):
         raise Exception(marker)
 
     monkeypatch.setattr(webapp, "_call_anthropic_explain", _raise_explain)
