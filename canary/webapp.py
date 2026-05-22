@@ -1028,38 +1028,6 @@ def _render_score_section(
     ai_error: str | None = None,
     rate_limited: bool = False,
 ) -> str:
-    # Build model dropdown with human-readable labels grouped by algorithm.
-    # Uses the same parser as the ML tab picker so names are consistent.
-    from pathlib import Path as _Path
-
-    ml_model_options: list[tuple[str, str]] = [("", "— select a model —")]
-
-    # Group parsed models by algorithm for a logical ordering
-    grouped: dict[str, list[tuple[str, str]]] = {a: [] for a in _ALGO_ORDER}
-    ungrouped: list[tuple[str, str]] = []
-
-    for d in model_dir_options or []:
-        parsed = _parse_model_dir(d)
-        if parsed is not None:
-            algo, feat, split = parsed
-            feat_label = _FEATURE_LABELS.get(feat, feat)
-            split_label = _SPLIT_LABELS.get(split, split)
-            label = f"{feat_label}  ({split_label})"
-            grouped.setdefault(algo, []).append((d, label))
-        else:
-            # Fallback for dirs that don't match the naming convention
-            ungrouped.append((d, _Path(d).name))
-
-    for algo in _ALGO_ORDER:
-        entries = sorted(grouped.get(algo, []), key=lambda x: x[1])
-        if entries:
-            algo_label = _ALGO_LABELS.get(algo, algo)
-            for val, label in entries:
-                ml_model_options.append((val, f"{algo_label} — {label}"))
-
-    for val, label in ungrouped:
-        ml_model_options.append((val, label))
-
     # ── Left column: form card ────────────────────────────────────────────────
     form_card = "".join(
         [
@@ -1069,13 +1037,26 @@ def _render_score_section(
             "<h2>Score a plugin</h2>"
             '<p class="kicker">Review the CANARY score, rationale, and supporting evidence.</p>'
             '</div><span class="pill">Core workflow</span></div>',
-            '<form method="get" action="/" style="display:grid;gap:.9rem" data-plugin-strict="true">',
+            '<form method="get" action="/" data-plugin-strict="true">',
             '<input type="hidden" name="tab" value="score">',
+            '<div style="display:grid;gap:.9rem">',
             _plugin_picker("plugin", "Plugin ID", values["plugin"], plugin_options),
-            _select(
-                "score_model_dir", "ML model", values.get("score_model_dir", ""), ml_model_options
+            "</div>",
+            '<div style="margin-top:.8rem">',
+            '<label style="font-size:.85rem;font-weight:600;color:var(--muted);display:block;margin-bottom:.3rem">ML model (optional)</label>',
+            _render_model_picker(
+                {"model_out_dir": values.get("score_model_dir", "")},
+                model_dir_options or [],
             ),
-            '<button type="submit">Score plugin</button></form>',
+            "</div>",
+            "<script>"
+            'document.currentScript.closest("form").addEventListener("submit",function(e){'
+            'var md=document.getElementById("pick-model-dir");'
+            'if(md&&md.value){var h=document.createElement("input");'
+            'h.type="hidden";h.name="score_model_dir";h.value=md.value;'
+            "e.target.appendChild(h);}});"
+            "</script>",
+            '<button type="submit" style="margin-top:.8rem">Score plugin</button></form>',
             f'<div class="notice">{_escape(score_error)}</div>' if score_error else "",
             "</section>",
             # Explain card always shown in left column after scoring
@@ -1095,17 +1076,40 @@ def _render_score_section(
     output_parts: list[str] = []
 
     if score_result:
-        # Risk context panel — replaces the old heuristic score card.
-        # Shows supporting signals without a competing score number.
-        # The ML probability is now the primary CANARY score.
+        # ── CANARY score card FIRST (primary output) ─────────────────────────
+        ml = score_result.get("ml")
+        if ml:
+            output_parts.append(
+                '<section class="card">'
+                '<div class="card__header"><div>'
+                '<p class="eyebrow">CANARY score</p>'
+                f"<h2>{_escape(score_result['plugin'])}</h2>"
+                '<p class="kicker">Estimated probability of a Jenkins security advisory within the next 180 days.</p>'
+                '</div><span class="pill pill--muted">Experimental</span></div>'
+                + _render_ml_score_panel(ml)
+                + "</section>"
+            )
+        else:
+            output_parts.append(
+                '<section class="card">'
+                '<div class="card__header"><div>'
+                '<p class="eyebrow">CANARY score</p>'
+                "<h2>Advisory risk score</h2>"
+                '</div><span class="pill pill--muted">Select a model</span></div>'
+                '<p class="muted" style="padding:.6rem 0">'
+                "Select an algorithm, feature set, and evaluation strategy on the left.</p>"
+                "</section>"
+            )
+
+        # ── Risk context card SECOND (supporting signals) ─────────────────────
         reasons_html = "".join(f"<li>{_escape(r)}</li>" for r in score_result["reasons"])
         output_parts.append(
             '<section class="card">'
             '<div class="card__header"><div>'
             '<p class="eyebrow">Risk context</p>'
-            f"<h2>{_escape(score_result['plugin'])}</h2>"
-            '<p class="kicker">Supporting signals — maintenance history, '
-            "governance, and dependency risk indicators for this plugin.</p>"
+            "<h2>Supporting signals</h2>"
+            '<p class="kicker">Maintenance history, governance, and dependency '
+            "risk indicators for this plugin.</p>"
             "</div></div>"
             f'<div class="panel" style="margin-top:.8rem">'
             "<h4>Key risk signals</h4>"
@@ -1118,31 +1122,6 @@ def _render_score_section(
             "</div>"
             "</section>"
         )
-
-        # ML score card
-        ml = score_result.get("ml")
-        if ml:
-            output_parts.append(
-                '<section class="card">'
-                '<div class="card__header"><div>'
-                '<p class="eyebrow">CANARY score</p>'
-                "<h2>Advisory risk score</h2>"
-                '<p class="kicker">Estimated probability of a Jenkins security advisory within the next 180 days.</p>'
-                '</div><span class="pill pill--muted">Experimental</span></div>'
-                + _render_ml_score_panel(ml)
-                + "</section>"
-            )
-        else:
-            output_parts.append(
-                '<section class="card">'
-                '<div class="card__header"><div>'
-                '<p class="eyebrow">Machine learning</p>'
-                "<h2>ML advisory risk score</h2>"
-                '</div><span class="pill pill--muted">Not available</span></div>'
-                '<p class="muted" style="padding:.6rem 0">Select a trained ML model above, or run '
-                "<strong>canary train baseline</strong> to create one.</p>"
-                "</section>"
-            )
     else:
         output_parts.append(
             '<section class="card">'

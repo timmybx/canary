@@ -12,9 +12,11 @@
 
 # 🐤 CANARY — Component Analytics & Near-term Advisory Risk Yardstick
 
-CANARY is a research prototype for collecting software ecosystem signals for Jenkins plugins and turning them into transparent, explainable risk indicators.
+CANARY is a research prototype that predicts near-term security advisory risk for Jenkins plugins using publicly observable project signals — commit patterns, governance artifacts, advisory history, and ecosystem metadata.
 
-Today, CANARY has a working Docker-based CLI, a local web console, first-class collectors for registry/snapshot/advisory/healthscore/GitHub/GHArchive/Software Heritage data, an explainable heuristic scorer, and an experimental ML scoring path. The project now produces static current-point feature bundles for scoring/reporting, monthly time-bounded feature bundles for modeling, future advisory labels, and trained model artifacts.
+A live demo is available at **[canary-score.com](https://canary-score.com)**, where you can score any Jenkins plugin, explore pre-trained ML model results across 64 model configurations, and view validated predictions alongside confirmed security advisories.
+
+The project includes a Docker-based CLI, a publicly deployed web console, collectors for registry/snapshot/advisory/healthscore/GitHub/GHArchive/Software Heritage data, an ML scoring pipeline trained on six years of historical data, feature selection analysis, operational precision@k evaluation, and an AI-powered explanation feature.
 
 > **Dependency source of truth:** `pyproject.toml` is the source of dependency declarations.  
 > `requirements*.txt` files are generated lockfiles used for reproducible installs.
@@ -41,7 +43,9 @@ Today, CANARY has a working Docker-based CLI, a local web console, first-class c
 - ✅ Labels monthly feature rows with future advisory horizons
 - ✅ Builds normalized advisory events for downstream analytics / ML
 - ✅ Trains baseline ML models on labeled monthly rows
-- ✅ Scores a plugin using explainable heuristic and ML-backed signals
+- ✅ Scores a plugin with an ML-backed advisory risk probability and interpretable SHAP-based feature drivers
+- ✅ Provides AI-powered plain-English explanations of scores via Claude or ChatGPT
+- ✅ Validates predictions against confirmed Jenkins security advisories in the case study tab
 - ✅ Runs tests, linting, fuzzing, and security checks in a consistent Docker environment
 
 ---
@@ -229,7 +233,9 @@ Processed:
 - `data/processed/models/<run>/metrics.json` — model metrics and selected feature columns
 - `data/processed/models/<run>/model.joblib` — trained sklearn pipeline
 - `data/processed/models/<run>/feature_columns.json` — ordered feature contract used by ML scoring
-- `data/processed/models/<run>/test_predictions.csv` — held-out predictions
+- `data/processed/models/<run>/test_predictions.csv` — held-out predictions ranked by predicted probability
+- `data/processed/models/<run>/precision_at_k.json` — operational precision@k analysis and scenario results
+- `data/processed/models/<run>/feature_selection.json` — SHAP-based feature selection results (H3 analysis)
 
 ### Feature outputs
 
@@ -298,13 +304,11 @@ With a local Python environment, you can also run:
 canary-web
 ```
 
-The web console is currently aimed at local demos and day-to-day use. It can:
-- score a plugin and show the JSON / reasons in the browser
-- optionally run the trained ML scorer alongside the heuristic score
-- run collection / enrichment commands without memorizing flags
-- build monthly labels and train / inspect baseline model runs
-- show command preview and captured console output
-- display the bundled CANARY logo and favicon
+The web console is publicly deployed at **[canary-score.com](https://canary-score.com)** and can also be run locally. It provides:
+- **Scoring tab** — score any Jenkins plugin with an ML advisory risk probability, SHAP-based feature drivers, supporting signals, and an AI-powered plain-English explanation
+- **Machine learning tab** — explore 64 pre-trained model configurations across four algorithms, eight feature sets, and two evaluation strategies — the complete 4×8×2 experiment matrix; includes operational precision@k analysis and feature selection (H3) results
+- **Case study tab** — see top-ranked predictions validated against confirmed Jenkins security advisories with CVE details, severity, and lead time
+- **About tab** — quick-start guide and background on the CANARY methodology
 
 You can also run it directly inside the container with:
 
@@ -672,49 +676,35 @@ CANARY aims to be reproducible and supply-chain aware:
 
 ## 🧠 How Scoring Works
 
-CANARY has two scoring paths.
+The primary CANARY score is an ML-backed advisory risk probability — the estimated likelihood that a plugin will appear in a Jenkins security advisory within the next 180 days. The score is produced by gradient-boosted tree models (XGBoost, LightGBM) trained on six years of monthly plugin observations.
 
-The default `canary score` path is a transparent heuristic scorer. It combines:
+**Key input signals:**
 
-- **name heuristics** (keywords that suggest auth/security or SCM surface area)
-- **advisory features**
-  - advisory count
-  - most recent advisory date
-  - recency-weighted advisory risk
-  - CVSS severity
-- **plugin snapshot features**
-  - required Jenkins core
-  - dependency count and dependency risk
-  - active and historical security warnings
-  - release recency
-- **Software Heritage features**
-  - last commit recency
-  - governance artifacts such as `SECURITY.md`, automation, tests, and changelogs
-- **healthscore features**
-  - healthscore value/date
-  - small risk-points mapping (higher health = lower risk)
+- **Software Heritage** — commit staleness, security-fix commit patterns, governance artifacts (`SECURITY.md`, changelogs, CI config), repository age, and revision-history signals
+- **GH Archive** — historical release cadence, pull request activity, contributor diversity, and maintenance regularity
+- **Advisory history** — prior advisory count, recency, and maximum observed CVSS severity
+- **Plugin ecosystem** — dependency risk, Jenkins core version requirements, health score, and security warnings
 
-Output includes the final score, human-readable reasons, and raw feature values in JSON mode.
+**Model output:**
 
-The experimental `canary score-ml` path loads a trained model from `data/processed/models/<run>/`, builds a current feature vector from collected raw data, and returns an advisory-risk probability, category, top drivers, and the aligned feature vector.
+- Advisory risk probability (0.0–1.0) with Low / Medium / High risk category
+- Top contributing features with SHAP-based direction and value
+- Supporting signals including dependency risk and governance indicators
+- AI-powered plain-English explanation (via Claude or ChatGPT)
+
+The `canary score-ml` CLI path loads a trained model from `data/processed/models/<run>/`, builds a current feature vector from collected raw data, and returns an advisory-risk probability, category, top drivers, and the aligned feature vector.
 
 ---
 
-## 🧩 Near-Term Integration Work
+## 🔬 Research Status
 
-The next technical layer for CANARY is less about adding isolated collectors and more about connecting them cleanly.
+CANARY is being developed as a Doctor of Engineering praxis at The George Washington University. Key empirical results from the current research phase:
 
-Good next steps include:
-
-- per-plugin feature bundles such as `data/processed/features/<plugin>.features.json`
-- calibration and validation reports for trained ML models
-- richer drift checks between current-point scoring features and monthly training features
-- lightweight schema/version metadata for generated datasets
-- GUI updates that expose more collection and modeling options without requiring CLI-only workflows
-  - date pickers / calendar widgets for historical collection
-  - preset ranges such as 30 days / 90 days / 1 year
-  - sample / byte-cap fields surfaced in the web UI
-  - collection and training progress summaries
+- **XGBoost (full features, time split):** ROC-AUC 0.960, Average Precision 0.764
+- **Precision@K:** top-10 plugins = 100% precision (53× lift), top-50 = 92% precision (49× lift)
+- **Feature selection (H3):** a 15-feature subset of the no-window model retains 93.9% of full-model AP
+- **Case study validation:** 18 of 25 top-ranked predictions confirmed by Jenkins security advisories published within the 180-day window
+- **Training data:** approximately 180,000 plugin-month observations from 2019–2025
 
 ---
 
@@ -730,11 +720,16 @@ Good next steps include:
 - [x] Add GitHub signals as first-class collectors in `collect enrich`
 - [x] Build monthly advisory labels for ML training
 - [x] Train baseline ML models from labeled monthly features
-- [x] Add ML-backed plugin scoring
-- [ ] Build per-plugin feature bundles (`data/processed/features/<plugin>.features.json`)
-- [ ] Add schema/version metadata for generated datasets
-- [ ] Expand model validation, calibration, and drift reporting
-- [ ] Expand the web UI with date widgets and richer output summaries
+- [x] Add ML-backed plugin scoring with SHAP feature drivers
+- [x] Feature selection study (H3 analysis) across model families
+- [x] Operational precision@k analysis and scenario evaluation
+- [x] Deploy publicly accessible web console (canary-score.com)
+- [x] AI-powered plain-English score explanations (Claude / ChatGPT)
+- [x] Case study tab — validated predictions vs. confirmed advisories
+- [x] Complete 64-model experiment matrix across 4 algorithms × 8 feature sets × 2 evaluation strategies
+- [ ] Generalization to OSS ecosystems beyond Jenkins
+- [ ] Longitudinal drift analysis as new advisories are published
+- [ ] Severity-aware scoring (weight predictions by expected CVSS)
 
 ---
 
