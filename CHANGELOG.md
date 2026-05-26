@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.9] - 2026-05-26
+### Added
+- SHAP-based feature-selection study support, including a new CLI workflow, experiment helpers, web-console experiment sections, and more robust feature-selection artifact loading.
+- In-page AI explanation support for scoring results, including rate limiting, clearer Anthropic error handling, formatted output, model context preservation, and a dedicated explanation card.
+- Additional web-console analysis surfaces, including an About tab, case-study/advisory validation tab, operational precision@k metrics, grouped model dropdowns, and a live GitHub commit signal for plugins.
+- Deployment documentation for the Render-based CANARY service, persistent data disk, SSH access, and data synchronization workflow.
+- Extra regression coverage for webapp scoring/explanation behavior, CodeQL exception-sanitization handling, pip-audit wrapper behavior, and plugin alias helpers.
+
+### Changed
+- The local web console now focuses on scoring and read-only ML/model inspection: data-collection controls and the `/run` path were removed from the UI surface.
+- Scoring flows now use GET-friendly URLs with a `/score` redirect, improved CANARY score presentation, refined ML result copy, and cleaner feature-driver formatting that filters imputed drivers.
+- Feature-selection and training helpers now guard average-precision calculations, cap expensive random-forest work, skip unnecessary full retrains, add `train_start_month` reporting, and improve output-error handling.
+- Container and deployment behavior now starts the web app by default, honors Render's `PORT` environment variable, gives the app user a shell for SSH, adds `rsync`, and removes the unused default Nginx config.
+- README guidance was refreshed for ML labels/training, Software Heritage output paths, and current web-console scoring behavior.
+
+### Fixed
+- Prevented information exposure through raw exception strings in webapp scoring/explanation errors, with regression coverage for the CodeQL finding.
+- Improved plugin alias matching resilience and added a network guard around pip-audit wrapper flows used by local hooks.
+- Fixed the docker pytest pre-commit hook so coverage output is written to a writable `/tmp` path.
+- Tightened score-form layout, feature-list styling, model-directory preservation, and several web-console edge cases.
+
+### Security
+- Upgraded `urllib3` to address `CVE-2026-44431` and `CVE-2026-44432`.
+- Upgraded `idna` to address `CVE-2026-45409`.
+- Removed the stale `PYSEC-2024-277` pip-audit ignore after confirming CANARY is pinned to `joblib` 1.5.3.
+- Refreshed CodeQL, Scorecard, Zizmor, pre-commit, and Dependabot automation, and updated dependency pins including `pip`, `ruff`, `boto3`/`botocore`, `requests`, `pandas`, and `numpy`.
+
 ## [0.1.8] - 2026-05-10
 ### Added
 - ML-backed scoring support for the CLI and local web console, including model-directory selection and SHAP-style driver extraction for trained baseline models.

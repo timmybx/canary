@@ -4,10 +4,4 @@
 # Use this only for known issues with no available fix yet.
 # Remove entries as soon as an upstream patched release exists.
 
-# PYSEC-2024-277 — joblib deserialization in NumpyArrayWrapper.read_array()
-# Added 2026-05-20. joblib 1.5.3 is the latest release; no patched version
-# exists yet. The upstream supplier disputes this finding, noting that
-# NumpyArrayWrapper is only exercised when loading cached (trusted) content.
-# Re-evaluate when a joblib release lists PYSEC-2024-277 as fixed.
-PYSEC-2024-277
 
