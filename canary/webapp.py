@@ -2144,8 +2144,9 @@ def _render_feature_item(item: dict[str, Any], is_xgb: bool) -> str:
         else f"<code>{_escape(feat)}</code>"
     )
     if is_xgb:
-        val = _float_or_none(item.get("importance"))
-        val_str = f"{val:.4f}" if val is not None else "—"
+        # Prefer mean_abs_shap (new SHAP-based) over legacy importance
+        mag = _float_or_none(item.get("mean_abs_shap")) or _float_or_none(item.get("importance"))
+        val_str = f"{mag:.4f}" if mag is not None else "—"
         tip_key = "XGBoost importance"
     else:
         val = _float_or_none(item.get("coefficient"))
@@ -2356,14 +2357,27 @@ def _render_ml_metrics(metrics: dict[str, Any] | None, model_out_dir: str = "") 
     )
 
     # Positive / negative feature lists with per-feature tooltips
-    pos_label = "Top features (by importance)" if is_xgb else "Top positive features"
+    # XGBoost/LightGBM: positive = mean_shap > 0 (raises risk),
+    #                    negative = mean_shap < 0 (lowers risk)
+    # Logistic: positive coefficient vs negative coefficient
+    pos_label = "Top risk-raising features" if is_xgb else "Top positive features"
+    has_shap_direction = is_xgb and bool(negative)
     positive_items = (
         "".join(_render_feature_item(item, is_xgb) for item in positive[:10])
         or "<li>No features found.</li>"
     )
-    negative_items = (
-        "".join(_render_feature_item(item, is_xgb) for item in negative[:10])
-        or "<li>No negative coefficients found.</li>"
+    negative_items = "".join(_render_feature_item(item, is_xgb) for item in negative[:10]) or (
+        "<li>Retrain this model to generate SHAP direction data.</li>"
+        if is_xgb
+        else "<li>No negative coefficients found.</li>"
+    )
+    # Proxy panel for models trained before SHAP direction was added
+    protective_note = (
+        '<p class="small muted" style="margin-bottom:.5rem">'
+        "Retrain this model to generate true SHAP direction data. "
+        "Until then, lower-importance features are shown as a proxy.</p>"
+        if is_xgb and not has_shap_direction
+        else ""
     )
 
     # Train/test class balance note
@@ -2432,20 +2446,27 @@ def _render_ml_metrics(metrics: dict[str, Any] | None, model_out_dir: str = "") 
         # Ranking precision
         f'<div class="panel">{_render_ranking_row(ranking, base_rate)}</div>'
         f"{operational_panel_html}"
-        # Feature importance columns — always two columns
+        # Feature importance columns — two columns with distinct content
         '<div class="grid--two">'
-        f'<div class="panel"><h4>{_escape(pos_label)}</h4><ul class="bullet-list">{positive_items}</ul></div>'
+        f'<div class="panel"><h4>{_escape(pos_label)}</h4>'
+        f'<p class="small muted" style="margin-bottom:.5rem">Features whose higher values '
+        "the model associates with <em>increased</em> near-term advisory risk. "
+        "Sorted by SHAP magnitude.</p>"
+        f'<ul class="bullet-list">{positive_items}</ul></div>'
         + (
-            f'<div class="panel"><h4>Top negative features</h4>'
-            f'<p class="small muted" style="margin-bottom:.5rem">Features whose higher values the model associates with <em>lower</em> predicted risk. '
-            f"For logistic regression, the direction reflects the signed coefficient. "
-            f"Correlated features can shift each other's signs — interpret alongside the positive list.</p>"
-            f'<ul class="bullet-list">{negative_items}</ul></div>'
-            if not is_xgb
-            else f'<div class="panel"><h4>Feature importance</h4>'
-            f'<p class="small muted" style="margin-bottom:.5rem">Gain-based importance does not indicate direction. '
-            f"Higher values mean more contribution to model splits, not whether the feature raises or lowers predicted risk.</p>"
-            f'<ul class="bullet-list">{positive_items}</ul></div>'
+            f'<div class="panel"><h4>Risk-reducing features</h4>'
+            f"{protective_note}"
+            f'<p class="small muted" style="margin-bottom:.5rem">'
+            + (
+                "Features where higher values are associated with <em>lower</em> advisory risk "
+                "— governance artifacts, active maintenance signals, and hygiene indicators. "
+                "Sorted by SHAP magnitude."
+                if has_shap_direction
+                else "Features whose higher values the model associates with <em>lower</em> predicted risk. "
+                "For logistic regression, the direction reflects the signed coefficient. "
+                "Correlated features can shift each other's signs."
+            )
+            + f'</p><ul class="bullet-list">{negative_items}</ul></div>'
         )
         + "</div>"
         # Classification report

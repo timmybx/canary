@@ -177,13 +177,21 @@ def _extract_feature_importance(
     model: Any,
     feature_cols: list[str],
     model_name: str,
+    X_sample: Any = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Return (top_positive, top_negative) feature importance dicts.
 
-    For logistic regression: uses signed coefficients.
-    For tree-based models: uses feature_importances_ (unsigned),
-    reported under top_positive only.
+    For logistic regression: uses signed coefficients directly.
+
+    For tree-based models (XGBoost, LightGBM, Random Forest): uses SHAP
+    TreeExplainer to compute mean signed SHAP values over X_sample.
+    - mean_shap > 0  → feature raises predicted advisory risk  (top_positive)
+    - mean_shap < 0  → feature lowers predicted advisory risk  (top_negative)
+    - mean_abs_shap  → unsigned magnitude used for ranking / bar width
+
+    Falls back to unsigned feature_importances_ if SHAP is unavailable or
+    X_sample is not provided (Random Forest is excluded from SHAP due to OOM).
     """
     # Unwrap a Pipeline to get to the actual classifier
     clf = model
@@ -194,7 +202,7 @@ def _extract_feature_importance(
     top_positive: list[dict[str, Any]] = []
     top_negative: list[dict[str, Any]] = []
 
-    # Logistic regression — signed coefficients
+    # ── Logistic regression — signed coefficients ────────────────────────────
     if hasattr(clf, "coef_"):
         coef_pairs = sorted(
             zip(feature_cols, clf.coef_[0], strict=False),
@@ -207,9 +215,64 @@ def _extract_feature_importance(
         top_negative = [{"feature": f, "coefficient": float(c)} for f, c in coef_pairs if c < 0][
             :20
         ]
+        return top_positive, top_negative
 
-    # Tree-based — unsigned feature importances
-    elif hasattr(clf, "feature_importances_"):
+    # ── Tree-based models ─────────────────────────────────────────────────────
+    model_type = type(clf).__name__
+    is_xgb_lgb = any(k in model_type for k in ("XGB", "LGBM", "LGB"))
+
+    # Random Forest SHAP is prohibitively slow — fall through to feature_importances_
+    if is_xgb_lgb and X_sample is not None:
+        try:
+            import shap  # pyright: ignore[reportMissingImports]
+
+            print(f"Computing signed SHAP values for {model_type} …")
+            explainer = shap.TreeExplainer(clf)
+            shap_out = explainer.shap_values(X_sample)
+            vals_array = np.asarray(
+                shap_out[1] if isinstance(shap_out, list) else shap_out,
+                dtype=float,
+            )
+
+            mean_shap = vals_array.mean(axis=0)  # signed — direction
+            mean_abs_shap = np.abs(vals_array).mean(axis=0)  # magnitude — ranking
+
+            pairs = list(
+                zip(feature_cols, mean_shap.tolist(), mean_abs_shap.tolist(), strict=False)
+            )
+
+            # Sort by magnitude descending for each direction
+            pos_pairs = sorted(
+                [(f, ms, ma) for f, ms, ma in pairs if ms > 0],
+                key=lambda x: x[2],
+                reverse=True,
+            )
+            neg_pairs = sorted(
+                [(f, ms, ma) for f, ms, ma in pairs if ms < 0],
+                key=lambda x: x[2],
+                reverse=True,
+            )
+
+            top_positive = [
+                {"feature": f, "mean_shap": round(ms, 6), "mean_abs_shap": round(ma, 6)}
+                for f, ms, ma in pos_pairs
+            ][:20]
+            top_negative = [
+                {"feature": f, "mean_shap": round(ms, 6), "mean_abs_shap": round(ma, 6)}
+                for f, ms, ma in neg_pairs
+            ][:20]
+
+            print(
+                f"SHAP direction split: {len(top_positive)} risk-raising, "
+                f"{len(top_negative)} risk-reducing features."
+            )
+            return top_positive, top_negative
+
+        except Exception as exc:  # noqa: BLE001
+            print(f"SHAP failed for {model_type} ({exc}); falling back to feature_importances_.")
+
+    # ── Fallback: unsigned feature_importances_ ───────────────────────────────
+    if hasattr(clf, "feature_importances_"):
         importance_pairs = sorted(
             zip(feature_cols, clf.feature_importances_, strict=False),
             key=lambda x: float(x[1]),
@@ -410,6 +473,7 @@ def train_model(
         full_pipeline.named_steps["model"],
         feature_cols,
         model_name,
+        X_sample=X_test,
     )
     metrics["top_positive_features"] = top_positive
     metrics["top_negative_features"] = top_negative
