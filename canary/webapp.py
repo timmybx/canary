@@ -3716,7 +3716,7 @@ def _render_about_tab() -> str:
         "</div></div>"
         '<p style="margin-top:.6rem;line-height:1.7;font-size:.95rem">'
         "The <strong>Machine learning</strong> tab lets you explore pre-computed results "
-        "across 29 model configurations. Use the three dropdowns to select an algorithm "
+        "across 64 model configurations. Use the three dropdowns to select an algorithm "
         "(XGBoost, LightGBM, Random Forest, Logistic Regression), a feature set "
         "(from advisory-history-only up to all 154 features), and an evaluation strategy "
         "(time split or group-time split). "
