@@ -3366,7 +3366,6 @@ def _render_case_study_tab(
     n_test = (metrics or {}).get("test_row_count", 1)
     base_rate = n_pos / n_test if n_test > 0 else 0.0
     n_test_plugins = (metrics or {}).get("test_unique_plugin_count")
-    n_train_plugins = (metrics or {}).get("train_unique_plugin_count")
 
     # Enrich with advisory data
     enriched: list[dict[str, Any]] = []
@@ -3502,10 +3501,7 @@ def _render_case_study_tab(
     # Ecosystem context line — shown when unique plugin counts are available
     eco_parts: list[str] = []
     if n_test_plugins:
-        eco_parts.append(f"<strong>Plugins scored (test set):</strong> {n_test_plugins:,}")
-    if n_train_plugins and n_test_plugins:
-        total_plugins = n_train_plugins + n_test_plugins
-        eco_parts.append(f"<strong>Total unique plugins:</strong> {total_plugins:,}")
+        eco_parts.append(f"<strong>Plugins scored:</strong> {n_test_plugins:,}")
     if n_pos and n_test_plugins:
         eco_parts.append(
             f"<strong>Advisories in window:</strong> {n_pos:,} "
