@@ -3365,6 +3365,8 @@ def _render_case_study_tab(
     n_pos = (metrics or {}).get("test_positive_count", 0)
     n_test = (metrics or {}).get("test_row_count", 1)
     base_rate = n_pos / n_test if n_test > 0 else 0.0
+    n_test_plugins = (metrics or {}).get("test_unique_plugin_count")
+    n_train_plugins = (metrics or {}).get("train_unique_plugin_count")
 
     # Enrich with advisory data
     enriched: list[dict[str, Any]] = []
@@ -3497,8 +3499,39 @@ def _render_case_study_tab(
     prec = n_confirmed / n_total if n_total > 0 else 0.0
     lift = prec / base_rate if base_rate > 0 else 0.0
 
+    # Ecosystem context line — shown when unique plugin counts are available
+    eco_parts: list[str] = []
+    if n_test_plugins:
+        eco_parts.append(f"<strong>Plugins scored (test set):</strong> {n_test_plugins:,}")
+    if n_train_plugins and n_test_plugins:
+        total_plugins = n_train_plugins + n_test_plugins
+        eco_parts.append(f"<strong>Total unique plugins:</strong> {total_plugins:,}")
+    if n_pos and n_test_plugins:
+        eco_parts.append(
+            f"<strong>Advisories in window:</strong> {n_pos:,} "
+            f"({n_pos / n_test_plugins * 100:.1f}% of scored plugins)"
+        )
+    eco_line = (
+        '<div style="margin-bottom:.5rem;padding:.5rem .9rem;'
+        + "background:rgba(92,152,224,.07);border:1px solid rgba(92,152,224,.2);"
+        + 'border-radius:8px;font-size:.83rem;color:var(--muted)">'
+        + '<span style="margin-right:.4rem">&#128270;</span>'
+        + "<strong>Ecosystem context</strong> &nbsp;&#8212;&nbsp; "
+        + " &nbsp;|&nbsp; ".join(eco_parts)
+        + (
+            f" &nbsp;|&nbsp; <strong>Base rate:</strong> {base_rate * 100:.1f}% "
+            f"(lift = top-{n_total} precision ÷ base rate)"
+            if base_rate > 0
+            else ""
+        )
+        + "</div>"
+        if eco_parts
+        else ""
+    )
+
     headline = (
-        '<div style="margin-bottom:.8rem;padding:.7rem .9rem;'
+        eco_line
+        + '<div style="margin-bottom:.8rem;padding:.7rem .9rem;'
         + "background:rgba(82,196,26,.08);border:1px solid rgba(82,196,26,.25);"
         + 'border-radius:10px;font-size:.9rem">'
         + f"<strong>Observation date:</strong> {_escape(obs_date)} &nbsp;|&nbsp; "

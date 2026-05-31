@@ -444,6 +444,12 @@ def train_model(
         ),
         "train_positive_count": int(y_train.sum()),
         "test_positive_count": int(y_test.sum()),
+        "train_unique_plugin_count": int(
+            len({str(row.get("plugin_id") or "") for row in train_rows})
+        ),
+        "test_unique_plugin_count": int(
+            len({str(row.get("plugin_id") or "") for row in test_rows})
+        ),
         "feature_count": int(len(feature_cols)),
         "feature_columns": feature_cols,
         "roc_auc": None,
