@@ -3455,7 +3455,7 @@ def _render_case_study_tab(
                 "<td style='padding:.45rem .6rem;text-align:center'>"
                 '<span style="color:#5ce0a0;font-weight:700">&#x2713;</span></td>'
                 + f"<td style='padding:.45rem .6rem'>{sev_cell}</td>"
-                + f"<td style='padding:.45rem .6rem;font-size:.82rem'>{_escape(adv_date)}</td>"
+                + f"<td style='padding:.45rem .6rem;font-size:.82rem'>{_escape(r['adv_date'])}</td>"
                 + f"<td style='padding:.45rem .6rem;font-size:.82rem;color:var(--muted)'>{days_str}</td>"
                 + f"<td style='padding:.45rem .6rem;font-size:.82rem'>{adv_cell}</td>"
             )
