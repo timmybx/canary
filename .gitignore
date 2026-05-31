@@ -13,6 +13,7 @@ dist/
 compose.override.yaml
 .local
 .cache
+*.zip
 
 # --- Generated data outputs (ignore by default) ---
 data/archive/**
