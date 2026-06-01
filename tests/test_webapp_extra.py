@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import urllib.error
-import urllib.request
 from email.message import Message
 from io import BytesIO
 from pathlib import Path
+import urllib.error
+import urllib.request
 
 import pytest
 
