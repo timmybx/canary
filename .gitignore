@@ -30,6 +30,8 @@ data/cache/**
 !data/processed/models/
 !data/processed/models/.gitkeep
 !data/cache/**/.gitkeep
+!data/raw/advisories/
+!data/raw/plugins/
 !data/raw/healthscore/
 !data/raw/healthscore/plugins/
 !data/raw/healthscore/plugins/.gitkeep
@@ -48,6 +50,9 @@ data/cache/**
 
 # (Optional) Keep docs/samples in data/
 !data/**/README.md
+!data/raw/**/README.md
+!data/raw/plugins/README.md
+!data/raw/advisories/README.md
 !data/raw/registry/*.sample.*
 
 canary_bad_json_distfork.txt

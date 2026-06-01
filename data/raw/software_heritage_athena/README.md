@@ -394,6 +394,24 @@ from commits reachable from the snapshot's branch tips.
 | `author_committer_mismatch_rate` | float \| None | Fraction of commits where the author timezone offset differs from the committer timezone offset. Used as an imperfect proxy for code review — if someone in a different timezone committed your code, a review step likely occurred. This is an exploratory heuristic not directly validated in the literature; timezone offsets can change without reflecting a real review. |
 | `late_night_commit_fraction` | float \| None | Fraction of commits authored between midnight and 4 AM local time (timezone-adjusted using `author_tz_offset_minutes`). Eyolfson et al. (2011) found that commits made between midnight and 4 AM have significantly higher bug rates than commits made during normal working hours, while Claes et al. (2018) established that most professional developers rarely commit during these hours. High values may indicate rushed or fatigued development practices. Complements `weekend_commit_fraction` as a second dimension of the professional vs. hobbyist maintenance signal. |
 
+### Archival and visit-context signals
+
+These signals capture whether and how thoroughly Software Heritage has archived the
+plugin repository up to the observation date. They are used to distinguish genuinely
+absent features from features that are missing simply because SWH had not yet crawled
+the repository. Preserving this distinction avoids the methodological error of treating
+"not observed" as equivalent to "not present."
+
+| Field | Type | Predictive rationale |
+|-------|------|----------------------|
+| `swh_origin_found` | bool | Whether any SWH origin record exists for this plugin's repository URL. A `False` value means the repository was either never archived or could not be resolved. Plugins with no archival presence are excluded from SWH-dependent features rather than imputed as zero, which avoids conflating unobservability with absence of the underlying signal. |
+| `swh_present_any` | bool | Whether at least one SWH visit with a valid snapshot was found for this plugin up to the observation date. Used downstream to gate whether SWH-derived features are populated or left as missing. |
+| `swh_has_snapshot_to_date` | bool | Whether at least one archival snapshot exists on or before the observation date. Distinct from `swh_origin_found` — an origin may be registered but have no completed snapshots yet. |
+| `swh_latest_visit_date_to_date` | str \| None | ISO 8601 date of the most recent SWH visit with a valid snapshot, constrained to visits on or before the observation date. Provides temporal context for interpreting all other SWH signals — a visit from five years ago is less informative than one from last month. |
+| `swh_visit_count_to_date` | int | Number of distinct SWH visits with valid snapshots recorded up to the observation date. Higher counts indicate the repository has been consistently crawled over time, increasing confidence that governance and revision signals reflect the full project history rather than a single point-in-time snapshot. |
+| `swh_visits_this_month` | int | Number of SWH visits recorded in the observation month. Primarily a data-quality and coverage signal rather than a direct risk indicator. |
+| `swh_archive_age_days_to_date` | float \| None | Days between the earliest SWH visit with a valid snapshot and the observation date. A proxy for how long the repository has been continuously observable in the archive. Longer archival histories mean more stable longitudinal signals and generally correspond to more mature, established projects. Consistent with the finding from Panter & Eisty (2026) that project age and maintenance history are among the strongest predictors of vulnerability risk. |
+
 ---
 
 ## Data limitations
