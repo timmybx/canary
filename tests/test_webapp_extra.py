@@ -1113,9 +1113,10 @@ def test_fmt_driver_value_and_prompt_builder():
 
 def test_rate_limit_and_explain_card_variants():
     ip = "127.0.0.1"
-    webapp._EXPLAIN_RATE_LIMIT[ip] = []
+    webapp._EXPLAIN_RATE_LIMIT.pop(ip, None)
     assert webapp._check_explain_rate_limit(ip) is True
-    webapp._EXPLAIN_RATE_LIMIT[ip] = [0.0] * webapp._EXPLAIN_RATE_MAX
+    now = webapp._time.monotonic()
+    webapp._EXPLAIN_RATE_LIMIT[ip] = [now] * webapp._EXPLAIN_RATE_MAX
     assert webapp._check_explain_rate_limit(ip) is False
 
     card_rate = webapp._render_explain_card(
