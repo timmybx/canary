@@ -747,6 +747,7 @@ def test_app_post_explain_redirects_to_get_route():
         "Location",
         "/?tab=score&plugin=&score_model_dir=data%2Fprocessed%2Fmodels%2Fbaseline_6m&explain=1",
     ) in headers
+    assert ("Location", "/?tab=score&plugin=workflow-cps&explain=1") not in headers
     assert response == b""
 
 
@@ -1022,6 +1023,10 @@ def test_load_precision_at_k_invalid_inputs(tmp_path: Path, monkeypatch: pytest.
 
     assert webapp._load_precision_at_k("/absolute/path") is None
     assert webapp._load_precision_at_k("data/processed/models/xgb_6m_full_cleaned_time") is None
+    (run_dir / "precision_at_k.json").write_text('{"unexpected":"shape"}', encoding="utf-8")
+    assert webapp._load_precision_at_k("data/processed/models/xgb_6m_full_cleaned_time") == {
+        "unexpected": "shape"
+    }
 
 
 def test_score_and_ml_payload_helpers():
@@ -1143,17 +1148,17 @@ def test_call_anthropic_explain_success_and_error(monkeypatch: pytest.MonkeyPatc
         def read(self):
             return b'{"content":[{"type":"text","text":"Hello"},{"type":"text","text":"World"}]}'
 
-    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=30: _Resp())
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *args, **kwargs: _Resp())
     assert webapp._call_anthropic_explain("prompt") == "Hello\n\nWorld"
 
     class _HttpErr(urllib.error.HTTPError):
         def __init__(self):
-            super().__init__("http://x", 401, "bad", Message(), None)
+            super().__init__("https://x", 401, "bad", Message(), None)
 
         def read(self):
             return b'{"error":"denied"}'
 
-    def _raise_http(req, timeout=30):
+    def _raise_http(*args, **kwargs):
         raise _HttpErr()
 
     monkeypatch.setattr(urllib.request, "urlopen", _raise_http)
