@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import urllib.error
+import urllib.request
+from email.message import Message
 from io import BytesIO
 from pathlib import Path
 
@@ -9,6 +12,7 @@ import pytest
 
 import canary.webapp as webapp
 from canary.scoring.baseline import ScoreResult
+from canary.scoring.ml import FeatureDriver, MLScoreResult
 from canary.webapp import (
     _bool_from_form,
     _checkbox,
@@ -646,3 +650,516 @@ def test_app_post_run_collect_github_missing_plugin():
     text = response.decode("utf-8")
     assert status == "404 Not Found"
     assert text == "Not found"
+
+
+def test_render_page_about_tab_exercises_about_content():
+    html = render_page({"active_tab": "about"})
+    assert "What is CANARY?" in html
+    assert "View on GitHub" in html
+    assert "Jenkins Security Advisories" in html
+
+
+def test_render_page_case_study_tab_without_model_selected():
+    html = render_page({"active_tab": "casestudy", "model_out_dir": ""}, model_dir_options=[])
+    assert "Validated predictions" in html
+    assert "Select a model to view results" in html
+
+
+def test_render_page_case_study_tab_with_missing_predictions_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    run_dir = model_root / "run_1"
+    run_dir.mkdir()
+
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT", model_root)
+    monkeypatch.setattr(webapp, "ADVISORY_DATA_ROOT", tmp_path / "advisories")
+
+    html = render_page(
+        {"active_tab": "casestudy", "model_out_dir": "data/processed/models/run_1"},
+        model_dir_options=["data/processed/models/run_1"],
+    )
+
+    assert "No predictions file found" in html
+    assert "test_predictions.csv" in html
+
+
+def test_render_page_case_study_tab_with_predictions_and_advisories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    model_root = tmp_path / "models"
+    run_name = "run_2"
+    run_dir = model_root / run_name
+    run_dir.mkdir(parents=True)
+    advisories_root = tmp_path / "advisories"
+    advisories_root.mkdir(parents=True)
+
+    (run_dir / "metrics.json").write_text(
+        """{
+  "test_start_month": "2024-01",
+  "test_positive_count": 1,
+  "test_row_count": 2,
+  "test_unique_plugin_count": 100
+}""",
+        encoding="utf-8",
+    )
+    (run_dir / "test_predictions.csv").write_text(
+        "\n".join(
+            [
+                "plugin_id,month,y_true,y_prob",
+                "confirmed-plugin,2024-01,1,0.90",
+                "unconfirmed-plugin,2024-01,0,0.40",
+                "confirmed-plugin,2024-01,1,0.10",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (advisories_root / "confirmed-plugin.advisories.real.jsonl").write_text(
+        (
+            '{"published_date":"2024-04-15","url":"https://example.test/advisory/1",'
+            '"severity_summary":{"max_severity_label":"high","max_cvss_base_score":8.5},'
+            '"security_warning_ids":["SECURITY-1234","SECURITY-9999"]}\n'
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT", model_root)
+    monkeypatch.setattr(webapp, "ADVISORY_DATA_ROOT", advisories_root)
+
+    html = render_page(
+        {"active_tab": "casestudy", "model_out_dir": f"data/processed/models/{run_name}"},
+        model_dir_options=[f"data/processed/models/{run_name}"],
+    )
+
+    assert "Top-2 predictions vs. confirmed advisories" in html
+    assert "Confirmed predictions" in html
+    assert "Unconfirmed predictions" in html
+    assert "confirmed-plugin" in html
+    assert "SECURITY-1234" in html
+
+
+def test_app_post_explain_redirects_to_get_route():
+    body = b"plugin=workflow-cps&score_model_dir=data%2Fprocessed%2Fmodels%2Fbaseline_6m"
+    status, headers, response = _run_app("POST", "/explain", body)
+    assert status == "302 Found"
+    assert (
+        "Location",
+        "/?tab=score&plugin=&score_model_dir=data%2Fprocessed%2Fmodels%2Fbaseline_6m&explain=1",
+    ) in headers
+    assert response == b""
+
+
+def test_app_post_ml_explain_redirects_to_get_route():
+    body = b"model_out_dir=data%2Fprocessed%2Fmodels%2Fbaseline_6m"
+    status, headers, response = _run_app("POST", "/ml_explain", body)
+    assert status == "302 Found"
+    assert (
+        "Location",
+        "/?tab=ml&model_out_dir=data%2Fprocessed%2Fmodels%2Fbaseline_6m&ml_explain=1",
+    ) in headers
+    assert response == b""
+
+
+def test_render_operational_panel_includes_headline_and_callouts():
+    html = webapp._render_operational_panel(
+        {
+            "n_positive": 20,
+            "n_test": 1000,
+            "base_rate": 0.02,
+            "split_strategy": "gt",
+            "scenarios": [
+                {
+                    "label": "Top 10",
+                    "k": 10,
+                    "true_positives": 6,
+                    "precision": 0.95,
+                    "recall": 0.3,
+                    "lift": 47.5,
+                },
+                {
+                    "label": "Top 25",
+                    "k": 25,
+                    "true_positives": 9,
+                    "precision": 0.72,
+                    "recall": 0.45,
+                    "lift": 36.0,
+                },
+                {
+                    "label": "Top 50",
+                    "k": 50,
+                    "true_positives": 12,
+                    "precision": 0.50,
+                    "recall": 0.6,
+                    "lift": 25.0,
+                },
+            ],
+            "recall_targets": [
+                {
+                    "target_recall": 0.5,
+                    "plugins_to_review": 42,
+                    "pct_of_ecosystem": 4.2,
+                    "true_positives": 10,
+                    "precision": 0.24,
+                }
+            ],
+        }
+    )
+    assert "Operational scenario analysis" in html
+    assert "group-time split" in html
+    assert "Key finding" in html
+    assert "50% recall" in html
+
+
+def test_render_ml_metrics_with_rich_xgb_payload(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        webapp,
+        "_load_precision_at_k",
+        lambda _: {
+            "n_positive": 20,
+            "n_test": 1000,
+            "base_rate": 0.02,
+            "split_strategy": "time",
+            "scenarios": [
+                {
+                    "label": "Top 10",
+                    "k": 10,
+                    "true_positives": 5,
+                    "precision": 0.5,
+                    "recall": 0.25,
+                    "lift": 25.0,
+                },
+                {
+                    "label": "Top 25",
+                    "k": 25,
+                    "true_positives": 8,
+                    "precision": 0.32,
+                    "recall": 0.4,
+                    "lift": 16.0,
+                },
+                {
+                    "label": "Top 50",
+                    "k": 50,
+                    "true_positives": 12,
+                    "precision": 0.24,
+                    "recall": 0.6,
+                    "lift": 12.0,
+                },
+            ],
+            "recall_targets": [],
+        },
+    )
+    html = webapp._render_ml_metrics(
+        {
+            "model_name": "xgboost",
+            "target_col": "label_advisory_within_6m",
+            "roc_auc": 0.84,
+            "average_precision": 0.33,
+            "feature_count": 15,
+            "feature_columns": [f"f{i}" for i in range(12)],
+            "train_row_count": 5000,
+            "train_positive_count": 100,
+            "test_row_count": 1000,
+            "test_positive_count": 20,
+            "test_start_month": "2024-01",
+            "train_start_month": "2023-01",
+            "ranking_metrics": {
+                "precision_at_10": 0.5,
+                "precision_at_25": 0.32,
+                "precision_at_50": 0.24,
+                "precision_at_100": 0.15,
+            },
+            "top_positive_features": [
+                {"feature": "repo_days_since_last_commit", "mean_abs_shap": 0.456},
+                {"feature": "gh_total_commits_90d", "importance": 0.321},
+            ],
+            "top_negative_features": [
+                {"feature": "has_security_policy", "mean_abs_shap": 0.199},
+            ],
+            "classification_report": {
+                "0": {"precision": 0.98, "recall": 0.99, "f1-score": 0.99, "support": 980},
+                "1": {"precision": 0.50, "recall": 0.25, "f1-score": 0.33, "support": 20},
+            },
+            "confusion_matrix": [[970, 10], [15, 5]],
+        },
+        model_out_dir="data/processed/models/xgb_6m_full_cleaned_time",
+    )
+    assert "Operational scenario analysis" in html
+    assert "Risk-reducing features" in html
+    assert "Per-class classification report" in html
+    assert "Confusion matrix" in html
+
+
+def test_render_feature_selection_panel_with_show_controls():
+    ranking = [
+        {"rank": i + 1, "feature": f"feature_{i + 1}", "mean_abs_shap": 1.0 / (i + 1)}
+        for i in range(12)
+    ]
+    html = webapp._render_feature_selection_panel(
+        {
+            "full_model_feature_count": 154,
+            "full_model_average_precision": 0.4123,
+            "h3_satisfied": True,
+            "h3_smallest_qualifying_subset": {
+                "size": 20,
+                "ap_retention": 0.93,
+                "average_precision": 0.3834,
+            },
+            "subset_results": [
+                {
+                    "subset_label": "full_model",
+                    "actual_feature_count": 154,
+                    "average_precision": 0.4123,
+                    "ap_retention_vs_full": 1.0,
+                    "meets_h3_threshold": True,
+                },
+                {
+                    "subset_label": "top_20",
+                    "actual_feature_count": 20,
+                    "average_precision": 0.3834,
+                    "ap_retention_vs_full": 0.93,
+                    "meets_h3_threshold": True,
+                },
+            ],
+            "feature_ranking": ranking,
+        }
+    )
+    assert "H3 SATISFIED" in html
+    assert "Top 10 features by importance" in html
+    assert "Show:" in html
+    assert "All" in html
+
+
+def test_build_ml_explain_prompt_includes_operational_and_feature_selection():
+    prompt = webapp._build_ml_explain_prompt(
+        {
+            "model_name": "xgboost",
+            "roc_auc": 0.81,
+            "average_precision": 0.42,
+            "test_row_count": 1000,
+            "test_positive_count": 30,
+            "feature_count": 40,
+            "ranking_metrics": {"precision_at_10": 0.6, "precision_at_25": 0.4},
+            "top_positive_features": [
+                {"feature": "repo_days_since_last_commit", "mean_abs_shap": 0.22}
+            ],
+        },
+        {
+            "scenarios": [
+                {"k": 50, "true_positives": 18, "precision": 0.36, "lift": 12.0},
+            ]
+        },
+        {
+            "h3_satisfied": True,
+            "h3_smallest_qualifying_subset": {
+                "size": 15,
+                "ap_retention": 0.91,
+                "average_precision": 0.3821,
+            },
+            "full_model_average_precision": 0.4201,
+        },
+        "data/processed/models/xgb_6m_full_cleaned_time",
+    )
+    assert "MODEL:" in prompt
+    assert "OPERATIONAL FINDING" in prompt
+    assert "FEATURE SELECTION (H3)" in prompt
+
+
+def test_render_ml_explain_card_variants():
+    values = {"model_out_dir": "data/processed/models/xgb_6m_full_cleaned_time"}
+    metrics = {"model_name": "xgboost", "test_row_count": 10, "test_positive_count": 1}
+
+    assert webapp._render_ml_explain_card(values, None, None, None) == ""
+
+    limited = webapp._render_ml_explain_card(values, metrics, None, None, rate_limited=True)
+    assert "Rate limit reached" in limited
+
+    rendered = webapp._render_ml_explain_card(
+        values,
+        metrics,
+        None,
+        None,
+        ai_result="**Summary**\n\nLooks useful.",
+    )
+    assert "AI explanation (Claude)" in rendered
+    assert "<strong>Summary</strong>" in rendered
+
+
+def test_render_ml_tab_feature_selection_messages(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(webapp, "_load_precision_at_k", lambda _: None)
+    monkeypatch.setattr(webapp, "_load_feature_selection", lambda _: None)
+
+    metrics = {
+        "model_name": "logistic",
+        "roc_auc": 0.7,
+        "average_precision": 0.2,
+        "test_row_count": 100,
+        "test_positive_count": 10,
+    }
+
+    html_single = webapp._render_ml_tab(
+        {"model_out_dir": "data/processed/models/logistic_6m_advisory_only_time"},
+        metrics,
+        ["data/processed/models/logistic_6m_advisory_only_time"],
+    )
+    assert "Metrics source" in html_single
+    assert "Feature selection is not applicable for single-family feature sets" in html_single
+
+    html_not_run = webapp._render_ml_tab(
+        {"model_out_dir": "data/processed/models/logistic_6m_full_cleaned_time"},
+        metrics,
+        ["data/processed/models/logistic_6m_full_cleaned_time"],
+    )
+    assert "Feature selection has not yet been run for this model" in html_not_run
+
+
+def test_load_precision_at_k_invalid_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    model_root = tmp_path / "models"
+    run_dir = model_root / "xgb_6m_full_cleaned_time"
+    run_dir.mkdir(parents=True)
+    (run_dir / "precision_at_k.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT", model_root)
+
+    assert webapp._load_precision_at_k("/absolute/path") is None
+    assert webapp._load_precision_at_k("data/processed/models/xgb_6m_full_cleaned_time") is None
+
+
+def test_score_and_ml_payload_helpers():
+    score = ScoreResult(plugin="plugin-a", score=12, reasons=("a",), features={"f1": 1.2})
+    payload = webapp._score_payload(score, score_model_dir="data/processed/models/run")
+    assert payload["score_model_dir"] == "data/processed/models/run"
+    assert "pretty_json" in payload
+    assert "pretty_features" in payload
+
+    ml_result = MLScoreResult(
+        plugin="plugin-a",
+        probability=0.237,
+        canary_score=0.237,
+        risk_category="Medium",
+        drivers=[FeatureDriver(name="f1", value=0.1, direction="neutral", rank=1)],
+        feature_vector={"f1": 0.1},
+        model_dir="data/processed/models/run",
+        model_name="xgboost",
+        scored_at="2026-01-01T00:00:00Z",
+    )
+    ml_payload = webapp._ml_score_payload(ml_result)
+    assert ml_payload["probability_pct"] == "23.7%"
+    assert "feature_vector" not in ml_payload["pretty_json"]
+
+
+def test_render_command_result_and_ml_score_panel():
+    cmd_html = webapp._render_command_result(
+        {"command": "canary score", "exit_code": 0, "output": "ok"},
+        "Score command",
+    )
+    assert "Score command preview" in cmd_html
+    assert "Console output" in cmd_html
+
+    ml_html = webapp._render_ml_score_panel(
+        {
+            "plugin": "workflow-cps",
+            "probability": 0.42,
+            "probability_pct": "42.0%",
+            "risk_category": "High",
+            "model_name": "xgboost",
+            "drivers": [
+                {
+                    "name": "repo_days_since_last_commit",
+                    "value": 930,
+                    "direction": "increases_risk",
+                },
+                {"name": "has_security_policy", "value": 1, "direction": "decreases_risk"},
+                {"name": "missing_driver", "value": None, "direction": "neutral"},
+            ],
+            "pretty_json": '{"probability": 0.42}',
+        }
+    )
+    assert "ML Score (experimental)" in ml_html
+    assert "Top contributing features" in ml_html
+    assert "▲" in ml_html
+    assert "▼" in ml_html
+
+
+def test_fmt_driver_value_and_prompt_builder():
+    assert webapp._fmt_driver_value(None, "x") == "n/a"
+    assert webapp._fmt_driver_value(800, "repo_days_since_last_commit").endswith("yrs")
+    assert webapp._fmt_driver_value(0.12345, "risk_ratio") == "0.123"
+    assert webapp._fmt_driver_value(1234, "events_count") == "1,234"
+    assert webapp._fmt_driver_value(30, "months_since_release") == "2.5 yrs"
+    assert webapp._fmt_driver_value(12.3456, "misc_float") == "12.3"
+
+    prompt = webapp._build_explain_prompt(
+        "workflow-cps",
+        {"reasons": ["reason one", "reason two"]},
+        {
+            "probability": 0.5,
+            "risk_category": "High",
+            "model_name": "xgboost",
+            "model_dir": "data/processed/models/xgb_6m_full_cleaned_time",
+            "drivers": [
+                {"name": "repo_days_since_last_commit", "value": 100, "direction": "increases_risk"}
+            ],
+        },
+    )
+    assert "CANARY ASSESSMENT — Plugin: workflow-cps" in prompt
+    assert "ML ADVISORY RISK SCORE" in prompt
+    assert "Top contributing features" in prompt
+
+
+def test_rate_limit_and_explain_card_variants():
+    ip = "127.0.0.1"
+    webapp._EXPLAIN_RATE_LIMIT[ip] = []
+    assert webapp._check_explain_rate_limit(ip) is True
+    webapp._EXPLAIN_RATE_LIMIT[ip] = [0.0] * webapp._EXPLAIN_RATE_MAX
+    assert webapp._check_explain_rate_limit(ip) is False
+
+    card_rate = webapp._render_explain_card(
+        "workflow-cps",
+        {"reasons": [], "ml": None, "score_model_dir": "data/processed/models/baseline_6m"},
+        rate_limited=True,
+    )
+    assert "Rate limit reached" in card_rate
+
+    card_ai = webapp._render_explain_card(
+        "workflow-cps",
+        {"reasons": [], "ml": None, "score_model_dir": "data/processed/models/baseline_6m"},
+        ai_result="## Heading\n\n**bold** and *italic*",
+    )
+    assert "AI explanation (Claude)" in card_ai
+    assert "<strong>Heading</strong>" in card_ai
+    assert "<em>italic</em>" in card_ai
+
+
+def test_call_anthropic_explain_success_and_error(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"content":[{"type":"text","text":"Hello"},{"type":"text","text":"World"}]}'
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=30: _Resp())
+    assert webapp._call_anthropic_explain("prompt") == "Hello\n\nWorld"
+
+    class _HttpErr(urllib.error.HTTPError):
+        def __init__(self):
+            super().__init__("http://x", 401, "bad", Message(), None)
+
+        def read(self):
+            return b'{"error":"denied"}'
+
+    def _raise_http(req, timeout=30):
+        raise _HttpErr()
+
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_http)
+    with pytest.raises(RuntimeError, match="Anthropic API error 401"):
+        webapp._call_anthropic_explain("prompt")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+        webapp._call_anthropic_explain("prompt")
