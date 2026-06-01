@@ -118,7 +118,7 @@ inactive.
 Alexopoulos, N., Brack, M., Wagner, J. P., Grube, T., & Mühlhäuser, M. (2022).
 How long do vulnerabilities live in the code? A large-scale empirical measurement
 study on FOSS vulnerability lifetimes. *Proceedings of the 31st USENIX Security
-Symposium*, 4187–4204.
+Symposium*, 4187–4204. https://www.usenix.org/system/files/sec22summer_alexopoulos.pdf
 
 Panter, S. K., & Eisty, N. U. (2026). *MALTA: Maintenance-aware technical lag
 estimation to address software abandonment*. arXiv preprint arXiv:2603.10265.

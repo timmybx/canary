@@ -382,7 +382,7 @@ from commits reachable from the snapshot's branch tips.
 |-------|------|----------------------|
 | `commit_count` | int | Total number of commits visible from the snapshot. A proxy for project maturity and accumulated technical debt. Very low counts may indicate immaturity; very high counts may indicate complexity. |
 | `days_since_last_commit` | float \| None | Days between the most recent commit's author date and the SWH visit date. Panter & Eisty (2026) found that packages classified as high-risk by maintenance-aware metrics averaged over 2,000 days since their last commit, and that 62% of packages considered low-risk by version lag alone were reclassified as high-risk when commit staleness was incorporated. One of the strongest known predictors of unpatched vulnerabilities. |
-| `author_committer_lag_p50_hours` | float \| None | Median time between when a commit was authored and when it was committed (merged). A larger lag suggests an async review workflow — someone other than the author is merging changes — which is a proxy for code review culture. Cánovas Izquierdo & Mens (2022) identified PR latency as a key indicator of maintainer responsiveness and team health. |
+| `author_committer_lag_p50_hours` | float \| None | Median time between when a commit was authored and when it was committed (merged). A larger lag suggests an async review workflow — someone other than the author is merging changes — which is a proxy for code review culture. Zhang et al., (2022) identified PR latency as a key indicator of maintainer responsiveness and team health. |
 | `author_committer_lag_p90_hours` | float \| None | 90th percentile of author-to-commit lag. The tail of this distribution captures how long the slowest code reviews take, which may indicate a bottleneck in the review process. |
 | `timezone_diversity` | int | Number of distinct timezone offsets (in minutes) among commit authors. Higher diversity suggests a geographically distributed contributor base, which generally correlates with healthier open-source community dynamics. Exploratory signal; not directly validated in the vulnerability prediction literature. |
 | `weekend_commit_fraction` | float \| None | Fraction of commits authored on a Saturday or Sunday. Claes et al. (2018) analyzed commit timestamps across 86 open-source projects and found that two-thirds of developers follow a standard work schedule and rarely commit on weekends, establishing weekend commits as a marker of volunteer or hobbyist maintenance. Projects with high weekend fractions may respond more slowly to vulnerability disclosures. |
@@ -475,9 +475,7 @@ software maintainers on vulnerability management and platform security features*
 Proceedings of the 34th USENIX Security Symposium.
 https://www.usenix.org/system/files/usenixsecurity25-ayala.pdf
 
-Cánovas Izquierdo, J. L., & Mens, T. (2022). Pull request latency explained:
-an empirical overview. *Empirical Software Engineering*, *27*(6), 131.
-https://doi.org/10.1007/s10664-022-10172-1
+Zhang, X., Yu, Y., Wang, T., Rastogi, A., & Wang, H. (2022). Pull request latency explained: An empirical overview. Empirical Software Engineering, 27, 126. https://doi.org/10.1007/s10664-022-10143-4
 
 Claes, M., Mäntylä, M. V., Kuutila, M., & Adams, B. (2018). Do programmers work at night or
 during the weekend? *Proceedings of the 40th International Conference on Software
