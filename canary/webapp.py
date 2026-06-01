@@ -1085,7 +1085,7 @@ def _render_explain_card(
     tip = (
         '<p style="font-size:.76rem;color:var(--muted);margin-top:.5rem">'
         '"Explain now" uses the server API key (max 3/hr). '
-        '"Open in" buttons use your own account with no limits.'
+        '"Open in" buttons use your own account with no limits. AI-generated explanations are provided for informational purposes only, may contain inaccuracies or omissions, and should not be relied upon as authoritative security guidance.'
         "</p>"
     )
 
@@ -3050,7 +3050,7 @@ def _render_ml_explain_card(
     tip = (
         '<p style="font-size:.76rem;color:var(--muted);margin-top:.5rem">'
         '"Explain now" uses the server API key (max 3/hr). '
-        '"Open in" buttons use your own account with no limits.'
+        '"Open in" buttons use your own account with no limits. AI-generated explanations are provided for informational purposes only, may contain inaccuracies or omissions, and should not be relied upon as authoritative security guidance.'
         "</p>"
     )
 
