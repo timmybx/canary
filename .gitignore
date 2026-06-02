@@ -60,3 +60,4 @@ canary_bad_json_distfork.txt
 score_top_input.tsv
 top20.tsv
 registry_translation.jsonl
+coverage.json
