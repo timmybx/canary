@@ -2926,6 +2926,236 @@ def _build_ml_explain_prompt(
     return "\n".join(lines)
 
 
+def _build_cs_explain_prompt(
+    metrics: dict[str, Any],
+    confirmed_rows: list[dict[str, Any]],
+    unconfirmed_rows: list[dict[str, Any]],
+    obs_date: str,
+    window_end: str,
+    n_total: int,
+    n_confirmed: int,
+    lift: float,
+    base_rate: float,
+    train_start: str,
+    stem: str,
+) -> str:
+    """Build a focused LLM prompt for the case study explain feature."""
+    prec = n_confirmed / n_total if n_total > 0 else 0.0
+    lines: list[str] = [
+        "You are a cybersecurity analyst assistant. The following are validated "
+        "case study results for CANARY, a tool that predicts near-term Jenkins plugin "
+        "advisory risk using publicly observable project signals. Please explain what "
+        "these results mean for a security manager evaluating whether to use CANARY "
+        "to prioritize plugin reviews in their Jenkins environment. Focus on:",
+        "  1. What the precision and lift numbers mean in plain English",
+        "  2. What the lead time results mean for proactive security planning",
+        "  3. What the unconfirmed predictions represent and why they matter",
+        "  4. Any important caveats about interpreting these results",
+        "",
+        "Keep the explanation to 3-5 short paragraphs. Write in plain prose — "
+        "no markdown headers or bullet lists.",
+        "",
+        "=" * 60,
+        f"MODEL: {stem}",
+        f"Trained from: {train_start}  |  Observation date: {obs_date}",
+        f"Prediction window: {obs_date} → {window_end}",
+        "=" * 60,
+        "",
+        "CASE STUDY RESULTS:",
+        f"  Top-{n_total} precision: {n_confirmed}/{n_total} ({prec:.0%})",
+        f"  Lift vs random:         {lift:.1f}x",
+        f"  Base rate:              {base_rate * 100:.2f}% of scored plugins",
+        "",
+    ]
+    if confirmed_rows:
+        lines.append(f"CONFIRMED PREDICTIONS ({len(confirmed_rows)}):")
+        for r in confirmed_rows[:10]:
+            sev = r.get("adv_sev") or ""
+            lead = f"{r['days_to_adv']} days lead" if r.get("days_to_adv") else ""
+            score = r.get("score", 0)
+            lines.append(f"  {r['plugin_id']:<35} score={score:.1%}  {sev}  {lead}")
+        if len(confirmed_rows) > 10:
+            lines.append(f"  ... and {len(confirmed_rows) - 10} more confirmed")
+        lines.append("")
+    if unconfirmed_rows:
+        lines.append(f"UNCONFIRMED / FORWARD-LOOKING ({len(unconfirmed_rows)}):")
+        for r in unconfirmed_rows:
+            score = r.get("score", 0)
+            lines.append(f"  {r['plugin_id']:<35} score={score:.1%}")
+        lines.append("")
+    lines += ["=" * 60, "Please provide your plain-English explanation now."]
+    return "\n".join(lines)
+
+
+def _render_cs_explain_card(
+    values: dict[str, Any],
+    metrics: dict[str, Any] | None,
+    confirmed_rows: list[dict[str, Any]],
+    unconfirmed_rows: list[dict[str, Any]],
+    obs_date: str,
+    window_end: str,
+    n_total: int,
+    n_confirmed: int,
+    lift: float,
+    base_rate: float,
+    train_start: str,
+    stem: str,
+    ai_result: str | None = None,
+    ai_error: str | None = None,
+    rate_limited: bool = False,
+) -> str:
+    """Render the AI explanation card for the case study tab."""
+    import urllib.parse as _up
+
+    if not metrics:
+        return ""
+
+    prompt = _build_cs_explain_prompt(
+        metrics,
+        confirmed_rows,
+        unconfirmed_rows,
+        obs_date,
+        window_end,
+        n_total,
+        n_confirmed,
+        lift,
+        base_rate,
+        train_start,
+        stem,
+    )
+    claude_url = "https://claude.ai/new?q=" + _up.quote(prompt, safe="")
+    chatgpt_url = "https://chatgpt.com/?q=" + _up.quote(prompt, safe="")
+
+    _mdir_esc = _escape(values.get("model_out_dir") or "")
+    _obs_esc = _escape(obs_date)
+    btn_inpage = (
+        '<form method="get" action="/" style="display:inline">'
+        '<input type="hidden" name="tab" value="casestudy">'
+        f'<input type="hidden" name="model_out_dir" value="{_mdir_esc}">'
+        f'<input type="hidden" name="cs_obs_date" value="{_obs_esc}">'
+        '<input type="hidden" name="cs_explain" value="1">'
+        '<button type="submit"'
+        ' style="background:rgba(120,80,220,.2);border:1px solid rgba(120,80,220,.4);'
+        "color:#a78bfa;padding:.45rem .9rem;border-radius:8px;cursor:pointer;"
+        'font-weight:600;font-size:.85rem">Explain now (AI)</button>'
+        "</form>"
+    )
+    btn_copy = (
+        '<button type="button"'
+        ' onclick="(function(b){navigator.clipboard.writeText('
+        "document.getElementById('csep').value)"
+        ".then(function(){var o=b.textContent;b.textContent='Copied!';"
+        "setTimeout(function(){b.textContent=o;},2000);})"
+        ".catch(function(){document.getElementById('csep').select();"
+        "document.execCommand('copy');});})(this)\""
+        ' style="background:var(--accent);border:none;color:#fff;'
+        "padding:.45rem .9rem;border-radius:8px;cursor:pointer;"
+        'font-weight:600;font-size:.85rem">Copy prompt</button>'
+    )
+    btn_claude = (
+        f'<a href="{claude_url}" target="_blank" rel="noopener noreferrer"'
+        ' style="display:inline-flex;align-items:center;'
+        "background:rgba(204,153,51,.15);border:1px solid rgba(204,153,51,.3);"
+        "color:#cc9933;padding:.45rem .9rem;border-radius:8px;"
+        'text-decoration:none;font-weight:600;font-size:.85rem">Open in Claude</a>'
+    )
+    btn_chatgpt = (
+        f'<a href="{chatgpt_url}" target="_blank" rel="noopener noreferrer"'
+        ' style="display:inline-flex;align-items:center;'
+        "background:rgba(16,163,127,.12);border:1px solid rgba(16,163,127,.3);"
+        "color:#10a37f;padding:.45rem .9rem;border-radius:8px;"
+        'text-decoration:none;font-weight:600;font-size:.85rem">Open in ChatGPT</a>'
+    )
+
+    ai_panel = ""
+    if rate_limited:
+        ai_panel = (
+            '<div style="margin-top:.8rem;padding:.7rem .9rem;'
+            "background:rgba(220,80,60,.1);border:1px solid rgba(220,80,60,.3);"
+            'border-radius:8px;font-size:.88rem;color:#e05c5c">'
+            f"Rate limit reached — max {_EXPLAIN_RATE_MAX} AI explanations per hour. "
+            "Use Copy or Open buttons to continue in your own AI session."
+            "</div>"
+        )
+    elif ai_error:
+        ai_panel = (
+            '<div style="margin-top:.8rem;padding:.7rem .9rem;'
+            "background:rgba(220,80,60,.1);border:1px solid rgba(220,80,60,.3);"
+            'border-radius:8px;font-size:.88rem;color:#e05c5c">'
+            f"AI explanation error: {_escape(ai_error)}"
+            "</div>"
+        )
+    elif ai_result:
+
+        def _md_simple(text: str) -> str:
+            import re as _re
+
+            t = _escape(text)
+            t = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", t)
+            return t
+
+        paras = "".join(
+            f"<p style='margin:.5rem 0'>{_md_simple(p.strip())}</p>"
+            for p in ai_result.split("\n\n")
+            if p.strip()
+        )
+        ai_panel = (
+            '<div style="margin-top:.8rem;padding:.8rem 1rem;'
+            "background:rgba(120,80,220,.08);border:1px solid rgba(120,80,220,.25);"
+            'border-radius:10px">'
+            '<p style="font-size:.78rem;color:#a78bfa;font-weight:600;margin:0 0 .5rem">'
+            "AI explanation (Claude)</p>"
+            f"{paras}"
+            "</div>"
+        )
+
+    byoai = (
+        '<details style="margin-top:.9rem;border-top:1px solid var(--line);padding-top:.8rem">'
+        '<summary style="cursor:pointer;font-size:.88rem;font-weight:600;color:var(--muted);'
+        'padding:.2rem 0">Bring your own AI</summary>'
+        '<p style="font-size:.82rem;color:var(--muted);margin:.5rem 0 .7rem">'
+        "Copy the prompt and paste into any AI assistant.</p>"
+        '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem">'
+        + btn_copy
+        + btn_claude
+        + btn_chatgpt
+        + "</div>"
+        '<textarea id="csep" readonly'
+        ' style="width:100%;min-height:140px;background:var(--panel2);'
+        "border:1px solid var(--line);border-radius:8px;padding:.6rem;"
+        "font-family:var(--mono);font-size:.75rem;line-height:1.5;"
+        'color:var(--text);resize:vertical;box-sizing:border-box">'
+        f"{_escape(prompt)}</textarea>"
+        "</details>"
+    )
+    tip = (
+        '<p style="font-size:.76rem;color:var(--muted);margin-top:.5rem">'
+        '"Explain now" uses the server API key (max 3/hr). '
+        '"Open in" buttons use your own account with no limits. '
+        "AI-generated explanations are provided for informational purposes only, "
+        "may contain inaccuracies or omissions, and should not be relied upon as "
+        "authoritative security guidance."
+        "</p>"
+    )
+
+    return (
+        '<section class="card" style="align-self:start">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">AI explanation</p>'
+        "<h2>Explain these results</h2>"
+        '<p class="kicker">Get a plain-English summary of what these '
+        "case study results mean operationally.</p>"
+        '</div><span class="pill pill--muted">Bring your own AI</span></div>'
+        '<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin:.7rem 0">'
+        + btn_inpage
+        + "</div>"
+        + ai_panel
+        + byoai
+        + tip
+        + "</section>"
+    )
+
+
 def _render_ml_explain_card(
     values: dict[str, Any],
     metrics: dict[str, Any] | None,
@@ -3226,9 +3456,118 @@ def _advisories_in_window(
     return [r for r in records if after_date < (r.get("published_date") or "") <= before_date]
 
 
+def _load_cs_prediction_rows(
+    model_out_dir: str,
+    metrics: dict[str, Any] | None,
+    n_top: int = 25,
+) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """
+    Load and enrich top-N case study predictions for a model directory.
+
+    Returns (obs_date, window_end, confirmed_rows, unconfirmed_rows).
+    Each row dict includes: rank, plugin_id, score, adv_sev, adv_cvss,
+    adv_date, adv_url, days_to_adv, confirmed.
+    """
+    import csv as _csv
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    stem = Path(model_out_dir).name
+    pred_path = MODEL_OUTPUTS_ROOT / stem / "test_predictions.csv"
+    if not pred_path.exists():
+        return "", "", [], []
+
+    rows: list[dict[str, Any]] = []
+    try:
+        reader = _csv.DictReader(pred_path.read_text(encoding="utf-8").splitlines())
+        for row in reader:
+            rows.append(
+                {
+                    "plugin_id": row.get("plugin_id", ""),
+                    "month": row.get("month", ""),
+                    "y_true": int(row.get("y_true", 0)),
+                    "y_prob": float(row.get("y_prob", 0.0)),
+                }
+            )
+        rows.sort(key=lambda r: r["y_prob"], reverse=True)
+    except Exception:  # noqa: BLE001
+        return "", "", [], []
+
+    obs_date = (metrics or {}).get("test_start_month") or (
+        min(r["month"] for r in rows) if rows else ""
+    )
+    window_end = ""
+    if obs_date:
+        try:
+            obs_dt = _dt.strptime(obs_date, "%Y-%m")
+            em = obs_dt.month + 6
+            ey = obs_dt.year + (em - 1) // 12
+            em = ((em - 1) % 12) + 1
+            end_dt = (_dt(ey, em, 1) + _td(days=32)).replace(day=1) - _td(days=1)
+            window_end = end_dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    # Deduplicate by plugin_id
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for row in rows:
+        if row["plugin_id"] not in seen:
+            seen.add(row["plugin_id"])
+            deduped.append(row)
+
+    enriched: list[dict[str, Any]] = []
+    for rank, row in enumerate(deduped[:n_top], start=1):
+        pid = row["plugin_id"]
+        advisories = (
+            _advisories_in_window(pid, obs_date, window_end) if obs_date and window_end else []
+        )
+        confirmed = bool(advisories) or row["y_true"] == 1
+        adv_date = adv_sev = adv_url = ""
+        adv_cvss: float | None = None
+        if advisories:
+            best = max(
+                advisories,
+                key=lambda a: (a.get("severity_summary") or {}).get("max_cvss_base_score") or 0,
+            )
+            adv_date = best.get("published_date", "")
+            sev_sum = best.get("severity_summary") or {}
+            adv_sev = (sev_sum.get("max_severity_label") or "").title()
+            adv_cvss = sev_sum.get("max_cvss_base_score")
+            adv_url = best.get("url", "")
+        days_to_adv: int | None = None
+        if adv_date and obs_date:
+            try:
+                days_to_adv = (
+                    _dt.strptime(adv_date, "%Y-%m-%d") - _dt.strptime(obs_date, "%Y-%m")
+                ).days
+            except ValueError:
+                pass
+        enriched.append(
+            {
+                "rank": rank,
+                "plugin_id": pid,
+                "score": row["y_prob"],
+                "confirmed": confirmed,
+                "adv_date": adv_date,
+                "adv_sev": adv_sev,
+                "adv_cvss": adv_cvss,
+                "adv_url": adv_url,
+                "days_to_adv": days_to_adv,
+            }
+        )
+
+    confirmed_rows = [r for r in enriched if r["confirmed"]]
+    unconfirmed_rows = [r for r in enriched if not r["confirmed"]]
+    return obs_date, window_end, confirmed_rows, unconfirmed_rows
+
+
 def _render_case_study_tab(
     values: dict[str, Any],
     model_dir_options: list[str],
+    cs_ai_result: str | None = None,
+    cs_ai_error: str | None = None,
+    cs_rate_limited: bool = False,
 ) -> str:
     """
     Dynamic case study tab — shows top-ranked test predictions alongside
@@ -3525,11 +3864,19 @@ def _render_case_study_tab(
         else ""
     )
 
+    train_start = (metrics or {}).get("train_start_month", "")
+    trained_from_str = (
+        f"<strong>Trained from:</strong> {_escape(train_start)} &nbsp;|&nbsp; "
+        if train_start
+        else ""
+    )
+
     headline = (
         eco_line
         + '<div style="margin-bottom:.8rem;padding:.7rem .9rem;'
         + "background:rgba(82,196,26,.08);border:1px solid rgba(82,196,26,.25);"
         + 'border-radius:10px;font-size:.9rem">'
+        + trained_from_str
         + f"<strong>Observation date:</strong> {_escape(obs_date)} &nbsp;|&nbsp; "
         + f"<strong>Prediction window:</strong> {_escape(obs_date)} &#8594; {_escape(window_end)} &nbsp;|&nbsp; "
         + f"<strong>Top-{n_total} precision:</strong> {n_confirmed}/{n_total} ({prec:.0%}) &nbsp;|&nbsp; "
@@ -3589,10 +3936,33 @@ def _render_case_study_tab(
         "Retrain on newer data and reload to see updated predictions.</p>" + "</section>"
     )
 
+    cs_explain_card = (
+        _render_cs_explain_card(
+            values=values,
+            metrics=metrics,
+            confirmed_rows=confirmed_rows,
+            unconfirmed_rows=unconfirmed_rows,
+            obs_date=obs_date,
+            window_end=window_end,
+            n_total=n_total,
+            n_confirmed=n_confirmed,
+            lift=lift,
+            base_rate=base_rate,
+            train_start=train_start,
+            stem=stem,
+            ai_result=cs_ai_result,
+            ai_error=cs_ai_error,
+            rate_limited=cs_rate_limited,
+        )
+        if metrics
+        else ""
+    )
+
     return (
         '<div class="grid--score">'
         + '<div class="score-output">'
         + selector_card
+        + cs_explain_card
         + "</div>"
         + '<div class="score-output">'
         + right_html
@@ -3824,6 +4194,9 @@ def render_page(
     ml_ai_result: str | None = None,
     ml_ai_error: str | None = None,
     ml_rate_limited: bool = False,
+    cs_ai_result: str | None = None,
+    cs_ai_error: str | None = None,
+    cs_rate_limited: bool = False,
 ) -> str:
     values = {**DEFAULTS, **values}
     plugin_options = plugin_options or []
@@ -3856,7 +4229,13 @@ def render_page(
     elif active_tab == "about":
         active_panel_html = _render_about_tab()
     elif active_tab == "casestudy":
-        active_panel_html = _render_case_study_tab(values, model_dir_options or [])
+        active_panel_html = _render_case_study_tab(
+            values,
+            model_dir_options or [],
+            cs_ai_result=cs_ai_result,
+            cs_ai_error=cs_ai_error,
+            cs_rate_limited=cs_rate_limited,
+        )
     else:
         active_panel_html = _render_ml_tab(
             values,
@@ -3974,6 +4353,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
     )
     _get_explain = query.get("explain", [""])[-1] == "1"
     _get_ml_explain = query.get("ml_explain", [""])[-1] == "1"
+    _get_cs_explain = query.get("cs_explain", [""])[-1] == "1"
     plugin_options, latest_metrics, model_dir_options = _prepare_request_state(values)
     score_result = None
     score_error = None
@@ -3983,6 +4363,9 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
     ml_ai_result: str | None = None
     ml_ai_error: str | None = None
     ml_rate_limited: bool = False
+    cs_ai_result: str | None = None
+    cs_ai_error: str | None = None
+    cs_rate_limited: bool = False
 
     # /run and /train are disabled in the public deployment
     if path in {"/run", "/train"}:
@@ -4036,17 +4419,65 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
                 0
             ].strip() or environ.get("REMOTE_ADDR", "unknown")
             if not _check_explain_rate_limit(client_ip):
-                ml_rate_limited = True  # noqa: F841
+                ml_rate_limited = True
             else:
                 try:
                     _ml_prompt = _build_ml_explain_prompt(
                         _ml_metrics, _ml_pk, _ml_fs, _ml_explain_dir
                     )
-                    ml_ai_result = _call_anthropic_explain(_ml_prompt)  # noqa: F841
+                    ml_ai_result = _call_anthropic_explain(_ml_prompt)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("ML explain call failed: %s", exc)
-                    ml_ai_error = "AI explanation unavailable — use Copy or Open buttons below."  # noqa: F841
+                    ml_ai_error = "AI explanation unavailable — use Copy or Open buttons below."
         values["active_tab"] = "ml"
+
+    # GET cs_explain — runs when cs_explain=1 is in query string (case study tab)
+    if method == "GET" and _get_cs_explain and values.get("model_out_dir"):
+        _cs_explain_dir = values["model_out_dir"]
+        _cs_metrics = _load_model_metrics(_cs_explain_dir)
+        if _cs_metrics:
+            client_ip = environ.get("HTTP_X_FORWARDED_FOR", "").split(",")[
+                0
+            ].strip() or environ.get("REMOTE_ADDR", "unknown")
+            if not _check_explain_rate_limit(client_ip):
+                cs_rate_limited = True
+            else:
+                try:
+                    _cs_obs, _cs_wend, _cs_confirmed, _cs_unconfirmed = _load_cs_prediction_rows(
+                        _cs_explain_dir, _cs_metrics
+                    )
+                    _cs_train = _cs_metrics.get("train_start_month") or ""
+                    _cs_stem = Path(_cs_explain_dir).name
+                    _cs_n_total = len(_cs_confirmed) + len(_cs_unconfirmed)
+                    _cs_n_confirmed = len(_cs_confirmed)
+                    _cs_n_pos = _cs_metrics.get("test_positive_count", 0)
+                    _cs_n_test = _cs_metrics.get("test_unique_plugin_count") or _cs_metrics.get(
+                        "test_row_count", 1
+                    )
+                    _cs_base = _cs_n_pos / _cs_n_test if _cs_n_test > 0 else 0.0
+                    _cs_lift = (
+                        (_cs_n_confirmed / _cs_n_total) / _cs_base
+                        if _cs_n_total > 0 and _cs_base > 0
+                        else 0.0
+                    )
+                    _cs_prompt = _build_cs_explain_prompt(
+                        metrics=_cs_metrics,
+                        confirmed_rows=_cs_confirmed,
+                        unconfirmed_rows=_cs_unconfirmed,
+                        obs_date=_cs_obs,
+                        window_end=_cs_wend,
+                        n_total=_cs_n_total,
+                        n_confirmed=_cs_n_confirmed,
+                        lift=_cs_lift,
+                        base_rate=_cs_base,
+                        train_start=_cs_train,
+                        stem=_cs_stem,
+                    )
+                    cs_ai_result = _call_anthropic_explain(_cs_prompt)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("CS explain call failed: %s", exc)
+                    cs_ai_error = "AI explanation unavailable — use Copy or Open buttons below."
+        values["active_tab"] = "casestudy"
 
     # GET explain — runs when explain=1 is in query string
     # Same logic as the old POST /explain but triggered by GET so firewalls don't block it
@@ -4243,6 +4674,9 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         ml_ai_result=ml_ai_result,
         ml_ai_error=ml_ai_error,
         ml_rate_limited=ml_rate_limited,
+        cs_ai_result=cs_ai_result,
+        cs_ai_error=cs_ai_error,
+        cs_rate_limited=cs_rate_limited,
     )
     start_response("200 OK", [("Content-Type", "text/html; charset=utf-8")])
     return [html_body.encode("utf-8")]
