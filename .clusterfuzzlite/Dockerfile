@@ -6,7 +6,9 @@ FROM gcr.io/oss-fuzz-base/base-builder-python@sha256:606108d78d3798a65cced45565f
 # locks deps for Python 3.12 and requires shap>=0.52.0. Overlay the same
 # Python 3.12 runtime used by the main project image so pip can install the
 # pinned dependency set inside the fuzzing container too.
-COPY --from=python312 /usr/local/bin/ /usr/local/bin/
+COPY --from=python312 /usr/local/bin/python /usr/local/bin/python
+COPY --from=python312 /usr/local/bin/python3 /usr/local/bin/python3
+COPY --from=python312 /usr/local/bin/python3.12 /usr/local/bin/python3.12
 COPY --from=python312 /usr/local/include/python3.12 /usr/local/include/python3.12
 COPY --from=python312 /usr/local/lib/libpython3.12.so.1.0 /usr/local/lib/libpython3.12.so.1.0
 COPY --from=python312 /usr/local/lib/libpython3.so /usr/local/lib/libpython3.so
