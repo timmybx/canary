@@ -1,4 +1,20 @@
+FROM python:3.12-slim-bullseye@sha256:411fa4dcfdce7e7a3057c45662beba9dcd4fa36b2e50a2bfcd6c9333e59bf0db AS python312
+
 FROM gcr.io/oss-fuzz-base/base-builder-python@sha256:606108d78d3798a65cced45565f979703f6deaa472d9a84383be15e0325c46b5
+
+# ClusterFuzzLite's Python base image still ships Python 3.11, but this repo
+# locks deps for Python 3.12 and requires shap>=0.52.0. Overlay the same
+# Python 3.12 runtime used by the main project image so pip can install the
+# pinned dependency set inside the fuzzing container too.
+COPY --from=python312 /usr/local/bin/ /usr/local/bin/
+COPY --from=python312 /usr/local/include/python3.12 /usr/local/include/python3.12
+COPY --from=python312 /usr/local/lib/libpython3.12.so.1.0 /usr/local/lib/libpython3.12.so.1.0
+COPY --from=python312 /usr/local/lib/libpython3.so /usr/local/lib/libpython3.so
+COPY --from=python312 /usr/local/lib/python3.12 /usr/local/lib/python3.12
+ENV PATH="/usr/local/bin:${PATH}" \
+    LD_LIBRARY_PATH="/usr/local/lib" \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
 
 # Upgrade pip to match the version pinned in requirements-build.in
 COPY requirements-build.txt /tmp/requirements-build.txt

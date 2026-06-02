@@ -2,8 +2,11 @@
 # build.sh executed inside the base-builder-python container
 # Expects fuzz targets named *_fuzzer.py somewhere under $SRC.
 
+export PIP_DISABLE_PIP_VERSION_CHECK=1
+export PIP_ROOT_USER_ACTION=ignore
+
 # Install locked deps (hash-locked) to avoid env/version drift.
-pip3 install --no-cache-dir --require-hashes -r "requirements.txt"
+python3 -m pip install --no-cache-dir --require-hashes -r "requirements.txt"
 
 # Make your source importable without installing it (avoids unpinned pip install).
 export PYTHONPATH="$SRC:${PYTHONPATH:-}"
