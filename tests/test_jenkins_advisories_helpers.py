@@ -18,6 +18,7 @@ from canary.collectors.jenkins_advisories import (
     _normalize_advisory_url,
     _parse_cvss_vector_from_url,
     _strip_query_fragment,
+    collect_advisories_sample,
     merge_advisory_records,
 )
 
@@ -654,3 +655,40 @@ def test_merge_advisory_records_normalizes_url():
     url = result[0]["url"]
     assert url.startswith("https://")
     assert "?" not in url
+
+
+# ---------------------------------------------------------------------------
+# collect_advisories_sample
+# ---------------------------------------------------------------------------
+
+
+def test_collect_advisories_sample_returns_list():
+    result = collect_advisories_sample()
+    assert isinstance(result, list)
+    assert len(result) >= 1
+
+
+def test_collect_advisories_sample_record_shape():
+    result = collect_advisories_sample()
+    for record in result:
+        assert "plugin_id" in record
+        assert "source" in record
+        assert record["source"] == "jenkins"
+        assert "url" in record
+
+
+def test_collect_advisories_sample_filter_by_plugin_id():
+    result = collect_advisories_sample(plugin_id="cucumber-reports")
+    assert all(r["plugin_id"] == "cucumber-reports" for r in result)
+    assert len(result) >= 1
+
+
+def test_collect_advisories_sample_filter_no_match():
+    result = collect_advisories_sample(plugin_id="no-such-plugin-xyz")
+    assert result == []
+
+
+def test_collect_advisories_sample_none_returns_all():
+    all_records = collect_advisories_sample(plugin_id=None)
+    filtered = collect_advisories_sample(plugin_id="cucumber-reports")
+    assert len(all_records) >= len(filtered)

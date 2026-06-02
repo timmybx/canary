@@ -8,8 +8,10 @@ from canary.collectors.gharchive_history import (
     _build_raw_event_query_with_sampling,
     _coerce_bool_or_none,
     _event_yyyymm_from_value,
+    _fallback_repo_names,
     _normalize_date_value,
     _normalize_timestamp_value,
+    _parse_yyyymmdd,
     _split_repo_full_name,
 )
 
@@ -286,6 +288,59 @@ def test_split_repo_full_name_strips_whitespace():
     owner, repo = _split_repo_full_name("  jenkinsci / my-plugin  ")
     assert owner == "jenkinsci"
     assert repo == "my-plugin"
+
+
+# ---------------------------------------------------------------------------
+# _parse_yyyymmdd
+# ---------------------------------------------------------------------------
+
+
+def test_parse_yyyymmdd_valid():
+    d = _parse_yyyymmdd("20240101")
+    assert d.year == 2024
+    assert d.month == 1
+    assert d.day == 1
+
+
+def test_parse_yyyymmdd_another_date():
+    d = _parse_yyyymmdd("20231231")
+    assert d.year == 2023
+    assert d.month == 12
+    assert d.day == 31
+
+
+def test_parse_yyyymmdd_invalid_raises():
+    with pytest.raises(ValueError):
+        _parse_yyyymmdd("2024-01-01")
+
+
+# ---------------------------------------------------------------------------
+# _fallback_repo_names
+# ---------------------------------------------------------------------------
+
+
+def test_fallback_repo_names_adds_plugin_suffix():
+    names = _fallback_repo_names("git")
+    assert "jenkinsci/git-plugin" in names
+    assert "jenkinsci/git" in names
+
+
+def test_fallback_repo_names_no_duplicate_plugin_suffix():
+    # slug already ends with "-plugin" → no extra bare-slug entry added
+    names = _fallback_repo_names("git-plugin")
+    assert "jenkinsci/git-plugin-plugin" in names
+    assert "jenkinsci/git-plugin" not in names
+
+
+def test_fallback_repo_names_normalizes_slug():
+    names = _fallback_repo_names("My Cool Plugin")
+    assert all(n.startswith("jenkinsci/") for n in names)
+    assert all(n == n.lower() for n in names)
+
+
+def test_fallback_repo_names_empty_returns_empty():
+    assert _fallback_repo_names("") == []
+    assert _fallback_repo_names("   ") == []
 
 
 def test_split_repo_full_name_empty_parts_become_none():

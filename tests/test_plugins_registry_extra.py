@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import http.client
+import json
+import urllib.error
+
 import pytest
 
 from canary.collectors.plugins_registry import (
     _extract_plugin_id,
+    _fetch_json,
     _plugin_to_registry_record,
     collect_plugins_registry_real,
     collect_plugins_registry_sample,
@@ -239,3 +244,110 @@ def test_collect_plugins_registry_real_skips_non_dict_plugins(monkeypatch):
     registry, _ = collect_plugins_registry_real(page_size=100)
     assert len(registry) == 1
     assert registry[0]["plugin_id"] == "good-plugin"
+
+
+# ---------------------------------------------------------------------------
+# _fetch_json
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+
+_VALID_URL = "https://plugins.jenkins.io/api/plugins.json"
+
+
+def test_fetch_json_rejects_non_allowlisted_url():
+    with pytest.raises(ValueError, match="Refusing"):
+        _fetch_json("https://evil.example.com/api.json")
+
+
+def test_fetch_json_rejects_http_scheme():
+    with pytest.raises(ValueError, match="Refusing"):
+        _fetch_json("http://plugins.jenkins.io/api/plugins.json")
+
+
+def test_fetch_json_success(monkeypatch):
+    payload = {"plugins": [], "total": 0}
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda req, timeout=None: _FakeResponse(json.dumps(payload).encode()),
+    )
+    result = _fetch_json(_VALID_URL)
+    assert result == payload
+
+
+def test_fetch_json_http_error_raises_immediately(monkeypatch):
+    call_count = [0]
+
+    def fake_urlopen(req, timeout=None):
+        call_count[0] += 1
+        raise urllib.error.HTTPError(
+            _VALID_URL, 503, "Service Unavailable", http.client.HTTPMessage(), None
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    with pytest.raises(RuntimeError, match="503"):
+        _fetch_json(_VALID_URL)
+    assert call_count[0] == 1
+
+
+def test_fetch_json_url_error_retries_and_raises(monkeypatch):
+    call_count = [0]
+
+    def fake_urlopen(req, timeout=None):
+        call_count[0] += 1
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    with pytest.raises(RuntimeError, match="after retries"):
+        _fetch_json(_VALID_URL)
+    assert call_count[0] == 5
+
+
+def test_fetch_json_json_decode_retries_and_raises(monkeypatch):
+    call_count = [0]
+
+    def bad_json_urlopen(req, timeout=None):
+        call_count[0] += 1
+        return _FakeResponse(b"not-json!!")
+
+    monkeypatch.setattr("urllib.request.urlopen", bad_json_urlopen)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    with pytest.raises(RuntimeError, match="after retries"):
+        _fetch_json(_VALID_URL)
+    assert call_count[0] == 5
+
+
+def test_fetch_json_succeeds_after_transient_failure(monkeypatch):
+    attempts = [0]
+    payload = {"plugins": []}
+
+    def fake_urlopen(req, timeout=None):
+        attempts[0] += 1
+        if attempts[0] < 3:
+            raise urllib.error.URLError("transient")
+        return _FakeResponse(json.dumps(payload).encode())
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    result = _fetch_json(_VALID_URL)
+    assert result == payload
+    assert attempts[0] == 3
