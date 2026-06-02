@@ -2,10 +2,117 @@
 
 from __future__ import annotations
 
+import http.client
+import json
+import urllib.error
+
+import pytest
+
 from canary.collectors.plugin_snapshot import (
     _extract_historical_plugin_ids,
+    _fetch_plugin_api_json,
     collect_plugin_snapshot,
 )
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+
+def _patch_github_full(monkeypatch, *, gh_repo=None, contributors=None, workflows=None):
+    if gh_repo is None:
+        gh_repo = {
+            "stargazers_count": 5,
+            "forks_count": 1,
+            "open_issues_count": 0,
+            "pushed_at": "2024-01-01T00:00:00Z",
+        }
+    if contributors is None:
+        contributors = [{"login": "u1", "contributions": 80}, {"login": "u2", "contributions": 20}]
+    if workflows is None:
+        workflows = [{"name": "ci.yml"}]
+    monkeypatch.setattr(
+        "canary.collectors.github_repo.parse_github_owner_repo", lambda url: ("org", "repo")
+    )
+    monkeypatch.setattr("canary.collectors.github_repo.fetch_github_repo", lambda o, r: gh_repo)
+    monkeypatch.setattr("canary.collectors.github_repo.fetch_github_releases", lambda o, r: [])
+    monkeypatch.setattr("canary.collectors.github_repo.fetch_github_tags", lambda o, r: [])
+    monkeypatch.setattr(
+        "canary.collectors.github_repo.fetch_github_commits_since",
+        lambda o, r, since_iso: [],
+    )
+    monkeypatch.setattr(
+        "canary.collectors.github_repo.fetch_github_contributors", lambda o, r: contributors
+    )
+    monkeypatch.setattr("canary.collectors.github_repo.fetch_github_open_pulls", lambda o, r: [])
+    monkeypatch.setattr("canary.collectors.github_repo.fetch_github_open_issues", lambda o, r: [])
+    monkeypatch.setattr(
+        "canary.collectors.github_repo.fetch_github_workflows_dir", lambda o, r: workflows
+    )
+    monkeypatch.setattr("canary.collectors.github_repo.fetch_github_codeowners", lambda o, r: None)
+    monkeypatch.setattr(
+        "canary.collectors.github_repo.fetch_github_security_policy", lambda o, r: None
+    )
+    monkeypatch.setattr(
+        "canary.collectors.github_repo.fetch_github_dependabot_config", lambda o, r: None
+    )
+
+
+# ---------------------------------------------------------------------------
+# _fetch_plugin_api_json
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_plugin_api_json_success(monkeypatch):
+    fake_data = {"name": "myplugin", "title": "My Plugin"}
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda req, timeout=None: _FakeResponse(json.dumps(fake_data).encode()),
+    )
+    result = _fetch_plugin_api_json("myplugin")
+    assert result["name"] == "myplugin"
+
+
+def test_fetch_plugin_api_json_http_error(monkeypatch):
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.HTTPError("url", 404, "Not Found", http.client.HTTPMessage(), None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError, match="404"):
+        _fetch_plugin_api_json("missing-plugin")
+
+
+def test_fetch_plugin_api_json_url_error(monkeypatch):
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError, match="network"):
+        _fetch_plugin_api_json("missing-plugin")
+
+
+def test_fetch_plugin_api_json_json_decode_error(monkeypatch):
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda req, timeout=None: _FakeResponse(b"not-json!!!"),
+    )
+    with pytest.raises(RuntimeError, match="not valid JSON"):
+        _fetch_plugin_api_json("bad-plugin")
+
 
 # ---------------------------------------------------------------------------
 # _extract_historical_plugin_ids
@@ -220,3 +327,117 @@ def test_collect_plugin_snapshot_real_with_github_signals(monkeypatch):
     assert snap["github_open_prs"] == 0
     assert snap["github_open_issues_only"] == 1
     assert snap["github_top_contributor_share"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# collect_plugin_snapshot — real=True, additional branches
+# ---------------------------------------------------------------------------
+
+
+def test_collect_plugin_snapshot_real_github_repo_error(monkeypatch):
+    api = {"name": "myplugin"}
+    monkeypatch.setattr(
+        "canary.collectors.plugin_snapshot._fetch_plugin_api_json", lambda *a, **kw: api
+    )
+    monkeypatch.setattr(
+        "canary.collectors.github_repo.parse_github_owner_repo", lambda url: ("org", "repo")
+    )
+
+    def raise_rate_limit(owner, repo):
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setattr("canary.collectors.github_repo.fetch_github_repo", raise_rate_limit)
+
+    snap = collect_plugin_snapshot(
+        plugin_id="myplugin",
+        repo_url="https://github.com/org/repo",
+        real=True,
+    )
+    assert "github_repo_error" in snap
+    assert snap["github_repo"] is None
+
+
+def test_collect_plugin_snapshot_top_contributor_share(monkeypatch):
+    api = {"name": "myplugin"}
+    monkeypatch.setattr(
+        "canary.collectors.plugin_snapshot._fetch_plugin_api_json", lambda *a, **kw: api
+    )
+    _patch_github_full(
+        monkeypatch,
+        contributors=[
+            {"login": "user1", "contributions": 75},
+            {"login": "user2", "contributions": 25},
+        ],
+    )
+
+    snap = collect_plugin_snapshot(
+        plugin_id="myplugin",
+        repo_url="https://github.com/org/repo",
+        real=True,
+    )
+    assert snap["github_top_contributor_share"] == pytest.approx(0.75)
+
+
+def test_collect_plugin_snapshot_no_contributors_gives_none_share(monkeypatch):
+    api = {"name": "myplugin"}
+    monkeypatch.setattr(
+        "canary.collectors.plugin_snapshot._fetch_plugin_api_json", lambda *a, **kw: api
+    )
+    _patch_github_full(monkeypatch, contributors=[])
+
+    snap = collect_plugin_snapshot(
+        plugin_id="myplugin",
+        repo_url="https://github.com/org/repo",
+        real=True,
+    )
+    assert snap["github_top_contributor_share"] is None
+
+
+def test_collect_plugin_snapshot_codeql_workflow_detected(monkeypatch):
+    api = {"name": "myplugin"}
+    monkeypatch.setattr(
+        "canary.collectors.plugin_snapshot._fetch_plugin_api_json", lambda *a, **kw: api
+    )
+    _patch_github_full(monkeypatch, workflows=[{"name": "ci.yml"}, {"name": "codeql-analysis.yml"}])
+
+    snap = collect_plugin_snapshot(
+        plugin_id="myplugin",
+        repo_url="https://github.com/org/repo",
+        real=True,
+    )
+    assert snap["github_has_codeql_workflow"] is True
+    assert snap["github_ci_workflow_count"] == 2
+
+
+def test_collect_plugin_snapshot_no_workflows(monkeypatch):
+    api = {"name": "myplugin"}
+    monkeypatch.setattr(
+        "canary.collectors.plugin_snapshot._fetch_plugin_api_json", lambda *a, **kw: api
+    )
+    _patch_github_full(monkeypatch, workflows=[])
+
+    snap = collect_plugin_snapshot(
+        plugin_id="myplugin",
+        repo_url="https://github.com/org/repo",
+        real=True,
+    )
+    assert snap["github_has_ci_workflows"] is False
+    assert snap["github_ci_workflow_count"] == 0
+    assert snap["github_has_codeql_workflow"] is False
+
+
+def test_collect_plugin_snapshot_posture_fields_absent(monkeypatch):
+    api = {"name": "myplugin"}
+    monkeypatch.setattr(
+        "canary.collectors.plugin_snapshot._fetch_plugin_api_json", lambda *a, **kw: api
+    )
+    _patch_github_full(monkeypatch)
+
+    snap = collect_plugin_snapshot(
+        plugin_id="myplugin",
+        repo_url="https://github.com/org/repo",
+        real=True,
+    )
+    assert snap["github_has_codeowners"] is False
+    assert snap["github_has_security_policy"] is False
+    assert snap["github_has_dependabot_config"] is False
