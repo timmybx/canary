@@ -14,7 +14,7 @@ COPY --from=python312 /usr/local/lib/libpython3.12.so.1.0 /usr/local/lib/libpyth
 COPY --from=python312 /usr/local/lib/libpython3.so /usr/local/lib/libpython3.so
 COPY --from=python312 /usr/local/lib/python3.12 /usr/local/lib/python3.12
 ENV PATH="/usr/local/bin:${PATH}" \
-    LD_LIBRARY_PATH="/usr/local/lib" \
+    LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}" \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_ROOT_USER_ACTION=ignore
 
