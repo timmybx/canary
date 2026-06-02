@@ -986,6 +986,381 @@ def test_render_ml_explain_card_variants():
     assert "<strong>Summary</strong>" in rendered
 
 
+def test_build_cs_explain_prompt_includes_summary_sections() -> None:
+    confirmed_rows = [
+        {"plugin_id": f"confirmed-{i}", "score": 0.9, "adv_sev": "High", "days_to_adv": 7}
+        for i in range(11)
+    ]
+    unconfirmed_rows = [{"plugin_id": "forward-1", "score": 0.41}]
+
+    prompt = webapp._build_cs_explain_prompt(
+        metrics={"test_row_count": 100},
+        confirmed_rows=confirmed_rows,
+        unconfirmed_rows=unconfirmed_rows,
+        obs_date="2024-01",
+        window_end="2024-07-31",
+        n_total=12,
+        n_confirmed=11,
+        lift=9.2,
+        base_rate=0.03,
+        train_start="2023-01",
+        stem="baseline_6m",
+    )
+
+    assert "MODEL: baseline_6m" in prompt
+    assert "Top-12 precision: 11/12 (92%)" in prompt
+    assert "CONFIRMED PREDICTIONS (11):" in prompt
+    assert "... and 1 more confirmed" in prompt
+    assert "UNCONFIRMED / FORWARD-LOOKING (1):" in prompt
+    assert "Please provide your plain-English explanation now." in prompt
+
+
+def test_render_cs_explain_card_variants() -> None:
+    values = {"model_out_dir": "data/processed/models/run_1"}
+    metrics = {"test_row_count": 10}
+    confirmed_rows = [{"plugin_id": "confirmed-plugin", "score": 0.91, "adv_sev": "High"}]
+
+    assert (
+        webapp._render_cs_explain_card(
+            values,
+            None,
+            confirmed_rows,
+            [],
+            "2024-01",
+            "2024-07-31",
+            1,
+            1,
+            2.0,
+            0.5,
+            "2023-01",
+            "run_1",
+        )
+        == ""
+    )
+
+    card_rate = webapp._render_cs_explain_card(
+        values,
+        metrics,
+        confirmed_rows,
+        [],
+        "2024-01",
+        "2024-07-31",
+        1,
+        1,
+        2.0,
+        0.5,
+        "2023-01",
+        "run_1",
+        rate_limited=True,
+    )
+    assert "Rate limit reached" in card_rate
+
+    card_error = webapp._render_cs_explain_card(
+        values,
+        metrics,
+        confirmed_rows,
+        [],
+        "2024-01",
+        "2024-07-31",
+        1,
+        1,
+        2.0,
+        0.5,
+        "2023-01",
+        "run_1",
+        ai_error="<boom>",
+    )
+    assert "AI explanation error: &lt;boom&gt;" in card_error
+
+    card_result = webapp._render_cs_explain_card(
+        values,
+        metrics,
+        confirmed_rows,
+        [],
+        "2024-01",
+        "2024-07-31",
+        1,
+        1,
+        2.0,
+        0.5,
+        "2023-01",
+        "run_1",
+        ai_result="**Summary**\n\nLooks useful.",
+    )
+    assert "AI explanation (Claude)" in card_result
+    assert "<strong>Summary</strong>" in card_result
+    assert 'name="cs_explain" value="1"' in card_result
+    assert "Open in Claude" in card_result
+    assert "Open in ChatGPT" in card_result
+
+
+def test_load_cs_prediction_rows_splits_confirmed_and_unconfirmed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_root = tmp_path / "models"
+    run_dir = model_root / "run_case"
+    run_dir.mkdir(parents=True)
+    (run_dir / "test_predictions.csv").write_text(
+        "\n".join(
+            [
+                "plugin_id,month,y_true,y_prob",
+                "confirmed-plugin,2024-01,0,0.95",
+                "ytrue-plugin,2024-01,1,0.50",
+                "forward-plugin,2024-01,0,0.40",
+                "confirmed-plugin,2024-01,1,0.10",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT", model_root)
+
+    def _fake_advisories(
+        plugin_id: str, after_date: str, before_date: str
+    ) -> list[dict[str, object]]:
+        assert after_date == "2024-01"
+        assert before_date == "2024-07-31"
+        if plugin_id == "confirmed-plugin":
+            return [
+                {
+                    "published_date": "2024-03-15",
+                    "url": "https://example.test/a",
+                    "severity_summary": {
+                        "max_severity_label": "high",
+                        "max_cvss_base_score": 8.5,
+                    },
+                },
+                {
+                    "published_date": "2024-02-15",
+                    "url": "https://example.test/b",
+                    "severity_summary": {
+                        "max_severity_label": "medium",
+                        "max_cvss_base_score": 6.2,
+                    },
+                },
+            ]
+        return []
+
+    monkeypatch.setattr(webapp, "_advisories_in_window", _fake_advisories)
+
+    obs_date, window_end, confirmed, unconfirmed = webapp._load_cs_prediction_rows(
+        "data/processed/models/run_case",
+        metrics={"test_start_month": "2024-01"},
+        n_top=3,
+    )
+
+    assert obs_date == "2024-01"
+    assert window_end == "2024-07-31"
+    assert [row["plugin_id"] for row in confirmed] == ["confirmed-plugin", "ytrue-plugin"]
+    assert confirmed[0]["adv_sev"] == "High"
+    assert confirmed[0]["adv_cvss"] == 8.5
+    assert confirmed[0]["days_to_adv"] == 74
+    assert [row["plugin_id"] for row in unconfirmed] == ["forward-plugin"]
+
+
+def test_load_cs_prediction_rows_returns_empty_on_bad_predictions_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_root = tmp_path / "models"
+    run_dir = model_root / "run_bad"
+    run_dir.mkdir(parents=True)
+    (run_dir / "test_predictions.csv").write_text(
+        "plugin_id,month,y_true,y_prob\nbroken,2024-01,0,not-a-number\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT", model_root)
+
+    assert webapp._load_cs_prediction_rows("data/processed/models/run_bad", metrics={}) == (
+        "",
+        "",
+        [],
+        [],
+    )
+
+
+def test_app_get_cs_explain_sets_ai_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _render_capture(values: dict[str, object], **kwargs: object) -> str:
+        captured["values"] = values
+        captured.update(kwargs)
+        return "ok"
+
+    monkeypatch.setattr(webapp, "_prepare_request_state", lambda values: ([], None, []))
+    monkeypatch.setattr(
+        webapp,
+        "_load_model_metrics",
+        lambda _model_dir: {
+            "train_start_month": "2023-01",
+            "test_positive_count": 2,
+            "test_unique_plugin_count": 10,
+        },
+    )
+    monkeypatch.setattr(webapp, "_check_explain_rate_limit", lambda _ip: True)
+    monkeypatch.setattr(
+        webapp,
+        "_load_cs_prediction_rows",
+        lambda *_args, **_kwargs: (
+            "2024-01",
+            "2024-07-31",
+            [{"plugin_id": "p1", "score": 0.9}],
+            [],
+        ),
+    )
+    monkeypatch.setattr(webapp, "_call_anthropic_explain", lambda _prompt: "generated text")
+    monkeypatch.setattr(webapp, "render_page", _render_capture)
+
+    status, _, _body = _run_app(
+        "GET",
+        "/",
+        query_string=(
+            "tab=casestudy&model_out_dir=data%2Fprocessed%2Fmodels%2Frun_case&cs_explain=1"
+        ),
+    )
+
+    assert status == "200 OK"
+    assert captured["cs_ai_result"] == "generated text"
+    assert captured["cs_ai_error"] is None
+    assert captured["cs_rate_limited"] is False
+    assert isinstance(captured["values"], dict)
+    assert captured["values"]["active_tab"] == "casestudy"
+
+
+def test_app_get_ml_explain_sets_ai_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _render_capture(values: dict[str, object], **kwargs: object) -> str:
+        captured["values"] = values
+        captured.update(kwargs)
+        return "ok"
+
+    monkeypatch.setattr(webapp, "_prepare_request_state", lambda values: ([], None, []))
+    monkeypatch.setattr(webapp, "_load_model_metrics", lambda _model_dir: {"test_row_count": 10})
+    monkeypatch.setattr(webapp, "_load_precision_at_k", lambda _model_dir: {"scenarios": []})
+    monkeypatch.setattr(
+        webapp, "_load_feature_selection", lambda _model_dir: {"h3_satisfied": False}
+    )
+    monkeypatch.setattr(webapp, "_build_ml_explain_prompt", lambda *_args, **_kwargs: "prompt")
+    monkeypatch.setattr(webapp, "_check_explain_rate_limit", lambda _ip: True)
+    monkeypatch.setattr(webapp, "_call_anthropic_explain", lambda _prompt: "ml generated text")
+    monkeypatch.setattr(webapp, "render_page", _render_capture)
+
+    status, _, _body = _run_app(
+        "GET",
+        "/",
+        query_string="tab=ml&model_out_dir=data%2Fprocessed%2Fmodels%2Frun_case&ml_explain=1",
+    )
+
+    assert status == "200 OK"
+    assert captured["ml_ai_result"] == "ml generated text"
+    assert captured["ml_ai_error"] is None
+    assert captured["ml_rate_limited"] is False
+    assert isinstance(captured["values"], dict)
+    assert captured["values"]["active_tab"] == "ml"
+
+
+def test_app_get_ml_explain_rate_limited_and_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _render_capture(values: dict[str, object], **kwargs: object) -> str:
+        captured["values"] = values
+        captured.update(kwargs)
+        return "ok"
+
+    monkeypatch.setattr(webapp, "_prepare_request_state", lambda values: ([], None, []))
+    monkeypatch.setattr(webapp, "_load_model_metrics", lambda _model_dir: {"test_row_count": 10})
+    monkeypatch.setattr(webapp, "_load_precision_at_k", lambda _model_dir: {"scenarios": []})
+    monkeypatch.setattr(
+        webapp, "_load_feature_selection", lambda _model_dir: {"h3_satisfied": False}
+    )
+    monkeypatch.setattr(webapp, "_build_ml_explain_prompt", lambda *_args, **_kwargs: "prompt")
+    monkeypatch.setattr(webapp, "_check_explain_rate_limit", lambda _ip: False)
+    monkeypatch.setattr(webapp, "render_page", _render_capture)
+
+    status, _, _body = _run_app(
+        "GET",
+        "/",
+        query_string="tab=ml&model_out_dir=data%2Fprocessed%2Fmodels%2Frun_case&ml_explain=1",
+    )
+    assert status == "200 OK"
+    assert captured["ml_rate_limited"] is True
+    assert captured["ml_ai_result"] is None
+    assert captured["ml_ai_error"] is None
+
+    def _raise_ml(_prompt: str) -> str:
+        raise Exception("hidden-ml-message")
+
+    monkeypatch.setattr(webapp, "_check_explain_rate_limit", lambda _ip: True)
+    monkeypatch.setattr(webapp, "_call_anthropic_explain", _raise_ml)
+
+    status2, _, _body2 = _run_app(
+        "GET",
+        "/",
+        query_string="tab=ml&model_out_dir=data%2Fprocessed%2Fmodels%2Frun_case&ml_explain=1",
+    )
+    assert status2 == "200 OK"
+    assert captured["ml_ai_error"] == "AI explanation unavailable — use Copy or Open buttons below."
+
+
+def test_app_get_cs_explain_rate_limited_and_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _render_capture(values: dict[str, object], **kwargs: object) -> str:
+        captured["values"] = values
+        captured.update(kwargs)
+        return "ok"
+
+    monkeypatch.setattr(webapp, "_prepare_request_state", lambda values: ([], None, []))
+    monkeypatch.setattr(
+        webapp,
+        "_load_model_metrics",
+        lambda _model_dir: {
+            "train_start_month": "2023-01",
+            "test_positive_count": 2,
+            "test_unique_plugin_count": 10,
+        },
+    )
+    monkeypatch.setattr(webapp, "_check_explain_rate_limit", lambda _ip: False)
+    monkeypatch.setattr(webapp, "render_page", _render_capture)
+
+    status, _, _body = _run_app(
+        "GET",
+        "/",
+        query_string=(
+            "tab=casestudy&model_out_dir=data%2Fprocessed%2Fmodels%2Frun_case&cs_explain=1"
+        ),
+    )
+    assert status == "200 OK"
+    assert captured["cs_rate_limited"] is True
+    assert captured["cs_ai_result"] is None
+    assert captured["cs_ai_error"] is None
+
+    def _raise_explain(_prompt: str) -> str:
+        raise Exception("hidden-internal-message")
+
+    monkeypatch.setattr(webapp, "_check_explain_rate_limit", lambda _ip: True)
+    monkeypatch.setattr(
+        webapp,
+        "_load_cs_prediction_rows",
+        lambda *_args, **_kwargs: (
+            "2024-01",
+            "2024-07-31",
+            [{"plugin_id": "p1", "score": 0.9}],
+            [],
+        ),
+    )
+    monkeypatch.setattr(webapp, "_call_anthropic_explain", _raise_explain)
+
+    status2, _, _body2 = _run_app(
+        "GET",
+        "/",
+        query_string=(
+            "tab=casestudy&model_out_dir=data%2Fprocessed%2Fmodels%2Frun_case&cs_explain=1"
+        ),
+    )
+    assert status2 == "200 OK"
+    assert captured["cs_ai_error"] == "AI explanation unavailable — use Copy or Open buttons below."
+
+
 def test_render_ml_tab_feature_selection_messages(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(webapp, "_load_precision_at_k", lambda _: None)
     monkeypatch.setattr(webapp, "_load_feature_selection", lambda _: None)
