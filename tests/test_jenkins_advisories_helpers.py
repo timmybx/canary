@@ -185,7 +185,10 @@ def test_strip_query_fragment_handles_malformed():
 
 
 def test_strip_query_fragment_returns_original_when_urlparse_raises(monkeypatch):
-    monkeypatch.setattr(ja, "urlparse", lambda _url: (_ for _ in ()).throw(ValueError("bad")))
+    def _raise_value_error(_url: str):
+        raise ValueError("bad")
+
+    monkeypatch.setattr(ja, "urlparse", _raise_value_error)
     url = "https://www.jenkins.io/security/advisory/2025-01-01/?x=1#frag"
     assert _strip_query_fragment(url) == url
 
@@ -388,7 +391,10 @@ def test_parse_cvss_vector_from_url_empty():
 
 
 def test_parse_cvss_vector_from_url_value_error(monkeypatch):
-    monkeypatch.setattr(ja, "urlparse", lambda _url: (_ for _ in ()).throw(ValueError("bad parse")))
+    def _raise_value_error(_url: str):
+        raise ValueError("bad parse")
+
+    monkeypatch.setattr(ja, "urlparse", _raise_value_error)
     version, vector = _parse_cvss_vector_from_url("https://www.first.org/cvss/calculator/3.1#x")
     assert version is None
     assert vector is None

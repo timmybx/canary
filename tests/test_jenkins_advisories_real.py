@@ -182,10 +182,14 @@ def test_collect_advisories_real_skips_404_without_retry(monkeypatch):
         },
     }
     monkeypatch.setattr(ja, "_load_plugin_snapshot", lambda pid, data_dir: fake_snapshot)
+
+    def _sleep_should_not_run(_s: float):
+        raise AssertionError("sleep not expected")
+
     monkeypatch.setattr(
         ja.time,
         "sleep",
-        lambda _s: (_ for _ in ()).throw(AssertionError("sleep not expected")),
+        _sleep_should_not_run,
     )
 
     def _fetch(url, timeout_s=15.0):
@@ -275,10 +279,12 @@ def test_collect_advisories_real_retry_failure_bubbles(monkeypatch):
     monkeypatch.setattr(
         ja,
         "_fetch_text",
-        lambda url, timeout_s=15.0: (_ for _ in ()).throw(
-            RuntimeError("Fetch failed (network) for x")
-        ),
+        _always_runtime_error_fetch,
     )
 
     with pytest.raises(RuntimeError, match="Fetch failed"):
         collect_advisories_real(plugin_id, data_dir="data/raw")
+
+
+def _always_runtime_error_fetch(url: str, timeout_s: float = 15.0) -> str:
+    raise RuntimeError("Fetch failed (network) for x")
