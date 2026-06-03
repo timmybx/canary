@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import urllib.error
+from email.message import Message
+
 import pytest
 
+from canary.collectors import jenkins_advisories as ja
 from canary.collectors.jenkins_advisories import (
     _allowlisted_url,
     _canonicalize_jenkins_url,
@@ -14,6 +18,8 @@ from canary.collectors.jenkins_advisories import (
     _extract_security_sections,
     _extract_severity_labels,
     _extract_title,
+    _fetch_text,
+    _load_plugin_snapshot,
     _max_severity_label,
     _normalize_advisory_url,
     _parse_cvss_vector_from_url,
@@ -176,6 +182,15 @@ def test_strip_query_fragment_handles_malformed():
     url = "not a url"
     result = _strip_query_fragment(url)
     assert isinstance(result, str)
+
+
+def test_strip_query_fragment_returns_original_when_urlparse_raises(monkeypatch):
+    def _raise_value_error(_url: str):
+        raise ValueError("bad")
+
+    monkeypatch.setattr(ja, "urlparse", _raise_value_error)
+    url = "https://www.jenkins.io/security/advisory/2025-01-01/?x=1#frag"
+    assert _strip_query_fragment(url) == url
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +390,16 @@ def test_parse_cvss_vector_from_url_empty():
     assert vector is None
 
 
+def test_parse_cvss_vector_from_url_value_error(monkeypatch):
+    def _raise_value_error(_url: str):
+        raise ValueError("bad parse")
+
+    monkeypatch.setattr(ja, "urlparse", _raise_value_error)
+    version, vector = _parse_cvss_vector_from_url("https://www.first.org/cvss/calculator/3.1#x")
+    assert version is None
+    assert vector is None
+
+
 # ---------------------------------------------------------------------------
 # _cvss3_base_score
 # ---------------------------------------------------------------------------
@@ -422,6 +447,20 @@ def test_cvss3_base_score_no_impact():
     vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N"
     score = _cvss3_base_score(vector)
     assert score == 0.0
+
+
+def test_cvss3_base_score_ignores_parts_without_colon():
+    vector = "CVSS:3.1/AV:N/BAD/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    score = _cvss3_base_score(vector)
+    assert score == 9.8
+
+
+def test_cvss3_base_score_returns_none_on_split_exception():
+    class BadSplit(str):
+        def split(self, sep=None, maxsplit=-1):  # type: ignore[override]
+            raise RuntimeError("boom")
+
+    assert _cvss3_base_score(BadSplit("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")) is None
 
 
 # ---------------------------------------------------------------------------
@@ -655,6 +694,115 @@ def test_merge_advisory_records_normalizes_url():
     url = result[0]["url"]
     assert url.startswith("https://")
     assert "?" not in url
+
+
+def test_merge_advisory_records_merges_vulnerabilities_and_dates():
+    rec1 = {
+        "source": "other",
+        "type": "advisory",
+        "plugin_id": "my-plugin",
+        "advisory_id": "2025-01-01",
+        "published_date": "",
+        "url": None,
+        "security_warning_ids": ["SECURITY-9"],
+        "vulnerabilities": [
+            "bad-entry",
+            {"security_warning_id": ""},
+            {
+                "security_warning_id": "SECURITY-9",
+                "severity_label": "",
+                "cvss": {"base_score": None},
+            },
+        ],
+    }
+    rec2 = {
+        "source": "other",
+        "type": "advisory",
+        "plugin_id": "my-plugin",
+        "advisory_id": "2025-01-01",
+        "published_date": "2025-01-02",
+        "url": "https://www.jenkins.io/security/advisory/2025-01-01/",
+        "security_warning_ids": ["SECURITY-10"],
+        "vulnerabilities": [
+            {
+                "security_warning_id": "SECURITY-9",
+                "severity_label": "high",
+                "url_fragment": "#SECURITY-9",
+                "cvss": {"base_score": 7.5, "vector": "CVSS:3.1/..."},
+            },
+            {"security_warning_id": "SECURITY-10", "severity_label": "medium"},
+        ],
+    }
+
+    result = merge_advisory_records([rec1, rec2])
+    assert len(result) == 1
+    merged = result[0]
+    assert merged["published_date"] == "2025-01-02"
+    assert merged["url"] == "https://www.jenkins.io/security/advisory/2025-01-01/"
+    assert merged["security_warning_ids"] == ["SECURITY-10", "SECURITY-9"]
+    assert [v["security_warning_id"] for v in merged["vulnerabilities"]] == [
+        "SECURITY-10",
+        "SECURITY-9",
+    ]
+    sec9 = merged["vulnerabilities"][1]
+    assert sec9["severity_label"] == "high"
+    assert sec9["url_fragment"] == "#SECURITY-9"
+    assert sec9["cvss"]["base_score"] == 7.5
+
+
+def test_fetch_text_success(monkeypatch):
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"ok-body"
+
+    monkeypatch.setattr(ja, "_allowlisted_url", lambda _url: None)
+    monkeypatch.setattr(ja.urllib.request, "urlopen", lambda req, timeout: _Resp())
+    text = _fetch_text("https://www.jenkins.io/security/advisory/2025-01-01/")
+    assert text == "ok-body"
+
+
+def test_fetch_text_http_error_raises_runtime_error(monkeypatch):
+    monkeypatch.setattr(ja, "_allowlisted_url", lambda _url: None)
+
+    def _raise(_req, timeout):
+        raise urllib.error.HTTPError("https://x", 500, "fail", hdrs=Message(), fp=None)
+
+    monkeypatch.setattr(ja.urllib.request, "urlopen", _raise)
+    with pytest.raises(RuntimeError, match="Fetch failed \\(500\\)"):
+        _fetch_text("https://www.jenkins.io/security/advisory/2025-01-01/")
+
+
+def test_fetch_text_url_error_raises_runtime_error(monkeypatch):
+    monkeypatch.setattr(ja, "_allowlisted_url", lambda _url: None)
+
+    def _raise(_req, timeout):
+        raise urllib.error.URLError("network down")
+
+    monkeypatch.setattr(ja.urllib.request, "urlopen", _raise)
+    with pytest.raises(RuntimeError, match="Fetch failed \\(network\\)"):
+        _fetch_text("https://www.jenkins.io/security/advisory/2025-01-01/")
+
+
+def test_load_plugin_snapshot_reads_expected_file(tmp_path):
+    data_dir = tmp_path / "raw"
+    plugins_dir = data_dir / "plugins"
+    plugins_dir.mkdir(parents=True)
+    snapshot_path = plugins_dir / "my-plugin.snapshot.json"
+    snapshot_path.write_text('{"plugin_id":"my-plugin"}', encoding="utf-8")
+
+    result = _load_plugin_snapshot("my-plugin", data_dir)
+    assert result["plugin_id"] == "my-plugin"
+
+
+def test_load_plugin_snapshot_rejects_unsafe_plugin_id(tmp_path):
+    with pytest.raises(ValueError, match="Invalid plugin_id"):
+        _load_plugin_snapshot("../bad", tmp_path)
 
 
 # ---------------------------------------------------------------------------
