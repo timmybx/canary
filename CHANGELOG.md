@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.10] - 2026-06-06
+### Changed
+- Bumped `boto3` from `1.43.17` to `1.43.18` and regenerated `requirements.txt`.
+
 ## [0.1.9] - 2026-05-26
 ### Added
 - SHAP-based feature-selection study support, including a new CLI workflow, experiment helpers, web-console experiment sections, and more robust feature-selection artifact loading.
