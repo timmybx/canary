@@ -6,8 +6,16 @@ This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
 ## [0.1.10] - 2026-06-06
+### Added
+- Focused regression coverage for high-change surfaces, including `features_bundle.py` branch paths, `jenkins_advisories` edge/error flows, and webapp case-study/explain GET flows and route assumptions.
+
 ### Changed
-- Bumped `boto3` from `1.43.17` to `1.43.18` and regenerated `requirements.txt`.
+- Refreshed runtime/developer dependency pins and lockfiles across merged dependency PRs, including `numpy`, `ruff`, `pyinstaller`, and `boto3` updates.
+- Updated CI/tooling automation via multiple pre-commit autoupdates and GitHub Action bumps (CodeQL, Codecov, and Zizmor).
+- Aligned ClusterFuzzLite build/runtime setup for Python 3.12-era ML dependencies, including follow-up `pip` pinning in fuzzing/container flows.
+
+### Fixed
+- Corrected the web console Machine Learning tab model-configuration count display (29 -> 64).
 
 ## [0.1.9] - 2026-05-26
 ### Added
