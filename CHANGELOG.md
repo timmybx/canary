@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.10] - 2026-06-06
+### Added
+- SHAP-based signed feature importances for tree models (XGBoost/LightGBM): `_extract_feature_importance` now accepts an `X_sample` parameter and uses `shap.TreeExplainer` to compute `mean_shap` (direction) and `mean_abs_shap` (magnitude), assembling top positive/negative feature lists with a fallback to `feature_importances_` when SHAP or sample data are unavailable. The ML results UI surfaces "risk-raising" vs "risk-reducing" semantics accordingly.
+- Case-study AI explain feature in the web console: AI prompt building (`_build_cs_explain_prompt`), explain card rendering (`_render_cs_explain_card`) with Copy/Open buttons and BYO-AI options, prediction row loading (`_load_cs_prediction_rows`), rate-limit handling, and training start month display in the case-study header.
+- Codecov upload step added to the CI workflow with a corresponding README coverage badge.
+- Unique plugin counts for train/test sets recorded in training metrics; "Ecosystem context" panel added to the case-study UI showing plugins scored, total unique plugins, advisories in window with percentage of scored plugins, and base rate/lift.
+- `tools/collect_canary_results.py`: CLI utility to collect per-model outputs (metrics, precision-at-k, PR curve, feature columns, feature selection, test predictions) and top-level summaries into a ZIP for sharing; skips large files and common binary/raw formats.
+- Disclaimer added to AI-generated explanation cards (both standard and ML variants) clarifying that explanations are for informational purposes only and may contain inaccuracies.
+- Data documentation: added `data/raw/advisories/README.md` and `data/raw/plugins/README.md` describing file layout, features, usage, and data limitations; extended `data/raw/software_heritage_athena/README.md` with archival/visit-context signal descriptions.
+- Expanded regression coverage across high-change test surfaces:
+  - `features_bundle.py` branch coverage raised from 81% to 99% (PR #109).
+  - `jenkins_advisories` collector edge/error path coverage (PR #108).
+  - Webapp case-study and AI explain GET flows, including missing `test_predictions.csv` handling, prediction ranking/dedup, and advisory enrichment (PR #105).
+  - Webapp rendering/explain paths aligned with current redirect semantics (`_render_operational_panel`, `_render_ml_metrics`, `_render_feature_selection_panel`, `_render_ml_tab`, `_render_ml_explain_card`, explain/prompt helpers) (PR #102).
+  - `monthly_features` (GH Archive/advisory) helper functions, bot detection, keyword matching, rolling-feature calculations, and CVSS/CVE extraction.
+  - Software Heritage Athena entry points, collector branches, and feature extraction/bundling, including new test fixtures (`demo-plugin.swh_athena_index.json`, `demo-plugin.swh_athena_visits.jsonl`).
+  - GH Archive history collection (dry-run mode, `_infer_repo_url` fallbacks) and SWH monthly feature aggregation from Athena JSONL fixtures.
+  - Train baseline helpers (`_load_jsonl`, `_select_feature_columns`, `_extract_feature_importance`, `_split_rows`, `_stable_plugin_bucket`, `_write_predictions_csv`).
+  - Feature selection helpers (`compute_shap_global_importance`, `run_feature_selection`, Random Forest MDI fast path, SHAP fallback, subset retraining, error paths).
+  - `pip_audit_wrapper` argument building, exit code mapping, and network-failure handling.
+  - CLI error/output paths (`_cmd_score_ml`, `_cmd_train_feature_select`, `_cmd_collect_plugin`, `_cmd_collect_advisories`).
+  - Coverage-gap tests for staleness/governance scoring, advisory CVSS extraction, pip-audit ignore file loading, model registry functions, and plugin alias snapshot handling.
+  - Extra tests for GH Archive helpers (`_parse_yyyymmdd`, `_fallback_repo_names`), Jenkins advisories sampling, plugins registry `_fetch_json` retry/error handling, and Software Heritage Athena pure helpers.
+  - Extra tests for plugin snapshot collector branches (HTTP/URL/JSON errors, top-contributor share, workflows, posture fields) and Software Heritage collector edge cases (`_scm_to_url`, `_http_get_json`, `_load_plugin_snapshot` validation, and `collect_software_heritage_real` snapshot extraction paths).
+  - Webapp `main()` tests covering waitress startup, wsgiref fallback, and invalid numeric env var handling.
+
+### Changed
+- Removed POST `/explain` and POST `/score` handlers from `webapp.py` to simplify request processing.
+- Case study advisory table now reads `r['adv_date']` per record rather than a stale outer-scope variable, ensuring the per-record advertisement date is correctly displayed and escaped.
+- Plugin counts display in the case-study UI simplified to a single "Plugins scored:" entry, removing reliance on `train_unique_plugin_count`.
+- README citations and references updated: added a direct URL for the Alexopoulos et al. (2022) citation in `data/raw/plugins/README.md`; corrected the PR latency citation in `data/raw/software_heritage_athena/README.md` to Zhang et al. (2022) with updated DOI.
+- Raised minimum versions for runtime dependencies in `pyproject.toml` (`boto3`, `requests`, `beautifulsoup4`, `cryptography`, `scikit-learn`, `python-dotenv`, `waitress`, `xgboost`, `lightgbm`, `shap`) and regenerated `requirements.txt` lockfile (PR #97).
+- Refreshed dependency pins: `ruff` (multiple bumps through 0.15.15, PRs #96 and #110), `numpy` (2.4.4 → 2.4.6), `pyinstaller` (6.10.0 → 6.20.0, PR #106), `boto3` (1.43.17 → 1.43.18, PR #112).
+- Updated CI/tooling automation: three pre-commit autoupdates (PRs #98, #104, #111) and GitHub Action bumps for CodeQL (PR #99) and Codecov (PR #107).
+- Aligned ClusterFuzzLite build/runtime setup for Python 3.12-era ML dependencies so `shap==0.52.0` resolves during fuzz builds (PR #103); pinned `pip` to `26.1.1` in the ClusterFuzzLite Dockerfile (PR #100).
+
+### Fixed
+- Corrected the web console Machine Learning tab model-configuration count (29 → 64) (PR #101).
+
 ## [0.1.9] - 2026-05-26
 ### Added
 - SHAP-based feature-selection study support, including a new CLI workflow, experiment helpers, web-console experiment sections, and more robust feature-selection artifact loading.
