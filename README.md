@@ -18,7 +18,7 @@ CANARY is a research prototype that predicts near-term security advisory risk fo
 
 A live demo is available at **[canary-score.com](https://canary-score.com)**, where you can score any Jenkins plugin, explore pre-trained ML model results across 64 model configurations, and view validated predictions alongside confirmed security advisories.
 
-The project includes a Docker-based CLI, a publicly deployed web console, collectors for registry/snapshot/advisory/healthscore/GitHub/GHArchive/Software Heritage data, an ML scoring pipeline trained on six years of historical data, feature selection analysis, operational precision@k evaluation, and an AI-powered explanation feature.
+The project includes a Docker-based CLI, a publicly deployed web console, collectors for registry/snapshot/advisory/healthscore/GitHub/GHArchive/Software Heritage data, an ML scoring pipeline trained on seven years of historical data, feature selection analysis, operational precision@k evaluation, and an AI-powered explanation feature.
 
 > **Dependency source of truth:** `pyproject.toml` is the source of dependency declarations.  
 > `requirements*.txt` files are generated lockfiles used for reproducible installs.
@@ -702,11 +702,11 @@ The `canary score-ml` CLI path loads a trained model from `data/processed/models
 
 CANARY is being developed as a Doctor of Engineering praxis at The George Washington University. Key empirical results from the current research phase:
 
-- **XGBoost (full features, time split):** ROC-AUC 0.960, Average Precision 0.764
-- **Precision@K:** top-10 plugins = 100% precision (53× lift), top-50 = 92% precision (49× lift)
-- **Feature selection (H3):** a 15-feature subset of the no-window model retains 93.9% of full-model AP
-- **Case study validation:** 18 of 25 top-ranked predictions confirmed by Jenkins security advisories published within the 180-day window
-- **Training data:** approximately 180,000 plugin-month observations from 2019–2025
+- **XGBoost (Advisory + Software Heritage features, time split):** ROC-AUC 0.960, Average Precision 0.773 — the best of 64 model configurations
+- **Precision@K:** top-10 plugins = 100% precision (53× lift), top-25 = 96% precision (51× lift)
+- **Feature selection (H3):** a compact 15-feature subset retains 93.9% of full-model average precision
+- **Case study validation:** 23 of 25 top-ranked predictions confirmed by Jenkins security advisories published within the 180-day window, with lead times exceeding 60 days in several cases
+- **Training data:** approximately 180,664 plugin-month observations spanning January 2018 – April 2025, with a held-out test window of May – November 2025
 
 ---
 
