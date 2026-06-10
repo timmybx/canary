@@ -44,7 +44,7 @@ jobs:
 
       - name: Install pip-tools
         run: |
-          python -m pip install --quiet 'pip>=26,<27' pip-tools
+          python -m pip install --quiet 'pip>=26,<27' 'pip-tools==7.5.3'
 
       # Compile in dependency order: requirements.txt first because
       # requirements-dev.in uses it as a constraint file (-c requirements.txt).
