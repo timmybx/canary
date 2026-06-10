@@ -60,7 +60,7 @@ jobs:
           GH_TOKEN: ${{ secrets.PR_BOT_TOKEN }}
         run: |
           if [ -z "${GH_TOKEN}" ]; then
-            echo "::error::PR_BOT_TOKEN is required for pushing regenerated lockfiles."
+            echo "::error::GH_TOKEN is empty; ensure the PR_BOT_TOKEN secret is available."
             exit 1
           fi
           git config user.name "github-actions[bot]"
