@@ -59,6 +59,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PR_BOT_TOKEN }}
         run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::PR_BOT_TOKEN is required for pushing regenerated lockfiles."
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git diff --quiet -- requirements*.txt; then
@@ -66,12 +70,9 @@ jobs:
           else
             echo "Lockfile changes detected:"
             git diff --name-only -- requirements*.txt
-            if [ -z "${GH_TOKEN}" ]; then
-              echo "::error::PR_BOT_TOKEN is required for pushing regenerated lockfiles."
-              exit 1
-            fi
             git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
             git add requirements*.txt
+            # Disable hooks in case earlier dependency-install steps planted one.
             git -c core.hooksPath=/dev/null commit -m "chore: regenerate lockfiles after Dependabot pip update"
             git push origin "HEAD:${{ github.ref_name }}"
           fi
