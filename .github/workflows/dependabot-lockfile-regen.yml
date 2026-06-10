@@ -11,10 +11,13 @@ on:
     branches:
       - "dependabot/pip/**"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # Default to least privilege.
 permissions:
   contents: read
-
 jobs:
   regen-lockfiles:
     runs-on: ubuntu-latest
