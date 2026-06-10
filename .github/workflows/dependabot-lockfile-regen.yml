@@ -1,0 +1,70 @@
+name: Regenerate lockfiles for Dependabot pip PRs
+
+# Dependabot only edits pyproject.toml when it bumps a pip dependency; it does
+# not regenerate the pip-compile --generate-hashes lockfiles that CI uses.
+# This workflow fires on every Dependabot push to a pip branch and runs the
+# same pip-compile commands as `make reqs`, committing the updated lockfiles
+# back so that CI can install the correct versions with verified hashes.
+
+on:
+  push:
+    branches:
+      - "dependabot/pip/**"
+
+# Default to least privilege.
+permissions:
+  contents: read
+
+jobs:
+  regen-lockfiles:
+    runs-on: ubuntu-latest
+
+    # Only run when Dependabot is the one who pushed.  After we commit the
+    # updated lockfiles back (using PR_BOT_TOKEN), the resulting push will have
+    # a different actor, so this condition prevents an infinite loop.
+    if: github.actor == 'dependabot[bot]'
+
+    # Keep the job token read-only; writes happen via PR_BOT_TOKEN below.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-tools
+        run: |
+          python -m pip install --quiet 'pip>=26,<27' pip-tools
+
+      # Compile in dependency order: requirements.txt first because
+      # requirements-dev.in uses it as a constraint file (-c requirements.txt).
+      - name: Regenerate lockfiles
+        run: |
+          pip-compile --generate-hashes -o requirements.txt pyproject.toml
+          pip-compile --generate-hashes -o requirements-ci.txt requirements-ci.in
+          pip-compile --allow-unsafe --generate-hashes -o requirements-dev.txt requirements-dev.in
+          pip-compile --allow-unsafe --generate-hashes -o requirements-build.txt requirements-build.in
+
+      - name: Commit and push if changed
+        env:
+          GH_TOKEN: ${{ secrets.PR_BOT_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- requirements*.txt; then
+            echo "Lockfiles already up to date – nothing to commit."
+          else
+            echo "Lockfile changes detected:"
+            git diff --name-only -- requirements*.txt
+            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}"
+            git add requirements*.txt
+            git commit -m "chore: regenerate lockfiles after Dependabot pip update"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
