@@ -3215,3 +3215,328 @@ def _render_ml_tab(
     right_col = '<div class="score-output">' + "".join(output_parts) + "</div>"
 
     return '<div class="grid--score">' + left_col + right_col + "</div>"
+
+
+# ---------------------------------------------------------------------------
+# Case-study tab renderer (pure presentation; caller passes cs_view)
+# ---------------------------------------------------------------------------
+
+
+def _render_case_study_tab(
+    values: dict[str, Any],
+    model_dir_options: list[str],
+    cs_view: dict[str, Any] | None = None,
+    cs_ai_result: str | None = None,
+    cs_ai_error: str | None = None,
+    cs_rate_limited: bool = False,
+) -> str:
+    """
+    Dynamic case study tab — shows top-ranked test predictions alongside
+    confirmed advisory outcomes drawn from the local advisory dataset.
+
+    The model picker mirrors the ML tab.  When a model is selected the tab:
+      - reads test_predictions.csv ranked by predicted probability
+      - joins against local advisory JSONL files to find confirmed advisories
+        within the 6-month prediction window
+      - renders a ranked table split into Confirmed and Unconfirmed sections
+
+    Pure presentation: all data is assembled by the caller via
+    _load_case_study_view and passed in as *cs_view* (None = no model selected).
+    """
+
+    # ── Left column: model picker ─────────────────────────────────────────────
+    selector_card = "".join(
+        [
+            '<section class="card" style="align-self:start">',
+            '<div class="card__header"><div>',
+            '<p class="eyebrow">Case study</p>',
+            "<h2>Validated predictions</h2>",
+            '<p class="kicker">Choose a model to see how its top-ranked predictions ',
+            "compared against advisories subsequently published by Jenkins. "
+            "Confirmed rows show plugins CANARY flagged that received a real advisory "
+            "within the 6-month prediction window. Unconfirmed rows are CANARY's "
+            "current forward-looking recommendations.</p>",
+            '</div><span class="pill pill--muted">Live validation</span></div>',
+            '<form method="get" action="/">',
+            '<input type="hidden" name="tab" value="casestudy">',
+            _render_model_picker(values, model_dir_options),
+            '<div style="margin-top:.9rem">',
+            '<button type="submit">Load predictions</button>',
+            "</div>",
+            "</form>",
+            "</section>",
+        ]
+    )
+
+    # ── Right column: no model selected yet ───────────────────────────────────
+    if cs_view is None:
+        right_col = (
+            '<section class="card">'
+            '<div class="card__header"><div>'
+            '<p class="eyebrow">Prediction outcomes</p>'
+            "<h2>Select a model to view results</h2>"
+            "</div></div>"
+            '<p class="muted" style="padding:.6rem 0">Choose an algorithm, '
+            "feature set, and evaluation strategy on the left, then click "
+            "<strong>Load predictions</strong>.</p>"
+            "</section>"
+        )
+        return (
+            '<div class="grid--score">'
+            + '<div class="score-output">'
+            + selector_card
+            + "</div>"
+            + '<div class="score-output">'
+            + right_col
+            + "</div>"
+            + "</div>"
+        )
+
+    stem = cs_view["stem"]
+
+    if not cs_view["pred_exists"]:
+        right_html = (
+            '<section class="card">'
+            + '<div class="card__header"><div>'
+            + '<p class="eyebrow">Prediction outcomes</p>'
+            + "<h2>No predictions file found</h2>"
+            + "</div></div>"
+            + '<p class="muted" style="padding:.6rem 0">Could not find '
+            + f"<code>test_predictions.csv</code> under <code>{_escape(stem)}</code>. "
+            "Re-run training to generate predictions.</p>" + "</section>"
+        )
+        return (
+            '<div class="grid--score">'
+            + '<div class="score-output">'
+            + selector_card
+            + "</div>"
+            + '<div class="score-output">'
+            + right_html
+            + "</div>"
+            + "</div>"
+        )
+
+    metrics = cs_view["metrics"]
+    obs_date = cs_view["obs_date"]
+    window_end = cs_view["window_end"]
+    confirmed_rows = cs_view["confirmed_rows"]
+    unconfirmed_rows = cs_view["unconfirmed_rows"]
+    base_rate = cs_view["base_rate"]
+    n_pos = cs_view["n_pos"]
+    n_test_plugins = cs_view["n_test_plugins"]
+
+    def _sev_color(sev: str) -> str:
+        s = sev.lower()
+        return (
+            "#e05c5c"
+            if s in ("high", "critical")
+            else ("#e6a01e" if s == "medium" else "var(--muted)")
+        )
+
+    def _row_html(r: dict[str, Any], show_outcome: bool) -> str:
+        plugin_url = f"/?tab=score&plugin={_escape(r['plugin_id'])}"
+        plugin_cell = (
+            f'<a href="{plugin_url}" style="color:var(--accent);text-decoration:none">'
+            + f"<code>{_escape(r['plugin_id'])}</code></a>"
+        )
+        prob_cell = f"<strong>{r['score']:.1%}</strong>"
+        if show_outcome and r["confirmed"]:
+            days_str = f"{r['days_to_adv']} days" if r["days_to_adv"] is not None else "—"
+            sev_cell = (
+                f'<span style="color:{_sev_color(r["adv_sev"])};font-weight:600">'
+                + _escape(r["adv_sev"])
+                + (f" ({r['adv_cvss']:.1f})" if r["adv_cvss"] is not None else "")
+                + "</span>"
+            )
+            adv_cell = (
+                (
+                    f'<a href="{_escape(r["adv_url"])}" target="_blank" rel="noopener noreferrer" '
+                    + f'style="color:var(--accent);font-size:.82rem">{_escape(r["sec_ids"][0])}</a>'
+                    + (
+                        f' <span style="color:var(--muted);font-size:.78rem">+{len(r["sec_ids"]) - 1} more</span>'
+                        if len(r["sec_ids"]) > 1
+                        else ""
+                    )
+                )
+                if r["adv_url"] and r["sec_ids"]
+                else '<span style="color:var(--muted)">—</span>'
+            )
+            outcome = (
+                "<td style='padding:.45rem .6rem;text-align:center'>"
+                '<span style="color:#5ce0a0;font-weight:700">&#x2713;</span></td>'
+                + f"<td style='padding:.45rem .6rem'>{sev_cell}</td>"
+                + f"<td style='padding:.45rem .6rem;font-size:.82rem'>{_escape(r['adv_date'])}</td>"
+                + f"<td style='padding:.45rem .6rem;font-size:.82rem;color:var(--muted)'>{days_str}</td>"
+                + f"<td style='padding:.45rem .6rem;font-size:.82rem'>{adv_cell}</td>"
+            )
+        else:
+            outcome = (
+                "<td style='padding:.45rem .6rem;text-align:center'>"
+                '<span style="color:var(--muted)">?</span></td>'
+                + "<td colspan='4' style='padding:.45rem .6rem;color:var(--muted);"
+                "font-size:.82rem;font-style:italic'>No confirmed advisory in window</td>"
+            )
+        return (
+            "<tr>"
+            + f"<td style='padding:.45rem .6rem;text-align:right;color:var(--muted);font-size:.82rem'>{r['rank']}</td>"
+            + f"<td style='padding:.45rem .6rem'>{plugin_cell}</td>"
+            + f"<td style='padding:.45rem .6rem;text-align:right'>{prob_cell}</td>"
+            + outcome
+            + "</tr>"
+        )
+
+    thead = (
+        "<thead><tr>"
+        + "".join(
+            f"<th style='text-align:{a};padding:.4rem .6rem;color:var(--muted);font-size:.8rem;font-weight:600'>{h}</th>"
+            for h, a in [
+                ("#", "right"),
+                ("Plugin", "left"),
+                ("CANARY score", "right"),
+                ("Confirmed", "center"),
+                ("Severity", "left"),
+                ("Advisory date", "left"),
+                ("Lead time", "left"),
+                ("Advisory", "left"),
+            ]
+        )
+        + "</tr></thead>"
+    )
+
+    n_confirmed = len(confirmed_rows)
+    n_total = len(confirmed_rows) + len(unconfirmed_rows)
+    prec = n_confirmed / n_total if n_total > 0 else 0.0
+    lift = prec / base_rate if base_rate > 0 else 0.0
+
+    # Ecosystem context line — shown when unique plugin counts are available
+    eco_parts: list[str] = []
+    if n_test_plugins:
+        eco_parts.append(f"<strong>Plugins scored:</strong> {n_test_plugins:,}")
+    if n_pos and n_test_plugins:
+        eco_parts.append(
+            f"<strong>Advisories in window:</strong> {n_pos:,} "
+            f"({n_pos / n_test_plugins * 100:.1f}% of scored plugins)"
+        )
+    eco_line = (
+        '<div style="margin-bottom:.5rem;padding:.5rem .9rem;'
+        + "background:rgba(92,152,224,.07);border:1px solid rgba(92,152,224,.2);"
+        + 'border-radius:8px;font-size:.83rem;color:var(--muted)">'
+        + '<span style="margin-right:.4rem">&#128270;</span>'
+        + "<strong>Ecosystem context</strong> &nbsp;&#8212;&nbsp; "
+        + " &nbsp;|&nbsp; ".join(eco_parts)
+        + (
+            f" &nbsp;|&nbsp; <strong>Base rate:</strong> {base_rate * 100:.1f}% "
+            f"(lift = top-{n_total} precision ÷ base rate)"
+            if base_rate > 0
+            else ""
+        )
+        + "</div>"
+        if eco_parts
+        else ""
+    )
+
+    train_start = (metrics or {}).get("train_start_month", "")
+    trained_from_str = (
+        f"<strong>Trained from:</strong> {_escape(train_start)} &nbsp;|&nbsp; "
+        if train_start
+        else ""
+    )
+
+    headline = (
+        eco_line
+        + '<div style="margin-bottom:.8rem;padding:.7rem .9rem;'
+        + "background:rgba(82,196,26,.08);border:1px solid rgba(82,196,26,.25);"
+        + 'border-radius:10px;font-size:.9rem">'
+        + trained_from_str
+        + f"<strong>Observation date:</strong> {_escape(obs_date)} &nbsp;|&nbsp; "
+        + f"<strong>Prediction window:</strong> {_escape(obs_date)} &#8594; {_escape(window_end)} &nbsp;|&nbsp; "
+        + f"<strong>Top-{n_total} precision:</strong> {n_confirmed}/{n_total} ({prec:.0%}) &nbsp;|&nbsp; "
+        + f"<strong>Lift vs random:</strong> {lift:.1f}&#215;"
+        + "</div>"
+    )
+
+    confirmed_html = (
+        (
+            '<div class="panel" style="margin-top:.6rem">'
+            + f'<h4>Confirmed predictions <span style="color:#5ce0a0">({n_confirmed} of {n_total})</span></h4>'
+            + '<p style="font-size:.82rem;color:var(--muted);margin:.2rem 0 .5rem">Plugins CANARY ranked '
+            + f"in its top {n_total} that received a Jenkins security advisory within the 180-day window. "
+            "Plugin names link to their CANARY score page.</p>"
+            + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+            + thead
+            + "<tbody>"
+            + "".join(_row_html(r, show_outcome=True) for r in confirmed_rows)
+            + "</tbody></table></div></div>"
+        )
+        if confirmed_rows
+        else ""
+    )
+
+    unconfirmed_html = (
+        (
+            '<div class="panel" style="margin-top:.6rem">'
+            + f'<h4>Unconfirmed predictions <span style="color:var(--muted)">({len(unconfirmed_rows)})</span></h4>'
+            + '<p style="font-size:.82rem;color:var(--muted);margin:.2rem 0 .5rem">'
+            + "High-scored plugins with no confirmed advisory in the window. "
+            "In a live deployment these are CANARY's current forward-looking recommendations &#8212; "
+            "some may receive advisories after the window closes.</p>"
+            + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+            + thead
+            + "<tbody>"
+            + "".join(_row_html(r, show_outcome=False) for r in unconfirmed_rows)
+            + "</tbody></table></div></div>"
+        )
+        if unconfirmed_rows
+        else ""
+    )
+
+    right_html = (
+        '<section class="card">'
+        + '<div class="card__header"><div>'
+        + '<p class="eyebrow">Prediction outcomes</p>'
+        + f"<h2>Top-{n_total} predictions vs. confirmed advisories</h2>"
+        + f'<p class="kicker">Model: <strong>{_escape(stem)}</strong></p>'
+        + "</div>"
+        + '<span class="pill pill--muted">Empirical validation</span></div>'
+        + headline
+        + confirmed_html
+        + unconfirmed_html
+        + '<p style="font-size:.78rem;color:var(--muted);margin-top:.8rem">'
+        + "Advisory data sourced from local Jenkins advisory dataset. "
+        "Lead time = days from observation date to advisory publication. "
+        "Retrain on newer data and reload to see updated predictions.</p>" + "</section>"
+    )
+
+    cs_explain_card = (
+        _render_cs_explain_card(
+            values=values,
+            metrics=metrics,
+            confirmed_rows=confirmed_rows,
+            unconfirmed_rows=unconfirmed_rows,
+            obs_date=obs_date,
+            window_end=window_end,
+            n_total=n_total,
+            n_confirmed=n_confirmed,
+            lift=lift,
+            base_rate=base_rate,
+            train_start=train_start,
+            stem=stem,
+            ai_result=cs_ai_result,
+            ai_error=cs_ai_error,
+            rate_limited=cs_rate_limited,
+        )
+        if metrics
+        else ""
+    )
+
+    return (
+        '<div class="grid--score">'
+        + '<div class="score-output">'
+        + selector_card
+        + cs_explain_card
+        + "</div>"
+        + '<div class="score-output">'
+        + right_html
+        + "</div>"
+        + "</div>"
+    )
