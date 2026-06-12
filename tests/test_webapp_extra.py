@@ -812,44 +812,40 @@ def test_render_operational_panel_includes_headline_and_callouts():
     assert "50% recall" in html
 
 
-def test_render_ml_metrics_with_rich_xgb_payload(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(
-        webapp,
-        "_load_precision_at_k",
-        lambda _: {
-            "n_positive": 20,
-            "n_test": 1000,
-            "base_rate": 0.02,
-            "split_strategy": "time",
-            "scenarios": [
-                {
-                    "label": "Top 10",
-                    "k": 10,
-                    "true_positives": 5,
-                    "precision": 0.5,
-                    "recall": 0.25,
-                    "lift": 25.0,
-                },
-                {
-                    "label": "Top 25",
-                    "k": 25,
-                    "true_positives": 8,
-                    "precision": 0.32,
-                    "recall": 0.4,
-                    "lift": 16.0,
-                },
-                {
-                    "label": "Top 50",
-                    "k": 50,
-                    "true_positives": 12,
-                    "precision": 0.24,
-                    "recall": 0.6,
-                    "lift": 12.0,
-                },
-            ],
-            "recall_targets": [],
-        },
-    )
+def test_render_ml_metrics_with_rich_xgb_payload():
+    pk_data = {
+        "n_positive": 20,
+        "n_test": 1000,
+        "base_rate": 0.02,
+        "split_strategy": "time",
+        "scenarios": [
+            {
+                "label": "Top 10",
+                "k": 10,
+                "true_positives": 5,
+                "precision": 0.5,
+                "recall": 0.25,
+                "lift": 25.0,
+            },
+            {
+                "label": "Top 25",
+                "k": 25,
+                "true_positives": 8,
+                "precision": 0.32,
+                "recall": 0.4,
+                "lift": 16.0,
+            },
+            {
+                "label": "Top 50",
+                "k": 50,
+                "true_positives": 12,
+                "precision": 0.24,
+                "recall": 0.6,
+                "lift": 12.0,
+            },
+        ],
+        "recall_targets": [],
+    }
     html = webapp._render_ml_metrics(
         {
             "model_name": "xgboost",
@@ -883,7 +879,7 @@ def test_render_ml_metrics_with_rich_xgb_payload(monkeypatch: pytest.MonkeyPatch
             },
             "confusion_matrix": [[970, 10], [15, 5]],
         },
-        model_out_dir="data/processed/models/xgb_6m_full_cleaned_time",
+        pk_data=pk_data,
     )
     assert "Operational scenario analysis" in html
     assert "Risk-reducing features" in html
@@ -1361,10 +1357,7 @@ def test_app_get_cs_explain_rate_limited_and_error(monkeypatch: pytest.MonkeyPat
     assert captured["cs_ai_error"] == "AI explanation unavailable — use Copy or Open buttons below."
 
 
-def test_render_ml_tab_feature_selection_messages(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(webapp, "_load_precision_at_k", lambda _: None)
-    monkeypatch.setattr(webapp, "_load_feature_selection", lambda _: None)
-
+def test_render_ml_tab_feature_selection_messages():
     metrics = {
         "model_name": "logistic",
         "roc_auc": 0.7,
