@@ -1,4 +1,15 @@
-"""Tests for jenkins_advisories.py helper functions."""
+"""
+Behavior tests for canary.collectors.jenkins_advisories.
+
+Contract helpers (CVSS v3 scoring, severity bucketing, URL canonicalization,
+advisory merging) are tested directly on purpose: they implement fiddly
+numeric/parsing contracts that downstream features depend on.  The
+collect_advisories_real tests exercise the full collector with the network
+boundary (_fetch_text) and snapshot loading mocked — no live calls.
+
+Consolidates test_jenkins_advisories_helpers.py and
+test_jenkins_advisories_real.py.
+"""
 
 from __future__ import annotations
 
@@ -24,13 +35,10 @@ from canary.collectors.jenkins_advisories import (
     _normalize_advisory_url,
     _parse_cvss_vector_from_url,
     _strip_query_fragment,
+    collect_advisories_real,
     collect_advisories_sample,
     merge_advisory_records,
 )
-
-# ---------------------------------------------------------------------------
-# _cvss_base_score_to_severity_label
-# ---------------------------------------------------------------------------
 
 
 def test_cvss_severity_none_score():
@@ -86,11 +94,6 @@ def test_cvss_severity_coerces_string_float():
     assert _cvss_base_score_to_severity_label("7.5") == "high"  # type: ignore[arg-type]
 
 
-# ---------------------------------------------------------------------------
-# _allowlisted_url
-# ---------------------------------------------------------------------------
-
-
 def test_allowlisted_url_valid_jenkins():
     # Should not raise
     _allowlisted_url("https://www.jenkins.io/security/advisory/2025-01-01/")
@@ -110,11 +113,6 @@ def test_allowlisted_url_rejects_unknown_domain():
 def test_allowlisted_url_rejects_file_scheme():
     with pytest.raises(ValueError, match="Refusing"):
         _allowlisted_url("file:///etc/passwd")
-
-
-# ---------------------------------------------------------------------------
-# _canonicalize_jenkins_url
-# ---------------------------------------------------------------------------
 
 
 def test_canonicalize_jenkins_url_normalizes_http_to_https():
@@ -150,11 +148,6 @@ def test_canonicalize_jenkins_url_preserves_path():
     result = _canonicalize_jenkins_url("https://www.jenkins.io/path/to/advisory")
     assert result is not None
     assert "/path/to/advisory" in result
-
-
-# ---------------------------------------------------------------------------
-# _strip_query_fragment
-# ---------------------------------------------------------------------------
 
 
 def test_strip_query_fragment_removes_query():
@@ -193,22 +186,12 @@ def test_strip_query_fragment_returns_original_when_urlparse_raises(monkeypatch)
     assert _strip_query_fragment(url) == url
 
 
-# ---------------------------------------------------------------------------
-# _normalize_advisory_url
-# ---------------------------------------------------------------------------
-
-
 def test_normalize_advisory_url_removes_query_and_fragment():
     url = "http://jenkins.io/security/advisory/2025-01-01/?q=1#SECURITY-1"
     result = _normalize_advisory_url(url)
     assert "?" not in result
     assert "#" not in result
     assert result.startswith("https://")
-
-
-# ---------------------------------------------------------------------------
-# _extract_title
-# ---------------------------------------------------------------------------
 
 
 def test_extract_title_basic():
@@ -237,11 +220,6 @@ def test_extract_title_missing():
 
 def test_extract_title_empty():
     assert _extract_title("") is None
-
-
-# ---------------------------------------------------------------------------
-# _date_from_advisory_url
-# ---------------------------------------------------------------------------
 
 
 def test_date_from_advisory_url_valid():
@@ -282,11 +260,6 @@ def test_date_from_advisory_url_strips_query_fragment():
     url = "https://www.jenkins.io/security/advisory/2025-06-15/?foo=bar#SECURITY-1"
     result = _date_from_advisory_url(url)
     assert result == date(2025, 6, 15)
-
-
-# ---------------------------------------------------------------------------
-# _extract_severity_labels
-# ---------------------------------------------------------------------------
 
 
 def test_extract_severity_labels_basic():
@@ -333,11 +306,6 @@ def test_extract_severity_labels_all_severity_levels():
     assert result["SECURITY-4"] == "critical"
 
 
-# ---------------------------------------------------------------------------
-# _extract_security_sections
-# ---------------------------------------------------------------------------
-
-
 def test_extract_security_sections_basic():
     html = "intro SECURITY-123 some text SECURITY-456 more text"
     sections = _extract_security_sections(html)
@@ -355,11 +323,6 @@ def test_extract_security_sections_single():
     sections = _extract_security_sections(html)
     assert "SECURITY-999" in sections
     assert "SECURITY-999" in sections["SECURITY-999"]
-
-
-# ---------------------------------------------------------------------------
-# _parse_cvss_vector_from_url
-# ---------------------------------------------------------------------------
 
 
 def test_parse_cvss_vector_from_url_valid_cvss3():
@@ -398,11 +361,6 @@ def test_parse_cvss_vector_from_url_value_error(monkeypatch):
     version, vector = _parse_cvss_vector_from_url("https://www.first.org/cvss/calculator/3.1#x")
     assert version is None
     assert vector is None
-
-
-# ---------------------------------------------------------------------------
-# _cvss3_base_score
-# ---------------------------------------------------------------------------
 
 
 def test_cvss3_base_score_high_score():
@@ -463,11 +421,6 @@ def test_cvss3_base_score_returns_none_on_split_exception():
     assert _cvss3_base_score(BadSplit("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")) is None
 
 
-# ---------------------------------------------------------------------------
-# _extract_cvss_by_security_id
-# ---------------------------------------------------------------------------
-
-
 def test_extract_cvss_by_security_id_finds_cvss():
     html = (
         "SECURITY-123 vulnerability\n"
@@ -489,11 +442,6 @@ def test_extract_cvss_by_security_id_no_cvss():
 
 def test_extract_cvss_by_security_id_empty():
     assert _extract_cvss_by_security_id("") == {}
-
-
-# ---------------------------------------------------------------------------
-# _max_severity_label
-# ---------------------------------------------------------------------------
 
 
 def test_max_severity_label_empty():
@@ -524,11 +472,6 @@ def test_max_severity_label_unknown_ignored():
     # Unknown label should have lowest priority
     result = _max_severity_label(["unknown_sev", "low"])
     assert result == "low"
-
-
-# ---------------------------------------------------------------------------
-# merge_advisory_records
-# ---------------------------------------------------------------------------
 
 
 def test_merge_advisory_records_deduplicates():
@@ -805,11 +748,6 @@ def test_load_plugin_snapshot_rejects_unsafe_plugin_id(tmp_path):
         _load_plugin_snapshot("../bad", tmp_path)
 
 
-# ---------------------------------------------------------------------------
-# collect_advisories_sample
-# ---------------------------------------------------------------------------
-
-
 def test_collect_advisories_sample_returns_list():
     result = collect_advisories_sample()
     assert isinstance(result, list)
@@ -840,3 +778,294 @@ def test_collect_advisories_sample_none_returns_all():
     all_records = collect_advisories_sample(plugin_id=None)
     filtered = collect_advisories_sample(plugin_id="cucumber-reports")
     assert len(all_records) >= len(filtered)
+
+
+# ---------------------------------------------------------------------------
+# collect_advisories_real — full collector with network/snapshot mocked
+# ---------------------------------------------------------------------------
+
+
+def test_canonicalize_jenkins_url_invalid_ipv6_does_not_crash():
+    assert _canonicalize_jenkins_url("//[\n") is None
+
+
+def test_collect_advisories_real_uses_snapshot_and_parses_advisory(monkeypatch):
+    plugin_id = "cucumber-reports"
+    advisory_url = "https://www.jenkins.io/security/advisory/2016-07-27/"
+
+    # 1) Fake snapshot: what collect_advisories_real reads from disk
+    fake_snapshot = {
+        "plugin_id": plugin_id,
+        "security_advisory_urls": [],
+        "plugin_api": {
+            "securityWarnings": [
+                {"id": "SECURITY-309", "url": advisory_url, "active": False},
+            ]
+        },
+    }
+
+    monkeypatch.setattr(
+        "canary.collectors.jenkins_advisories._load_plugin_snapshot",
+        lambda pid, data_dir: fake_snapshot,
+    )
+
+    # 2) Fake HTML fetch: no network
+    # Include a severity line + a FIRST CVSS calculator link so we can parse both.
+    fake_html = (
+        "<html><head><title>Jenkins Security Advisory 2016-07-27</title></head>"
+        "<body>"
+        "<h2>Severity</h2><p>SECURITY-309 is considered medium.</p>"
+        "<h3 id='SECURITY-309'>SECURITY-309</h3>"
+        "<a href='https://www.first.org/cvss/calculator/3.0#CVSS:3.0/AV:N/AC:H/PR:L/UI:R/S:C/C:L/I:L/A:N'>CVSS</a>"
+        "</body></html>"
+    )
+    monkeypatch.setattr(
+        "canary.collectors.jenkins_advisories._fetch_text",
+        lambda url, timeout_s=15.0: fake_html,
+    )
+
+    records = collect_advisories_real(plugin_id, data_dir="data/raw")
+
+    assert len(records) == 1
+    rec = records[0]
+
+    assert rec["plugin_id"] == plugin_id
+    assert rec["url"] == advisory_url
+    assert rec["advisory_id"] == "2016-07-27"
+    assert rec["published_date"] == "2016-07-27"
+    assert rec["title"] == "Jenkins Security Advisory 2016-07-27"
+    assert rec["security_warning_ids"] == ["SECURITY-309"]
+    assert rec["active_security_warning"] is False
+
+    # New: severity/CVSS enrichment
+    assert rec["vulnerabilities"][0]["security_warning_id"] == "SECURITY-309"
+    assert rec["vulnerabilities"][0]["severity_label"] == "medium"
+    assert rec["vulnerabilities"][0]["cvss"]["version"] == "3.0"
+    assert (
+        rec["vulnerabilities"][0]["cvss"]["vector"]
+        == "CVSS:3.0/AV:N/AC:H/PR:L/UI:R/S:C/C:L/I:L/A:N"
+    )
+    assert rec["vulnerabilities"][0]["cvss"]["base_score"] == 4.4
+    assert rec["severity_summary"]["max_severity_label"] == "medium"
+    assert rec["severity_summary"]["max_cvss_base_score"] == 4.4
+
+
+def test_collect_advisories_real_normalizes_fragment_urls_and_derives_ids(monkeypatch):
+    plugin_id = "testlink"
+    advisory_url = "https://www.jenkins.io/security/advisory/2018-02-26/#SECURITY-731"
+
+    fake_snapshot = {
+        "plugin_id": plugin_id,
+        "security_advisory_urls": [],
+        "plugin_api": {
+            "securityWarnings": [
+                {"id": "SECURITY-731", "url": advisory_url, "active": True},
+            ]
+        },
+    }
+
+    monkeypatch.setattr(
+        "canary.collectors.jenkins_advisories._load_plugin_snapshot",
+        lambda pid, data_dir: fake_snapshot,
+    )
+
+    fake_html = (
+        "<html><head><title>Jenkins Security Advisory 2018-02-26</title></head>"
+        "<body><h2>Severity</h2><p>SECURITY-731 is considered medium.</p></body></html>"
+    )
+    monkeypatch.setattr(
+        "canary.collectors.jenkins_advisories._fetch_text",
+        lambda url, timeout_s=15.0: fake_html,
+    )
+
+    records = collect_advisories_real(plugin_id, data_dir="data/raw")
+    assert len(records) == 1
+    rec = records[0]
+
+    # URL stored without fragment, but url_fragment is preserved per vulnerability
+    assert rec["url"] == "https://www.jenkins.io/security/advisory/2018-02-26/"
+    assert rec["advisory_id"] == "2018-02-26"
+    assert rec["published_date"] == "2018-02-26"
+    assert rec["vulnerabilities"][0]["url_fragment"].endswith("#SECURITY-731")
+
+
+def test_collect_advisories_real_uses_curated_urls_and_skips_invalid_warning_urls(monkeypatch):
+    plugin_id = "demo"
+    curated = "https://jenkins.io/security/advisory/2022-01-10/?x=1#frag"
+    fake_snapshot = {
+        "plugin_id": plugin_id,
+        "security_advisory_urls": [curated],
+        "plugin_api": {
+            "securityWarnings": [
+                {"id": "SECURITY-111", "url": None, "active": True},
+                {"id": "SECURITY-112", "url": "", "active": False},
+            ]
+        },
+    }
+    monkeypatch.setattr(ja, "_load_plugin_snapshot", lambda pid, data_dir: fake_snapshot)
+    monkeypatch.setattr(
+        ja,
+        "_fetch_text",
+        lambda url, timeout_s=15.0: "<html><title>Adv</title><body>SECURITY-111</body></html>",
+    )
+
+    records = collect_advisories_real(plugin_id, data_dir="data/raw")
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["url"] == "https://www.jenkins.io/security/advisory/2022-01-10/"
+    assert rec["security_warning_ids"] == []
+
+
+def test_collect_advisories_real_retries_on_runtime_error_then_succeeds(monkeypatch):
+    plugin_id = "retry-plugin"
+    advisory_url = "https://www.jenkins.io/security/advisory/2021-01-01/"
+    fake_snapshot = {
+        "plugin_id": plugin_id,
+        "security_advisory_urls": [],
+        "plugin_api": {
+            "securityWarnings": [{"id": "SECURITY-500", "url": advisory_url, "active": True}]
+        },
+    }
+    monkeypatch.setattr(ja, "_load_plugin_snapshot", lambda pid, data_dir: fake_snapshot)
+    monkeypatch.setattr(ja.time, "sleep", lambda _s: None)
+
+    calls = {"n": 0}
+
+    def _fetch(url, timeout_s=15.0):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError(
+                "Fetch failed (network) for https://www.jenkins.io/security/advisory/2021-01-01/"
+            )
+        return (
+            "<html><title>Retry OK</title>"
+            "<body>SECURITY-500 "
+            "https://www.first.org/cvss/calculator/3.1#CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+            "</body></html>"
+        )
+
+    monkeypatch.setattr(ja, "_fetch_text", _fetch)
+
+    records = collect_advisories_real(plugin_id, data_dir="data/raw")
+    assert calls["n"] == 2
+    assert len(records) == 1
+    assert records[0]["title"] == "Retry OK"
+
+
+def test_collect_advisories_real_skips_404_without_retry(monkeypatch):
+    plugin_id = "dead-link"
+    advisory_url = "https://www.jenkins.io/security/advisory/2020-01-01/"
+    fake_snapshot = {
+        "plugin_id": plugin_id,
+        "security_advisory_urls": [],
+        "plugin_api": {
+            "securityWarnings": [{"id": "SECURITY-404", "url": advisory_url, "active": False}]
+        },
+    }
+    monkeypatch.setattr(ja, "_load_plugin_snapshot", lambda pid, data_dir: fake_snapshot)
+
+    def _sleep_should_not_run(_s: float):
+        raise AssertionError("sleep not expected")
+
+    monkeypatch.setattr(
+        ja.time,
+        "sleep",
+        _sleep_should_not_run,
+    )
+
+    def _fetch(url, timeout_s=15.0):
+        raise RuntimeError(
+            "Fetch failed (404) for https://www.jenkins.io/security/advisory/2020-01-01/"
+        )
+
+    monkeypatch.setattr(ja, "_fetch_text", _fetch)
+    assert collect_advisories_real(plugin_id, data_dir="data/raw") == []
+
+
+def test_collect_advisories_real_retries_on_generic_exception(monkeypatch):
+    plugin_id = "generic-retry"
+    advisory_url = "https://www.jenkins.io/security/advisory/2019-01-01/"
+    fake_snapshot = {
+        "plugin_id": plugin_id,
+        "security_advisory_urls": [],
+        "plugin_api": {"securityWarnings": [{"id": "", "url": advisory_url, "active": False}]},
+    }
+    monkeypatch.setattr(ja, "_load_plugin_snapshot", lambda pid, data_dir: fake_snapshot)
+    monkeypatch.setattr(ja.time, "sleep", lambda _s: None)
+
+    calls = {"n": 0}
+
+    def _fetch(url, timeout_s=15.0):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("temporary parse issue")
+        return "<html><title>Done</title><body>SECURITY-900</body></html>"
+
+    monkeypatch.setattr(ja, "_fetch_text", _fetch)
+    records = collect_advisories_real(plugin_id, data_dir="data/raw")
+    assert calls["n"] == 2
+    assert records[0]["security_warning_ids"] == []
+
+
+def test_collect_advisories_real_derives_severity_from_cvss(monkeypatch):
+    plugin_id = "cvss-derived"
+    advisory_url = "https://www.jenkins.io/security/advisory/2018-01-01/"
+    fake_snapshot = {
+        "plugin_id": plugin_id,
+        "security_advisory_urls": [],
+        "plugin_api": {
+            "securityWarnings": [
+                {"id": "SECURITY-700", "url": advisory_url, "active": True},
+                {"id": "SECURITY-701", "url": advisory_url, "active": True},
+                {"id": None, "url": advisory_url, "active": True},
+            ]
+        },
+    }
+    monkeypatch.setattr(ja, "_load_plugin_snapshot", lambda pid, data_dir: fake_snapshot)
+    monkeypatch.setattr(
+        ja,
+        "_fetch_text",
+        lambda url, timeout_s=15.0: (
+            "<html><title>Derived severity</title><body>"
+            "SECURITY-700 "
+            "https://www.first.org/cvss/calculator/3.1#"
+            "CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:C/C:L/I:L/A:N "
+            "SECURITY-701 "
+            "https://www.first.org/cvss/calculator/3.1#not-cvss"
+            "</body></html>"
+        ),
+    )
+
+    records = collect_advisories_real(plugin_id, data_dir="data/raw")
+    rec = records[0]
+    vulns = {v["security_warning_id"]: v for v in rec["vulnerabilities"]}
+    assert vulns["SECURITY-700"]["severity_label"] == "medium"
+    assert vulns["SECURITY-700"]["severity_source"] == "cvss_v3_derived"
+    assert vulns["SECURITY-701"]["severity_label"] is None
+    assert rec["severity_summary"]["max_severity_label"] == "medium"
+
+
+def test_collect_advisories_real_retry_failure_bubbles(monkeypatch):
+    plugin_id = "retry-fails"
+    advisory_url = "https://www.jenkins.io/security/advisory/2017-01-01/"
+    fake_snapshot = {
+        "plugin_id": plugin_id,
+        "security_advisory_urls": [],
+        "plugin_api": {
+            "securityWarnings": [{"id": "SECURITY-999", "url": advisory_url, "active": True}]
+        },
+    }
+    monkeypatch.setattr(ja, "_load_plugin_snapshot", lambda pid, data_dir: fake_snapshot)
+    monkeypatch.setattr(ja.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(
+        ja,
+        "_fetch_text",
+        _always_runtime_error_fetch,
+    )
+
+    with pytest.raises(RuntimeError, match="Fetch failed"):
+        collect_advisories_real(plugin_id, data_dir="data/raw")
+
+
+def _always_runtime_error_fetch(url: str, timeout_s: float = 15.0) -> str:
+    raise RuntimeError("Fetch failed (network) for x")
