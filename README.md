@@ -160,7 +160,10 @@ flowchart LR
 ```text
 ├── canary/                         # Python package
 │   ├── cli.py                      # CLI entrypoint (`canary ...`)
-│   ├── webapp.py                   # Web console (serves canary-score.com; runs locally via `canary-web`)
+│   ├── webapp.py                   # Web console WSGI app + routing (serves canary-score.com; runs locally via `canary-web`)
+│   ├── web/                        # Web console internals
+│   │   ├── ui.py                   # CSS and HTML renderers (presentation layer)
+│   │   └── services.py             # Plugin-choice cache, live-commit lookup, rate-limit state
 │   ├── plugin_aliases.py           # Canonical plugin-id aliasing used by CLI, scoring, and webapp
 │   ├── collectors/                 # Data collectors
 │   │   ├── github_plugin.py

@@ -55,6 +55,7 @@ data/cache/**
 !data/raw/advisories/README.md
 !data/raw/registry/*.sample.*
 
+test_output.txt
 canary_bad_json_distfork.txt
 .vscode/settings.json
 score_top_input.tsv
