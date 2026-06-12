@@ -689,6 +689,175 @@ def _prepare_request_state(
     return plugin_options, latest_metrics, model_dir_options
 
 
+def _client_ip(environ: dict[str, Any]) -> str:
+    """Client IP used for rate limiting: first X-Forwarded-For hop, else REMOTE_ADDR."""
+    forwarded = environ.get("HTTP_X_FORWARDED_FOR", "")
+    return forwarded.split(",")[0].strip() or environ.get("REMOTE_ADDR", "unknown")
+
+
+def _score_with_ml(plugin: str, score_model_dir: str) -> dict[str, Any]:
+    """
+    Run the baseline scorer, refresh the live-commit signal, and attach the
+    ML score when a trained model is available (score_result["ml"], else None).
+    """
+    score_result = _score_payload(
+        score_plugin_baseline(plugin, real=True),
+        score_model_dir=score_model_dir,
+    )
+    score_result = _inject_live_commit_signal(score_result, plugin)
+    _ml_scorer = _get_ml_scorer(score_model_dir) if score_model_dir else None
+    if _ml_scorer is not None:
+        try:
+            score_result["ml"] = _ml_score_payload(score_plugin_ml(plugin, scorer=_ml_scorer))
+        except Exception as _ml_exc:  # noqa: BLE001
+            logger.warning("ML scoring failed for %s: %s", plugin, _ml_exc)
+            score_result["ml"] = None
+    else:
+        score_result["ml"] = None
+    return score_result
+
+
+def _handle_ml_explain(
+    environ: dict[str, Any], values: dict[str, Any]
+) -> tuple[str | None, str | None, bool]:
+    """
+    GET ?ml_explain=1 — in-page AI explanation for the ML tab.
+
+    Returns (ai_result, ai_error, rate_limited) and pins the active tab.
+    """
+    ai_result: str | None = None
+    ai_error: str | None = None
+    rate_limited = False
+    model_dir = values["model_out_dir"]
+    metrics = _load_model_metrics(model_dir)
+    pk_data = _load_precision_at_k(model_dir)
+    fs_data = _load_feature_selection(model_dir)
+    if metrics:
+        if not _check_explain_rate_limit(_client_ip(environ)):
+            rate_limited = True
+        else:
+            try:
+                prompt = _build_ml_explain_prompt(metrics, pk_data, fs_data, model_dir)
+                ai_result = _call_anthropic_explain(prompt)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ML explain call failed: %s", exc)
+                ai_error = "AI explanation unavailable — use Copy or Open buttons below."
+    values["active_tab"] = "ml"
+    return ai_result, ai_error, rate_limited
+
+
+def _handle_cs_explain(
+    environ: dict[str, Any], values: dict[str, Any]
+) -> tuple[str | None, str | None, bool]:
+    """
+    GET ?cs_explain=1 — in-page AI explanation for the case-study tab.
+
+    Returns (ai_result, ai_error, rate_limited) and pins the active tab.
+    """
+    ai_result: str | None = None
+    ai_error: str | None = None
+    rate_limited = False
+    model_dir = values["model_out_dir"]
+    metrics = _load_model_metrics(model_dir)
+    if metrics:
+        if not _check_explain_rate_limit(_client_ip(environ)):
+            rate_limited = True
+        else:
+            try:
+                obs_date, window_end, confirmed, unconfirmed = _load_cs_prediction_rows(
+                    model_dir, metrics
+                )
+                train_start = metrics.get("train_start_month") or ""
+                stem = Path(model_dir).name
+                n_total = len(confirmed) + len(unconfirmed)
+                n_confirmed = len(confirmed)
+                n_pos = metrics.get("test_positive_count", 0)
+                n_test = metrics.get("test_unique_plugin_count") or metrics.get("test_row_count", 1)
+                base_rate = n_pos / n_test if n_test > 0 else 0.0
+                lift = (n_confirmed / n_total) / base_rate if n_total > 0 and base_rate > 0 else 0.0
+                prompt = _build_cs_explain_prompt(
+                    metrics=metrics,
+                    confirmed_rows=confirmed,
+                    unconfirmed_rows=unconfirmed,
+                    obs_date=obs_date,
+                    window_end=window_end,
+                    n_total=n_total,
+                    n_confirmed=n_confirmed,
+                    lift=lift,
+                    base_rate=base_rate,
+                    train_start=train_start,
+                    stem=stem,
+                )
+                ai_result = _call_anthropic_explain(prompt)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("CS explain call failed: %s", exc)
+                ai_error = "AI explanation unavailable — use Copy or Open buttons below."
+    values["active_tab"] = "casestudy"
+    return ai_result, ai_error, rate_limited
+
+
+def _handle_score_explain(
+    environ: dict[str, Any], values: dict[str, Any]
+) -> tuple[dict[str, Any] | None, str | None, str | None, str | None, bool]:
+    """
+    GET ?explain=1 — score the plugin, then add an in-page AI explanation.
+
+    Returns (score_result, score_error, ai_result, ai_error, rate_limited).
+    """
+    score_result: dict[str, Any] | None = None
+    score_error: str | None = None
+    ai_result: str | None = None
+    ai_error: str | None = None
+    rate_limited = False
+    plugin = values["plugin"].strip()
+    score_model_dir = values.get("score_model_dir") or ""
+    try:
+        score_result = _score_with_ml(plugin, score_model_dir)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Score failed during GET explain for %s: %s", plugin, exc)
+        score_error = "Unable to score the requested plugin right now."
+    if score_result is not None:
+        if not _check_explain_rate_limit(_client_ip(environ)):
+            rate_limited = True
+        else:
+            try:
+                prompt = _build_explain_prompt(plugin, score_result, score_result.get("ml"))
+                ai_result = _call_anthropic_explain(prompt)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Anthropic explain call failed: %s", exc)
+                ai_error = "AI explanation unavailable — use Copy or Open buttons below."
+    if score_model_dir:
+        values["score_model_dir"] = score_model_dir
+    return score_result, score_error, ai_result, ai_error, rate_limited
+
+
+def _handle_get_scoring(values: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    """
+    GET ?tab=score&plugin=... — baseline + ML scoring for the score tab.
+
+    Returns (score_result, score_error).
+    """
+    score_result: dict[str, Any] | None = None
+    score_error: str | None = None
+    plugin = values["plugin"].strip()
+    try:
+        if not _plugin_known(plugin, values["registry_path"]):
+            raise ValueError("Please choose a plugin ID from the current registry list.")
+        score_model_dir = (
+            values.get("score_model_dir") or values.get("model_dir") or DEFAULT_MODEL_DIR
+        )
+        score_result = _score_with_ml(plugin, score_model_dir)
+    except ValueError as exc:
+        logger.warning("Rejected GET score request for %s: %s", plugin, exc)
+        score_error = (
+            "The scoring request could not be completed. Check the plugin ID and try again."
+        )
+    except Exception:  # pragma: no cover
+        logger.exception("Unhandled error during GET scoring for %s", plugin)
+        score_error = "Something went wrong while processing your request."
+    return score_result, score_error
+
+
 def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
     method = environ.get("REQUEST_METHOD", "GET").upper()
     path = environ.get("PATH_INFO", "/")
@@ -767,155 +936,28 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         start_response("302 Found", [("Location", f"/?{qs}"), ("Content-Type", "text/plain")])
         return [b""]
 
-    # GET ml_explain — runs when ml_explain=1 is in query string (ML tab)
+    # GET ml_explain — AI explanation for the ML tab
     if method == "GET" and _get_ml_explain and values.get("model_out_dir"):
-        _ml_explain_dir = values["model_out_dir"]
-        _ml_metrics = _load_model_metrics(_ml_explain_dir)
-        _ml_pk = _load_precision_at_k(_ml_explain_dir)
-        _ml_fs = _load_feature_selection(_ml_explain_dir)
-        if _ml_metrics:
-            client_ip = environ.get("HTTP_X_FORWARDED_FOR", "").split(",")[
-                0
-            ].strip() or environ.get("REMOTE_ADDR", "unknown")
-            if not _check_explain_rate_limit(client_ip):
-                ml_rate_limited = True
-            else:
-                try:
-                    _ml_prompt = _build_ml_explain_prompt(
-                        _ml_metrics, _ml_pk, _ml_fs, _ml_explain_dir
-                    )
-                    ml_ai_result = _call_anthropic_explain(_ml_prompt)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("ML explain call failed: %s", exc)
-                    ml_ai_error = "AI explanation unavailable — use Copy or Open buttons below."
-        values["active_tab"] = "ml"
+        ml_ai_result, ml_ai_error, ml_rate_limited = _handle_ml_explain(environ, values)
 
-    # GET cs_explain — runs when cs_explain=1 is in query string (case study tab)
+    # GET cs_explain — AI explanation for the case-study tab
     if method == "GET" and _get_cs_explain and values.get("model_out_dir"):
-        _cs_explain_dir = values["model_out_dir"]
-        _cs_metrics = _load_model_metrics(_cs_explain_dir)
-        if _cs_metrics:
-            client_ip = environ.get("HTTP_X_FORWARDED_FOR", "").split(",")[
-                0
-            ].strip() or environ.get("REMOTE_ADDR", "unknown")
-            if not _check_explain_rate_limit(client_ip):
-                cs_rate_limited = True
-            else:
-                try:
-                    _cs_obs, _cs_wend, _cs_confirmed, _cs_unconfirmed = _load_cs_prediction_rows(
-                        _cs_explain_dir, _cs_metrics
-                    )
-                    _cs_train = _cs_metrics.get("train_start_month") or ""
-                    _cs_stem = Path(_cs_explain_dir).name
-                    _cs_n_total = len(_cs_confirmed) + len(_cs_unconfirmed)
-                    _cs_n_confirmed = len(_cs_confirmed)
-                    _cs_n_pos = _cs_metrics.get("test_positive_count", 0)
-                    _cs_n_test = _cs_metrics.get("test_unique_plugin_count") or _cs_metrics.get(
-                        "test_row_count", 1
-                    )
-                    _cs_base = _cs_n_pos / _cs_n_test if _cs_n_test > 0 else 0.0
-                    _cs_lift = (
-                        (_cs_n_confirmed / _cs_n_total) / _cs_base
-                        if _cs_n_total > 0 and _cs_base > 0
-                        else 0.0
-                    )
-                    _cs_prompt = _build_cs_explain_prompt(
-                        metrics=_cs_metrics,
-                        confirmed_rows=_cs_confirmed,
-                        unconfirmed_rows=_cs_unconfirmed,
-                        obs_date=_cs_obs,
-                        window_end=_cs_wend,
-                        n_total=_cs_n_total,
-                        n_confirmed=_cs_n_confirmed,
-                        lift=_cs_lift,
-                        base_rate=_cs_base,
-                        train_start=_cs_train,
-                        stem=_cs_stem,
-                    )
-                    cs_ai_result = _call_anthropic_explain(_cs_prompt)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("CS explain call failed: %s", exc)
-                    cs_ai_error = "AI explanation unavailable — use Copy or Open buttons below."
-        values["active_tab"] = "casestudy"
+        cs_ai_result, cs_ai_error, cs_rate_limited = _handle_cs_explain(environ, values)
 
-    # GET explain — runs when explain=1 is in query string
-    # Same logic as the old POST /explain but triggered by GET so firewalls don't block it
+    # GET explain — score + AI explanation (GET so corporate firewalls don't block it)
     if method == "GET" and _get_explain and values.get("plugin"):
-        plugin = values["plugin"].strip()
-        try:
-            _score_model_dir = values.get("score_model_dir") or ""
-            score_result = _score_payload(
-                score_plugin_baseline(plugin, real=True),
-                score_model_dir=_score_model_dir,
-            )
-            score_result = _inject_live_commit_signal(score_result, plugin)
-            _ml_scorer = _get_ml_scorer(_score_model_dir) if _score_model_dir else None
-            if _ml_scorer is not None:
-                try:
-                    ml_score_result = _ml_score_payload(score_plugin_ml(plugin, scorer=_ml_scorer))
-                    score_result["ml"] = ml_score_result
-                except Exception as _ml_exc:  # noqa: BLE001
-                    logger.warning("ML scoring failed for %s: %s", plugin, _ml_exc)
-                    score_result["ml"] = None
-            else:
-                score_result["ml"] = None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Score failed during GET explain for %s: %s", plugin, exc)
-            score_error = "Unable to score the requested plugin right now."
-        # Call Anthropic API with rate limiting
-        if score_result is not None:
-            client_ip = environ.get("HTTP_X_FORWARDED_FOR", "").split(",")[
-                0
-            ].strip() or environ.get("REMOTE_ADDR", "unknown")
-            if not _check_explain_rate_limit(client_ip):
-                rate_limited = True  # noqa: F841
-            else:
-                try:
-                    prompt = _build_explain_prompt(plugin, score_result, score_result.get("ml"))
-                    ai_result = _call_anthropic_explain(prompt)  # noqa: F841
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Anthropic explain call failed: %s", exc)
-                    ai_error = "AI explanation unavailable — use Copy or Open buttons below."  # noqa: F841
-        if _score_model_dir:
-            values["score_model_dir"] = _score_model_dir
+        score_result, score_error, ai_result, ai_error, rate_limited = _handle_score_explain(
+            environ, values
+        )
 
-    # GET scoring — runs when tab=score and a plugin is provided in the query string
+    # GET scoring — tab=score with a plugin in the query string
     if (
         method == "GET"
         and values.get("active_tab") == "score"
         and values.get("plugin")
         and not _get_explain
     ):
-        plugin = values["plugin"].strip()
-        try:
-            if not _plugin_known(plugin, values["registry_path"]):
-                raise ValueError("Please choose a plugin ID from the current registry list.")
-            _score_model_dir = (
-                values.get("score_model_dir") or values.get("model_dir") or DEFAULT_MODEL_DIR
-            )
-            score_result = _score_payload(
-                score_plugin_baseline(plugin, real=True),
-                score_model_dir=_score_model_dir,
-            )
-            score_result = _inject_live_commit_signal(score_result, plugin)
-            _ml_scorer = _get_ml_scorer(_score_model_dir) if _score_model_dir else None
-            if _ml_scorer is not None:
-                try:
-                    ml_score_result = _ml_score_payload(score_plugin_ml(plugin, scorer=_ml_scorer))
-                    score_result["ml"] = ml_score_result
-                except Exception as _ml_exc:  # noqa: BLE001
-                    logger.warning("ML scoring failed for %s: %s", plugin, _ml_exc)
-                    score_result["ml"] = None
-            else:
-                score_result["ml"] = None
-        except ValueError as exc:
-            logger.warning("Rejected GET score request for %s: %s", plugin, exc)
-            score_error = (
-                "The scoring request could not be completed. Check the plugin ID and try again."
-            )
-        except Exception:  # pragma: no cover
-            logger.exception("Unhandled error during GET scoring for %s", plugin)
-            score_error = "Something went wrong while processing your request."
+        score_result, score_error = _handle_get_scoring(values)
 
     html_body = render_page(
         values,
