@@ -1,17 +1,14 @@
-# cli.py
+"""``canary collect`` — data collection command group."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import time
-from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
-from canary.build.advisories_events import build_advisories_events
-from canary.build.features_bundle import build_feature_bundle
-from canary.build.monthly_features import build_monthly_feature_bundle
-from canary.build.monthly_labels import build_monthly_labels
+from canary.cli._common import _iter_registry_plugin_ids, _nonempty, bulk_collect_loop
 from canary.collectors.gharchive_history import collect_gharchive_history_real
 from canary.collectors.github_plugin import collect_github_plugin_real
 from canary.collectors.healthscore import collect_health_scores
@@ -25,66 +22,6 @@ from canary.collectors.software_heritage_backend import (
     collect_software_heritage,
     default_out_dir_for_backend,
 )
-from canary.plugin_aliases import canonicalize_plugin_id
-from canary.scoring.baseline import score_plugin_baseline
-from canary.train.baseline import train_baseline
-
-
-def _nonempty(path: Path) -> bool:
-    try:
-        return path.exists() and path.stat().st_size > 0
-    except OSError:
-        return False
-
-
-def _iter_registry_plugin_ids(registry_path: Path) -> Iterable[str]:
-    with registry_path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            rec = json.loads(line)
-            pid = (rec.get("plugin_id") or "").strip()
-            if pid:
-                yield canonicalize_plugin_id(pid, registry_path=registry_path)
-
-
-def _cmd_train_baseline(args: argparse.Namespace) -> int:
-    extra_exclude = set()
-    if args.exclude_cols:
-        extra_exclude = {col.strip() for col in args.exclude_cols.split(",") if col.strip()}
-
-    include_prefixes: tuple[str, ...] | None = None
-    if args.include_prefixes:
-        include_prefixes = tuple(
-            prefix.strip() for prefix in args.include_prefixes.split(",") if prefix.strip()
-        )
-
-    metrics = train_baseline(
-        in_path=args.in_path,
-        target_col=args.target_col,
-        out_dir=args.out_dir,
-        test_start_month=args.test_start_month,
-        extra_exclude=extra_exclude,
-        include_prefixes=include_prefixes,
-        model_name=args.model,
-        split_strategy=args.split_strategy,
-        group_col=args.group_col,
-        test_fraction=args.test_fraction,
-        random_seed=args.random_seed,
-    )
-
-    print(f"Trained baseline for target {metrics['target_col']}")
-    print(f"Model:      {metrics['model_name']}")
-    print(f"Train rows: {metrics['train_row_count']}  positives: {metrics['train_positive_count']}")
-    print(f"Test rows:  {metrics['test_row_count']}  positives: {metrics['test_positive_count']}")
-    print(f"Features:   {metrics['feature_count']}")
-    print(f"ROC-AUC:    {metrics['roc_auc']}")
-    print(f"AvgPrec:    {metrics['average_precision']}")
-    print(f"Wrote metrics to {args.out_dir}/metrics.json")
-    print(f"Wrote predictions to {args.out_dir}/test_predictions.csv")
-
-    return 0
 
 
 def _cmd_collect_advisories(args: argparse.Namespace) -> int:
@@ -123,74 +60,32 @@ def _cmd_collect_advisories(args: argparse.Namespace) -> int:
     if not registry_path.exists():
         raise SystemExit(f"ERROR: registry file not found: {registry_path}")
 
-    max_plugins = int(args.max_plugins) if args.max_plugins is not None else None
-    sleep_s = float(args.sleep)
-    overwrite = bool(args.overwrite)
-
-    processed = 0
-    written = 0
-    skipped = 0
-    no_snapshot = 0
-    errors = 0
-
     plugins_dir = Path(args.data_dir) / "plugins"
 
-    for plugin_id in _iter_registry_plugin_ids(registry_path):
-        if max_plugins is not None and processed >= max_plugins:
-            break
-        processed += 1
+    def _collect_one(plugin_id: str, out_path: Path) -> None:
+        records = collect_advisories_real(plugin_id=plugin_id, data_dir=args.data_dir)
+        with out_path.open("w", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
-        snapshot_path = plugins_dir / f"{plugin_id}.snapshot.json"
-        if not _nonempty(snapshot_path):
-            # collect_advisories_real expects snapshot metadata to exist for core/version context.
-            no_snapshot += 1
-            continue
-
-        out_path = out_dir / f"{plugin_id}.advisories.real.jsonl"
-        if (not overwrite) and _nonempty(out_path):
-            skipped += 1
-            continue
-
-        try:
-            records = collect_advisories_real(plugin_id=plugin_id, data_dir=args.data_dir)
-            with out_path.open("w", encoding="utf-8") as f:
-                for rec in records:
-                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            written += 1
-        except Exception as e:
-            errors += 1
-            print(f"[ERROR] {plugin_id}: {e}")
-
-        if sleep_s > 0:
-            time.sleep(sleep_s)
-
-    print("Advisories summary")
-    print(f"  Plugins processed:  {processed}")
-    print(f"  Advisories written: {written}")
-    print(f"  Advisories skipped: {skipped}")
-    print(f"  No snapshot:        {no_snapshot}")
-    print(f"  Errors:             {errors}")
-    return 0 if errors == 0 else 2
-
-
-def _cmd_build_monthly_labels(args: argparse.Namespace) -> int:
-    horizons = tuple(int(x.strip()) for x in args.horizons.split(",") if x.strip())
-
-    rows = build_monthly_labels(
-        in_path=args.in_path,
-        out_path=args.out_path,
-        out_csv_path=args.out_csv_path,
-        summary_path=args.summary_path,
-        horizons=horizons,
+    counts = bulk_collect_loop(
+        registry_path=registry_path,
+        max_plugins=int(args.max_plugins) if args.max_plugins is not None else None,
+        sleep_s=float(args.sleep),
+        overwrite=bool(args.overwrite),
+        out_path_for=lambda pid: out_dir / f"{pid}.advisories.real.jsonl",
+        collect_one=_collect_one,
+        # collect_advisories_real expects snapshot metadata to exist for core/version context.
+        precondition=lambda pid: _nonempty(plugins_dir / f"{pid}.snapshot.json"),
     )
 
-    print(f"Wrote {len(rows)} labeled monthly rows to {args.out_path}")
-    if args.out_csv_path:
-        print(f"Wrote labeled monthly CSV to {args.out_csv_path}")
-    if args.summary_path:
-        print(f"Wrote labeled monthly summary to {args.summary_path}")
-
-    return 0
+    print("Advisories summary")
+    print(f"  Plugins processed:  {counts['processed']}")
+    print(f"  Advisories written: {counts['written']}")
+    print(f"  Advisories skipped: {counts['skipped']}")
+    print(f"  No snapshot:        {counts['precondition_failed']}")
+    print(f"  Errors:             {counts['errors']}")
+    return 0 if counts["errors"] == 0 else 2
 
 
 def _cmd_collect_plugin(args: argparse.Namespace) -> int:
@@ -218,47 +113,32 @@ def _cmd_collect_plugin(args: argparse.Namespace) -> int:
     if not registry_path.exists():
         raise SystemExit(f"ERROR: registry file not found: {registry_path}")
 
-    max_plugins = int(args.max_plugins) if args.max_plugins is not None else None
-    sleep_s = float(args.sleep)
-    overwrite = bool(args.overwrite)
+    def _collect_one(plugin_id: str, out_path: Path) -> None:
+        snapshot = collect_plugin_snapshot(
+            plugin_id=plugin_id,
+            repo_url=None,
+            real=args.real,
+        )
+        out_path.write_text(
+            json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
 
-    processed = 0
-    written = 0
-    skipped = 0
-    errors = 0
-
-    for plugin_id in _iter_registry_plugin_ids(registry_path):
-        if max_plugins is not None and processed >= max_plugins:
-            break
-        processed += 1
-        out_path = out_dir / f"{plugin_id}.snapshot.json"
-        if (not overwrite) and _nonempty(out_path):
-            skipped += 1
-            continue
-        try:
-            snapshot = collect_plugin_snapshot(
-                plugin_id=plugin_id,
-                repo_url=None,
-                real=args.real,
-            )
-            out_path.write_text(
-                json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
-            )
-            written += 1
-        except Exception as e:
-            errors += 1
-            print(f"[ERROR] {plugin_id}: {e}")
-
-        if sleep_s > 0:
-            time.sleep(sleep_s)
+    counts = bulk_collect_loop(
+        registry_path=registry_path,
+        max_plugins=int(args.max_plugins) if args.max_plugins is not None else None,
+        sleep_s=float(args.sleep),
+        overwrite=bool(args.overwrite),
+        out_path_for=lambda pid: out_dir / f"{pid}.snapshot.json",
+        collect_one=_collect_one,
+    )
 
     print("Plugin snapshot summary")
-    print(f"  Plugins processed: {processed}")
-    print(f"  Snapshots written: {written}")
-    print(f"  Snapshots skipped: {skipped}")
-    print(f"  Errors:            {errors}")
-    return 0 if errors == 0 else 2
+    print(f"  Plugins processed: {counts['processed']}")
+    print(f"  Snapshots written: {counts['written']}")
+    print(f"  Snapshots skipped: {counts['skipped']}")
+    print(f"  Errors:            {counts['errors']}")
+    return 0 if counts["errors"] == 0 else 2
 
 
 def _cmd_collect_registry(args: argparse.Namespace) -> int:
@@ -346,40 +226,6 @@ def _cmd_collect_gharchive(args: argparse.Namespace) -> int:
         dry_run=bool(args.dry_run),
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))
-    return 0
-
-
-def _cmd_build_feature_bundle(args: argparse.Namespace) -> int:
-    records = build_feature_bundle(
-        data_raw_dir=args.data_raw_dir,
-        registry_path=args.registry,
-        out_path=args.out,
-        out_csv_path=args.out_csv,
-        summary_path=args.summary_out,
-        software_heritage_backend=args.software_heritage_backend,
-    )
-    print(f"Wrote {len(records)} feature rows to {args.out}")
-    if args.out_csv:
-        print(f"Wrote feature CSV to {args.out_csv}")
-    if args.summary_out:
-        print(f"Wrote feature summary to {args.summary_out}")
-    return 0
-
-
-def _cmd_build_monthly_feature_bundle(args: argparse.Namespace) -> int:
-    records = build_monthly_feature_bundle(
-        data_raw_dir=args.data_raw_dir,
-        registry_path=args.registry,
-        start_month=args.start,
-        end_month=args.end,
-        out_path=args.out,
-        out_csv_path=args.out_csv,
-        summary_path=args.summary_out,
-        software_heritage_backend=args.software_heritage_backend,
-    )
-    print(f"Wrote {len(records)} monthly feature rows to {args.out}")
-    print(f"Wrote monthly feature CSV to {args.out_csv}")
-    print(f"Wrote monthly feature summary to {args.summary_out}")
     return 0
 
 
@@ -603,168 +449,12 @@ def _cmd_collect_enrich(args: argparse.Namespace) -> int:
     return 0 if errors == 0 else 2
 
 
-def _cmd_build_advisories_events(args: argparse.Namespace) -> int:
-    _ = build_advisories_events(
-        data_raw_dir=args.data_raw_dir,
-        out_path=args.out,
-    )
-    print(f"Wrote advisory events to {args.out}")
-    return 0
+def register(subparsers: Any) -> None:
+    """Register the ``collect`` command group."""
+    collect = subparsers.add_parser("collect", help="Collect raw/processed data")
+    collect_subparsers = collect.add_subparsers(dest="collect_cmd", required=True)
 
-
-def _cmd_score(args: argparse.Namespace) -> int:
-    plugin = args.plugin.strip()
-    result = score_plugin_baseline(plugin, real=bool(args.real))
-
-    if args.json:
-        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
-    else:
-        print(f"Plugin: {result.plugin}")
-        print(f"Score:  {result.score}/100")
-        print("Why:")
-        for line in result.reasons:
-            print(f" - {line}")
-    return 0
-
-
-def _cmd_score_ml(args: argparse.Namespace) -> int:
-    """CLI handler for `canary score-ml <plugin>`."""
-    from canary.scoring.ml import load_ml_scorer, score_plugin_ml
-
-    plugin = args.plugin.strip()
-    model_dir = args.model_dir
-
-    # Load the scorer — give a clear message if training hasn't been run yet
-    try:
-        scorer = load_ml_scorer(model_dir)
-    except FileNotFoundError as exc:
-        print(f"Error: {exc}", flush=True)
-        print("Tip: run `canary train baseline` first to produce a trained model.")
-        return 1
-
-    # Score the plugin
-    try:
-        result = score_plugin_ml(
-            plugin,
-            scorer=scorer,
-            data_raw_dir=args.data_dir,
-            top_drivers=args.top_drivers,
-        )
-    except ValueError as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    if args.json:
-        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
-        return 0
-
-    # Human-readable output
-    risk_icons = {"Low": "🟢", "Medium": "🟡", "High": "🔴"}
-    icon = risk_icons.get(result.risk_category, "⚪")
-
-    print(f"Plugin:        {result.plugin}")
-    print(f"ML Score:      {result.probability:.4f}  ({result.probability * 100:.1f}%)")
-    print(f"Risk category: {icon}  {result.risk_category}")
-    print(f"Model:         {result.model_dir}")
-    print(f"Scored at:     {result.scored_at}")
-    print()
-
-    if result.drivers:
-        print("Top contributing features:")
-        dir_icons = {"increases_risk": "▲", "decreases_risk": "▼", "neutral": "—"}
-        for d in result.drivers:
-            arrow = dir_icons.get(d.direction, "—")
-            val_str = f"{d.value:.4g}" if d.value is not None else "n/a"
-            print(f"  {arrow}  {d.name:<55}  {val_str}")
-    else:
-        print("No driver information available.")
-
-    return 0
-
-
-def _cmd_train_feature_select(args: argparse.Namespace) -> int:
-    """CLI handler for `canary train feature-select`."""
-    import logging
-
-    from canary.train.feature_selection import DEFAULT_SUBSET_SIZES, run_feature_selection
-
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-
-    subset_sizes: tuple[int, ...] = DEFAULT_SUBSET_SIZES
-    if args.subset_sizes:
-        try:
-            subset_sizes = tuple(int(s.strip()) for s in args.subset_sizes.split(",") if s.strip())
-        except ValueError as exc:
-            print(f"Error: --subset-sizes must be comma-separated integers: {exc}")
-            return 1
-
-    print(f"Running feature selection study on model: {args.model_dir}")
-    print(f"Dataset: {args.in_path}")
-    print(f"Subset sizes: {subset_sizes} + full")
-    print()
-
-    result = run_feature_selection(
-        model_dir=args.model_dir,
-        in_path=args.in_path,
-        target_col=args.target_col,
-        test_start_month=args.test_start_month,
-        split_strategy=args.split_strategy,
-        subset_sizes=subset_sizes,
-        group_col=args.group_col,
-        test_fraction=args.test_fraction,
-        random_seed=args.random_seed,
-    )
-
-    # Print summary
-    full_ap = result.get("full_model_average_precision")
-    full_n = result.get("full_model_feature_count")
-    print()
-    print(f"Full model: {full_n} features, AP = {full_ap:.4f}")
-    print()
-    header = (
-        f"{'Subset':<12} {'Features':>8} {'Avg Precision':>14} {'% of Full':>10} {'H3 (≥90%)':>10}"
-    )
-    print(header)
-    print("-" * 60)
-    for res in result.get("subset_results", []):
-        label = res.get("subset_label", "?")
-        n = res.get("actual_feature_count", "?")
-        ap = res.get("average_precision")
-        ret = res.get("ap_retention_vs_full")
-        h3 = res.get("meets_h3_threshold")
-        ap_str = f"{ap:.4f}" if ap is not None else "  n/a"
-        ret_str = f"{ret * 100:.1f}%" if ret is not None else "   —"
-        h3_str = "✓" if h3 is True else ("—" if h3 is False else " ")
-        print(f"{label:<12} {str(n):>8} {ap_str:>14} {ret_str:>10} {h3_str:>10}")
-
-    print()
-    h3_ok = result.get("h3_satisfied")
-    h3_info = result.get("h3_smallest_qualifying_subset")
-    if h3_ok and h3_info:
-        print(
-            f"H3 SATISFIED: {h3_info['size']}-feature model retains "
-            f"{h3_info['ap_retention'] * 100:.1f}% of full-model AP "
-            f"(AP = {h3_info['average_precision']:.4f})"
-        )
-    else:
-        print("H3 NOT satisfied at any evaluated subset size.")
-
-    print()
-    print(f"Full results written to: {args.model_dir}/feature_selection.json")
-    return 0
-
-
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="canary",
-        description="CANARY: Component Analytics & Near-term Advisory Risk Yardstick",
-    )
-    sub = p.add_subparsers(dest="cmd", required=True)
-
-    collect = sub.add_parser("collect", help="Collect raw/processed data")
-    collect_sub = collect.add_subparsers(dest="collect_cmd", required=True)
-
-    advisories = collect_sub.add_parser("advisories", help="Collect Jenkins advisories")
+    advisories = collect_subparsers.add_parser("advisories", help="Collect Jenkins advisories")
     advisories.add_argument(
         "--plugin",
         default=None,
@@ -799,112 +489,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     advisories.set_defaults(func=_cmd_collect_advisories)
 
-    train_parser = sub.add_parser("train", help="Train models")
-    train_subparsers = train_parser.add_subparsers(dest="train_command", required=True)
-
-    train_baseline_parser = train_subparsers.add_parser(
-        "baseline",
-        help="Train a logistic regression baseline on labeled monthly plugin data",
-    )
-    train_baseline_parser.add_argument(
-        "--in-path",
-        default="data/processed/features/plugins.monthly.labeled.jsonl",
-        help="Input labeled JSONL",
-    )
-    train_baseline_parser.add_argument(
-        "--target-col",
-        default="label_advisory_within_6m",
-        help="Target label column",
-    )
-    train_baseline_parser.add_argument(
-        "--out-dir",
-        default="data/processed/models/baseline_6m",
-        help="Directory for metrics/predictions outputs",
-    )
-    train_baseline_parser.add_argument(
-        "--test-start-month",
-        default="2025-10",
-        help="First month to include in test split (YYYY-MM)",
-    )
-    train_baseline_parser.add_argument(
-        "--exclude-cols",
-        default="",
-        help="Comma-separated additional columns to exclude from training",
-    )
-    train_baseline_parser.add_argument(
-        "--include-prefixes",
-        default="",
-        help="Comma-separated feature name prefixes to include (for example: gharchive_,window_)",
-    )
-    train_baseline_parser.add_argument(
-        "--model",
-        default="logistic",
-        help=(
-            "Model to train. Available: logistic, random_forest, xgboost, lightgbm. "
-            "xgboost and lightgbm require optional dependencies to be installed. "
-            "(default: logistic)"
-        ),
-    )
-    train_baseline_parser.add_argument(
-        "--split-strategy",
-        choices=["time", "group", "group_time"],
-        default="time",
-    )
-    train_baseline_parser.add_argument("--group-col", default="plugin_id")
-    train_baseline_parser.add_argument("--test-fraction", type=float, default=0.2)
-    train_baseline_parser.add_argument("--random-seed", type=int, default=42)
-
-    train_baseline_parser.set_defaults(func=_cmd_train_baseline)
-
-    # ── feature-select subcommand ───────────────────────────────────────────
-    fs_parser = train_subparsers.add_parser(
-        "feature-select",
-        help=(
-            "Principled feature selection: rank features by SHAP global importance "
-            "and evaluate AP retention across top-N subsets.  Provides an empirical "
-            "test of H3."
-        ),
-    )
-    fs_parser.add_argument(
-        "--model-dir",
-        default="data/processed/models/baseline_6m",
-        help="Directory containing a trained model.joblib and feature_columns.json",
-    )
-    fs_parser.add_argument(
-        "--in-path",
-        default="data/processed/features/plugins.monthly.labeled.jsonl",
-        help="Input labeled JSONL (same file used during training)",
-    )
-    fs_parser.add_argument(
-        "--target-col",
-        default="label_advisory_within_6m",
-        help="Target label column (must match original training run)",
-    )
-    fs_parser.add_argument(
-        "--test-start-month",
-        default="2025-10",
-        help="Test cutoff month YYYY-MM (must match original training run)",
-    )
-    fs_parser.add_argument(
-        "--split-strategy",
-        choices=["time", "group", "group_time"],
-        default="time",
-        help="Split strategy (must match original training run)",
-    )
-    fs_parser.add_argument(
-        "--subset-sizes",
-        default="",
-        help=(
-            "Comma-separated top-N subset sizes to evaluate "
-            "(default: 5,10,15,20,30,50). Full feature set is always added."
-        ),
-    )
-    fs_parser.add_argument("--group-col", default="plugin_id")
-    fs_parser.add_argument("--test-fraction", type=float, default=0.2)
-    fs_parser.add_argument("--random-seed", type=int, default=42)
-    fs_parser.set_defaults(func=_cmd_train_feature_select)
-
-    plugin = collect_sub.add_parser("plugin", help="Collect a plugin snapshot")
+    plugin = collect_subparsers.add_parser("plugin", help="Collect a plugin snapshot")
     plugin.add_argument(
         "--id",
         required=False,
@@ -941,7 +526,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plugin.set_defaults(func=_cmd_collect_plugin)
 
-    registry = collect_sub.add_parser(
+    registry = collect_subparsers.add_parser(
         "registry",
         help="Collect the current Jenkins plugin registry (the universe snapshot)",
     )
@@ -958,7 +543,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     registry.set_defaults(func=_cmd_collect_registry)
 
-    github = collect_sub.add_parser(
+    github = collect_subparsers.add_parser(
         "github",
         help="Collect raw GitHub API payloads for a plugin (requires plugin snapshot mapping)",
     )
@@ -981,7 +566,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     github.set_defaults(func=_cmd_collect_github)
 
-    gharchive = collect_sub.add_parser(
+    gharchive = collect_subparsers.add_parser(
         "gharchive",
         help=(
             "Collect historical GitHub activity windows for Jenkins plugins "
@@ -1043,7 +628,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     gharchive.set_defaults(func=_cmd_collect_gharchive)
 
-    healthscore = collect_sub.add_parser(
+    healthscore = collect_subparsers.add_parser(
         "healthscore",
         help="Collect Jenkins plugin Health Score dataset (bulk) from plugin-health.jenkins.io",
     )
@@ -1064,7 +649,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     healthscore.set_defaults(func=_cmd_collect_healthscore)
 
-    software_heritage = collect_sub.add_parser(
+    software_heritage = collect_subparsers.add_parser(
         "software-heritage",
         help="Collect Software Heritage archival metadata for a plugin",
     )
@@ -1131,7 +716,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     software_heritage.set_defaults(func=_cmd_collect_software_heritage)
 
-    enrich = collect_sub.add_parser(
+    enrich = collect_subparsers.add_parser(
         "enrich",
         help="Batch-enrich plugins from the registry (snapshot + advisories + github) with resume",
     )
@@ -1205,185 +790,3 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reduce Athena logging during enrich",
     )
     enrich.set_defaults(func=_cmd_collect_enrich)
-
-    build = sub.add_parser("build", help="Build processed datasets from raw data")
-    build_sub = build.add_subparsers(dest="build_cmd", required=True)
-
-    adv_events = build_sub.add_parser(
-        "advisories-events",
-        help="Normalize/dedupe advisories JSONL files into a single events stream",
-    )
-    adv_events.add_argument(
-        "--data-raw-dir", default="data/raw", help="Raw data root containing advisories/"
-    )
-    adv_events.add_argument(
-        "--out",
-        default="data/processed/events/advisories.jsonl",
-        help="Output path for deduped events JSONL",
-    )
-    adv_events.set_defaults(func=_cmd_build_advisories_events)
-
-    features = build_sub.add_parser(
-        "features",
-        help="Join raw collector outputs into a unified per-plugin feature bundle",
-    )
-    features.add_argument(
-        "--data-raw-dir", default="data/raw", help="Raw data root containing collected artifacts"
-    )
-    features.add_argument(
-        "--registry",
-        default="data/raw/registry/plugins.jsonl",
-        help="Registry JSONL used as the plugin universe",
-    )
-    features.add_argument(
-        "--out",
-        default="data/processed/features/plugins.features.jsonl",
-        help="Output JSONL path for unified plugin feature rows",
-    )
-    features.add_argument(
-        "--out-csv",
-        default="data/processed/features/plugins.features.csv",
-        help="Optional CSV companion output path",
-    )
-    features.add_argument(
-        "--summary-out",
-        default="data/processed/features/plugins.features.summary.json",
-        help="Optional summary JSON path",
-    )
-    features.add_argument(
-        "--software-heritage-backend",
-        choices=["athena", "api"],
-        default="athena",
-        help="Software Heritage backend to read from",
-    )
-    features.set_defaults(func=_cmd_build_feature_bundle)
-
-    build_monthly_labels_parser = build_sub.add_parser(
-        "monthly-labels",
-        help="Build future advisory labels for monthly plugin feature rows",
-    )
-    build_monthly_labels_parser.add_argument(
-        "--in-path",
-        default="data/processed/features/plugins.monthly.features.jsonl",
-        help="Input monthly feature JSONL",
-    )
-    build_monthly_labels_parser.add_argument(
-        "--out-path",
-        default="data/processed/features/plugins.monthly.labeled.jsonl",
-        help="Output labeled JSONL",
-    )
-    build_monthly_labels_parser.add_argument(
-        "--out-csv-path",
-        default="data/processed/features/plugins.monthly.labeled.csv",
-        help="Optional output labeled CSV",
-    )
-    build_monthly_labels_parser.add_argument(
-        "--summary-path",
-        default="data/processed/features/plugins.monthly.labeled.summary.json",
-        help="Optional output summary JSON",
-    )
-    build_monthly_labels_parser.add_argument(
-        "--horizons",
-        default="1,3,6,12",
-        help="Comma-separated advisory horizons in months",
-    )
-    build_monthly_labels_parser.set_defaults(func=_cmd_build_monthly_labels)
-
-    monthly_features = build_sub.add_parser(
-        "monthly-features",
-        help="Build a dense per-plugin-per-month feature dataset from collected artifacts",
-    )
-    monthly_features.add_argument(
-        "--data-raw-dir", default="data/raw", help="Raw data root containing collected artifacts"
-    )
-    monthly_features.add_argument(
-        "--registry",
-        default="data/raw/registry/plugins.jsonl",
-        help="Registry JSONL used as the plugin universe",
-    )
-    monthly_features.add_argument(
-        "--start",
-        required=True,
-        help="Start month in YYYY-MM format",
-    )
-    monthly_features.add_argument(
-        "--end",
-        required=True,
-        help="End month in YYYY-MM format",
-    )
-    monthly_features.add_argument(
-        "--out",
-        default="data/processed/features/plugins.monthly.features.jsonl",
-        help="Output JSONL path for unified monthly feature rows",
-    )
-    monthly_features.add_argument(
-        "--out-csv",
-        default="data/processed/features/plugins.monthly.features.csv",
-        help="Optional CSV companion output path",
-    )
-    monthly_features.add_argument(
-        "--summary-out",
-        default="data/processed/features/plugins.monthly.features.summary.json",
-        help="Optional summary JSON path",
-    )
-    monthly_features.add_argument(
-        "--software-heritage-backend",
-        choices=["athena", "api"],
-        default="athena",
-        help="Software Heritage backend to read from",
-    )
-    monthly_features.set_defaults(func=_cmd_build_monthly_feature_bundle)
-
-    score = sub.add_parser("score", help="Score a component/plugin")
-    score.add_argument("plugin", help="Plugin short name (e.g. workflow-cps)")
-    score.add_argument("--json", action="store_true", help="Output JSON instead of text")
-    score.add_argument(
-        "--data-dir", default="data/raw", help="Directory containing collected datasets"
-    )
-    score.add_argument(
-        "--real", action="store_true", help="Prefer *.advisories.real.jsonl if present"
-    )
-    score.set_defaults(func=_cmd_score)
-
-    score_ml = sub.add_parser(
-        "score-ml",
-        help="Score a plugin using the trained ML model",
-    )
-    score_ml.add_argument("plugin", help="Plugin short name (e.g. cucumber-reports)")
-    score_ml.add_argument(
-        "--model-dir",
-        default="data/processed/models/baseline_6m",
-        help=(
-            "Directory containing model.joblib and feature_columns.json "
-            "(default: data/processed/models/baseline_6m)"
-        ),
-    )
-    score_ml.add_argument(
-        "--data-dir",
-        default="data/raw",
-        help="Root directory of collected raw data (default: data/raw)",
-    )
-    score_ml.add_argument(
-        "--top-drivers",
-        type=int,
-        default=10,
-        help="Number of top contributing features to display (default: 10)",
-    )
-    score_ml.add_argument(
-        "--json",
-        action="store_true",
-        help="Output full JSON instead of human-readable text",
-    )
-    score_ml.set_defaults(func=_cmd_score_ml)
-
-    return p
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    return int(args.func(args))
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

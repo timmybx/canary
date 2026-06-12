@@ -324,7 +324,7 @@ class TestCmdCollectPluginErrorBranch:
         (tmp_path / "plugins").mkdir()
 
         with patch(
-            "canary.cli.collect_plugin_snapshot",
+            "canary.cli.collect.collect_plugin_snapshot",
             side_effect=RuntimeError("network error"),
             autospec=True,
         ):
@@ -352,7 +352,7 @@ class TestCmdCollectPluginErrorBranch:
         mock_snap = {"plugin_id": "sleepy-plugin", "data": {}}
         with (
             patch(
-                "canary.cli.collect_plugin_snapshot",
+                "canary.cli.collect.collect_plugin_snapshot",
                 return_value=mock_snap,
             ),
             patch("time.sleep") as mock_sleep,
@@ -390,7 +390,7 @@ class TestCmdCollectAdvisoriesErrorBranch:
         args.data_dir = str(tmp_path / "data" / "raw")
 
         with patch(
-            "canary.cli.collect_advisories_real",
+            "canary.cli.collect.collect_advisories_real",
             side_effect=RuntimeError("parse error"),
             autospec=True,
         ):

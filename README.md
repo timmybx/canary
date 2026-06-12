@@ -159,7 +159,11 @@ flowchart LR
 
 ```text
 ├── canary/                         # Python package
-│   ├── cli.py                      # CLI entrypoint (`canary ...`)
+│   ├── cli/                        # CLI entrypoint (`canary ...`), one module per command group
+│   │   ├── collect.py              # `canary collect ...` (registry, snapshot, advisories, enrich, ...)
+│   │   ├── build.py                # `canary build ...` (features, monthly features, labels, events)
+│   │   ├── train.py                # `canary train ...` (baseline, feature-select)
+│   │   └── score.py                # `canary score` / `canary score-ml`
 │   ├── webapp.py                   # Web console WSGI app + routing (serves canary-score.com; runs locally via `canary-web`)
 │   ├── web/                        # Web console internals
 │   │   ├── ui.py                   # CSS and HTML renderers (presentation layer)
