@@ -36,7 +36,12 @@ exclude = ["data*", "tests*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-ra --cov=canary --cov-report=term-missing"
+# Coverage is a ratchet, not a target: --cov-fail-under stops regressions, but new
+# tests must be justified by the behavior they protect, never by coverage alone
+# (see .github/agents/unit-test.agent.md). Current floor reflects ~93% actual with
+# headroom for planned consolidation of implementation-coupled tests; tighten it
+# back up after each consolidation lands.
+addopts = "-ra --cov=canary --cov-report=term-missing --cov-fail-under=91"
 
 [tool.coverage.run]
 branch = true
