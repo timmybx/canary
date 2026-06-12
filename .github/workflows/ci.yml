@@ -69,3 +69,25 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  # Docker is the documented primary workflow (Makefile, compose.yaml, README
+  # quickstart), so verify the image actually builds and the installed
+  # entrypoints import cleanly.  Without this the image can rot while the
+  # plain-Python test job stays green.
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: docker build -t canary:ci .
+
+      - name: Smoke test — CLI entrypoint
+        run: docker run --rm canary:ci canary --help
+
+      - name: Smoke test — webapp imports
+        run: docker run --rm canary:ci python -c "import canary.webapp"

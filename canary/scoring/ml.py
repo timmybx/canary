@@ -59,6 +59,13 @@ class MLScoreResult:
     model_dir: str
     model_name: str  # e.g. "xgboost", "logistic", "lightgbm"
     scored_at: str  # ISO timestamp
+    # Inference-quality signals: how much of the model's feature contract
+    # could actually be populated from collected data.  A high fraction means
+    # the score leans heavily on imputed (median) values — either the plugin
+    # has little collected data, or a feature-name mismatch crept in between
+    # training and inference.
+    missing_feature_count: int = 0
+    missing_feature_fraction: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,6 +86,8 @@ class MLScoreResult:
             "feature_vector": self.feature_vector,
             "model_dir": self.model_dir,
             "scored_at": self.scored_at,
+            "missing_feature_count": self.missing_feature_count,
+            "missing_feature_fraction": self.missing_feature_fraction,
         }
 
 
@@ -98,6 +107,13 @@ class MLScorer:
 
 _LOW_THRESHOLD = 0.05
 _HIGH_THRESHOLD = 0.20
+
+# Warn when at least this fraction of the model's feature columns could not be
+# populated at inference time.  Some missingness is normal (not every plugin
+# has every data source collected), but a sudden jump — especially across all
+# plugins — is the signature of a feature-name mismatch between training
+# (monthly_features.py) and inference (features_bundle.py + _BUNDLE_TO_MODEL).
+_MISSING_FEATURE_WARN_FRACTION = 0.5
 
 
 def _risk_category(probability: float) -> str:
@@ -475,6 +491,27 @@ def score_plugin_ml(
     # Build feature vector
     feature_vector = _build_feature_vector(safe_id, data_raw_dir, scorer.feature_columns)
 
+    # Inference-quality guard: how many model columns could not be populated?
+    # The imputer will silently fill these with training medians, so a high
+    # fraction degrades the score without any visible error.  Warn loudly so a
+    # feature-name mismatch between training and inference cannot hide.
+    missing_count = sum(1 for col in scorer.feature_columns if feature_vector.get(col) is None)
+    missing_fraction = (
+        missing_count / len(scorer.feature_columns) if scorer.feature_columns else 0.0
+    )
+    if missing_fraction >= _MISSING_FEATURE_WARN_FRACTION:
+        LOGGER.warning(
+            "ML scoring for %r: %d of %d model feature columns (%.0f%%) could not "
+            "be populated from collected data and will be median-imputed. If this "
+            "happens for most plugins, suspect a feature-name mismatch between "
+            "training (monthly_features.py) and inference (features_bundle.py / "
+            "_BUNDLE_TO_MODEL) rather than missing raw data.",
+            safe_id,
+            missing_count,
+            len(scorer.feature_columns),
+            missing_fraction * 100,
+        )
+
     # Align to a single-row DataFrame in the exact column order the pipeline expects
     X = pd.DataFrame(
         [[feature_vector.get(col) for col in scorer.feature_columns]],
@@ -502,4 +539,6 @@ def score_plugin_ml(
         model_dir=scorer.model_dir,
         model_name=scorer.model_name,
         scored_at=datetime.now(tz=UTC).isoformat(),
+        missing_feature_count=missing_count,
+        missing_feature_fraction=round(missing_fraction, 4),
     )

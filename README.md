@@ -160,24 +160,27 @@ flowchart LR
 ```text
 ├── canary/                         # Python package
 │   ├── cli.py                      # CLI entrypoint (`canary ...`)
-│   ├── webapp.py                   # Local web console (`python -m canary.webapp`)
+│   ├── webapp.py                   # Web console (serves canary-score.com; runs locally via `canary-web`)
+│   ├── plugin_aliases.py           # Canonical plugin-id aliasing used by CLI, scoring, and webapp
 │   ├── collectors/                 # Data collectors
 │   │   ├── github_plugin.py
+│   │   ├── github_repo.py
 │   │   ├── gharchive_history.py
 │   │   ├── healthscore.py
 │   │   ├── jenkins_advisories.py
 │   │   ├── plugin_snapshot.py
 │   │   ├── plugins_registry.py
-│   │   └── software_heritage.py
+│   │   ├── software_heritage.py            # SWH REST API backend
+│   │   ├── software_heritage_athena.py     # SWH bulk backend via AWS Athena
+│   │   └── software_heritage_backend.py    # Backend dispatch (athena | api)
 │   ├── build/                      # Dataset builders / normalizers
 │   │   ├── advisories_events.py
 │   │   ├── features_bundle.py
 │   │   ├── monthly_labels.py
 │   │   └── monthly_features.py
-│   ├── datasets/                   # Auxiliary / legacy dataset scripts
-│   │   └── github_repo_features.py
 │   ├── train/
 │   │   ├── baseline.py              # Baseline model training
+│   │   ├── feature_selection.py     # SHAP-based feature selection (H3 analysis)
 │   │   └── registry.py              # Model registry
 │   └── scoring/
 │       ├── baseline.py              # Heuristic scorer (explainable)
@@ -199,8 +202,8 @@ flowchart LR
 │       ├── features/
 │       └── models/
 ├── .github/
-│   ├── workflows/
-│   └── rulesets/
+│   └── workflows/
+├── DEPLOYMENT.md                   # Production deployment notes (canary-score.com)
 ├── Dockerfile
 ├── compose.yaml
 ├── Makefile
@@ -317,6 +320,8 @@ You can also run it directly inside the container with:
 ```bash
 docker compose run --rm --service-ports canary-web
 ```
+
+Deployment of the public instance is documented in [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 ### 4) Collect the plugin registry
 
@@ -571,46 +576,6 @@ docker compose run --rm canary canary collect gharchive \
   --start 20250101 \
   --end 20250331 \
   --allow-jenkinsci-fallback
-```
-
----
-
-## 🗂️ GitHub Repo Feature Script (auxiliary / legacy path)
-
-Use this for standalone repo metadata experiments outside the main CANARY collection + feature-build pipeline.
-
-Optional: set a GitHub token first:
-
-```bash
-export GITHUB_TOKEN=<your_token>
-```
-
-PowerShell:
-
-```powershell
-$env:GITHUB_TOKEN="<your_token>"
-```
-
-Examples:
-
-```bash
-make github-features
-```
-
-```bash
-python -m canary.datasets.github_repo_features --org jenkinsci --repo-suffix -plugin --max-repos 25 --out data/processed/github_repo_features.csv
-```
-
-Skip Scorecard API enrichment:
-
-```bash
-python -m canary.datasets.github_repo_features --skip-scorecard
-```
-
-Include Dependabot / code-scanning alert metrics:
-
-```bash
-python -m canary.datasets.github_repo_features --include-alerts
 ```
 
 ---

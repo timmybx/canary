@@ -19,7 +19,7 @@ bandit:
 	docker compose run --rm canary bandit -r canary -q -s B608
 
 security: bandit audit
-	
+
 pyright:
 	docker compose run --rm canary pyright
 
@@ -35,12 +35,6 @@ demo:
 	docker compose run --rm canary canary collect plugin --id cucumber-reports --real
 	docker compose run --rm canary canary collect advisories --plugin cucumber-reports --real --data-dir data/raw --out-dir data/raw/advisories
 	docker compose run --rm canary canary score cucumber-reports --data-dir data/raw --json
-
-gharchive-sample:
-	python -m canary.datasets.gharchive $(ARGS)
-
-github-features:
-	python -m canary.datasets.github_repo_features $(ARGS)
 
 
 .PHONY: metrics metrics-top clean help
@@ -110,7 +104,7 @@ score-top20:
 	      printf "%s\n" "$$row"; \
 	    done < "$$tmp"'; \
 	  rm -f $$tmpfile
-	  
+
 # Save leaderboard output to a TSV file (docker noise suppressed)
 score-top20-tsv:
 	@$(MAKE) --no-print-directory score-top20 1> score_top20.tsv 2>/dev/null

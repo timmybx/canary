@@ -33,6 +33,51 @@ def _get_month_value(row: dict[str, Any]) -> str:
     raise KeyError("Row is missing a recognized month field (month/month_id/period/yyyymm).")
 
 
+def _next_month(key: tuple[int, int]) -> tuple[int, int]:
+    """Return the (year, month) tuple immediately following *key*."""
+    year, month = key
+    if month == 12:
+        return (year + 1, 1)
+    return (year, month + 1)
+
+
+def _validate_dense_months(plugin_id: str, rows_sorted: list[dict[str, Any]]) -> None:
+    """
+    Assert that *rows_sorted* contains exactly one row per consecutive calendar
+    month, with no gaps and no duplicates.
+
+    Horizon labels are computed positionally (the next H rows are treated as
+    the next H calendar months), so a gap or duplicate would silently produce
+    labels that span the wrong calendar window. Validity of the labeled
+    dataset depends on this invariant, so violations fail loudly rather than
+    mislabeling.
+    """
+    prev: tuple[int, int] | None = None
+    for row in rows_sorted:
+        cur = _parse_month_key(_get_month_value(row))
+        if prev is not None:
+            if cur == prev:
+                raise ValueError(
+                    f"Duplicate month {cur[0]:04d}-{cur[1]:02d} for plugin "
+                    f"{plugin_id!r}. Monthly feature rows must contain exactly one "
+                    "row per plugin-month; horizon labels would be computed over "
+                    "the wrong calendar window. Re-run 'canary build "
+                    "monthly-features' to regenerate a dense grid."
+                )
+            expected = _next_month(prev)
+            if cur != expected:
+                raise ValueError(
+                    f"Month gap for plugin {plugin_id!r}: "
+                    f"{prev[0]:04d}-{prev[1]:02d} is followed by "
+                    f"{cur[0]:04d}-{cur[1]:02d} (expected "
+                    f"{expected[0]:04d}-{expected[1]:02d}). Horizon labels are "
+                    "positional and require consecutive months; a gap would "
+                    "silently mislabel advisory windows. Re-run 'canary build "
+                    "monthly-features' to regenerate a dense grid."
+                )
+        prev = cur
+
+
 def _row_has_advisory_this_month(row: dict[str, Any]) -> bool:
     """
     Return whether the row indicates an advisory in the current month.
@@ -106,6 +151,7 @@ def _build_labels_for_plugin_rows(
     rows: list[dict[str, Any]],
     *,
     horizons: tuple[int, ...],
+    require_dense_months: bool = True,
 ) -> list[dict[str, Any]]:
     """
     Given rows for a single plugin, sorted by month, attach future-looking labels.
@@ -114,8 +160,15 @@ def _build_labels_for_plugin_rows(
       - 1 if any advisory occurs in months i+1 through i+H
       - 0 if the full future window exists and none occur
       - None if the full future window does not exist (right-censored)
+
+    Labels are positional, so by default the rows are validated to be a dense
+    run of consecutive calendar months (see _validate_dense_months).
     """
     rows_sorted = sorted(rows, key=lambda r: _parse_month_key(_get_month_value(r)))
+
+    if require_dense_months and rows_sorted:
+        plugin_id = str(rows_sorted[0].get("plugin_id", "<unknown>"))
+        _validate_dense_months(plugin_id, rows_sorted)
 
     output: list[dict[str, Any]] = []
 
@@ -159,9 +212,16 @@ def build_monthly_labels(
     | Path
     | None = "data/processed/features/plugins.monthly.labeled.summary.json",
     horizons: tuple[int, ...] = (1, 3, 6, 12),
+    require_dense_months: bool = True,
 ) -> list[dict[str, Any]]:
     """
     Build future advisory labels for each plugin-month row.
+
+    By default each plugin's rows must form a dense run of consecutive
+    calendar months (one row per month, no gaps); a ValueError is raised
+    otherwise, because positional horizon labels would silently cover the
+    wrong calendar window. Pass require_dense_months=False only if you have
+    intentionally sparse input and accept that risk.
 
     Returns the labeled rows.
     """
@@ -178,6 +238,7 @@ def build_monthly_labels(
             _build_labels_for_plugin_rows(
                 rows_by_plugin[plugin_id],
                 horizons=horizons,
+                require_dense_months=require_dense_months,
             )
         )
 
