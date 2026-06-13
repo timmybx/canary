@@ -65,9 +65,11 @@ typeCheckingMode = "basic"
 reportMissingTypeStubs = "none"
 
 [tool.mutmut]
-# Scope mutation to the highest-value packages: scoring logic and data collectors.
-# Expanding to canary/features or canary/train is easy -- just add more paths.
+# Mutate only the scoring package — the core logic that the project's academic
+# claims rest on.  This keeps the weekly run well within the 6-hour CI limit.
+# To expand coverage: add more patterns to only_mutate (must end in .py or *).
 source_paths = ["canary/scoring", "canary/collectors"]
+only_mutate = ["canary/scoring/baseline.py", "canary/scoring/ml.py"]
 # also_copy: mutmut runs pytest inside mutants/, so the full canary package must
 # be present there for any test that imports outside the mutation scope to work.
 # mutmut writes the mutated source_paths files last, so scoring/ and collectors/
