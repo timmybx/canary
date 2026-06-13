@@ -38,12 +38,6 @@ jobs:
           python -m pip install --require-hashes -r requirements.txt
           python -m pip install --require-hashes -r requirements-dev.txt
 
-      # mutmut is installed outside the pinned lockfile because it is
-      # quality-monitoring tooling only (not shipped, not a test dep).
-      # Pin the version explicitly so the run is reproducible.
-      - name: Install mutmut
-        run: pip install "mutmut==3.6.0"
-
       # --no-cov: coverage overhead would make each mutant test run ~10× slower,
       #           and --cov-fail-under in addopts would produce false "killed"
       #           results when a mutant drops coverage below the floor.
@@ -64,7 +58,7 @@ jobs:
 
       - name: Upload mutation report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mutation-report-${{ github.run_number }}
           path: mutants/

@@ -10,3 +10,4 @@ pip-tools>=7.4.1
 pyright>=1.1.410
 pre-commit
 atheris>=2.3.0
+mutmut==3.6.0
