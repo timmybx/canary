@@ -15,7 +15,9 @@ from canary.scoring.ml import (
     MLScorer,
     MLScoreResult,
     _extract_drivers,
+    _is_tree_model,
     _risk_category,
+    _unwrap_pipeline,
     _window_features,
     load_ml_scorer,
     score_plugin_ml,
@@ -571,3 +573,81 @@ def test_score_plugin_ml_uses_top_drivers_param():
         score_plugin_ml("p", scorer=scorer, top_drivers=5)
     _, kwargs = mock_extract.call_args
     assert kwargs.get("top_n") == 5 or mock_extract.call_args[0][3] == 5
+
+
+# ---------------------------------------------------------------------------
+# _is_tree_model
+# ---------------------------------------------------------------------------
+
+
+class TestIsTreeModel:
+    """Direct unit tests for _is_tree_model — ensures class-name matching is correct.
+
+    _is_tree_model uses type(clf).__name__, so we create real instances of
+    dynamically-typed classes rather than trying to override MagicMock.__class__.
+    """
+
+    @staticmethod
+    def _clf(name: str) -> object:
+        """Return an instance of an anonymous class whose __name__ is *name*."""
+        return type(name, (), {})()
+
+    def test_xgb_classifier_is_tree(self) -> None:
+        assert _is_tree_model(self._clf("XGBClassifier")) is True
+
+    def test_lgbm_classifier_is_tree(self) -> None:
+        assert _is_tree_model(self._clf("LGBMClassifier")) is True
+
+    def test_lgb_model_is_tree(self) -> None:
+        assert _is_tree_model(self._clf("LGBModel")) is True
+
+    def test_random_forest_is_tree(self) -> None:
+        assert _is_tree_model(self._clf("RandomForestClassifier")) is True
+
+    def test_gradient_boosting_is_tree(self) -> None:
+        assert _is_tree_model(self._clf("GradientBoostingClassifier")) is True
+
+    def test_decision_tree_is_tree(self) -> None:
+        assert _is_tree_model(self._clf("DecisionTreeClassifier")) is True
+
+    def test_logistic_regression_is_not_tree(self) -> None:
+        assert _is_tree_model(self._clf("LogisticRegression")) is False
+
+    def test_svc_is_not_tree(self) -> None:
+        assert _is_tree_model(self._clf("SVC")) is False
+
+    def test_unknown_model_is_not_tree(self) -> None:
+        assert _is_tree_model(self._clf("MyCustomModel")) is False
+
+
+# ---------------------------------------------------------------------------
+# _unwrap_pipeline
+# ---------------------------------------------------------------------------
+
+
+class TestUnwrapPipeline:
+    """Direct tests for _unwrap_pipeline to ensure it correctly extracts steps."""
+
+    def test_named_steps_model_key(self) -> None:
+        imputer = MagicMock()
+        model = MagicMock()
+        pipeline = MagicMock()
+        pipeline.named_steps = {"impute": imputer, "model": model}
+        imp_out, clf_out = _unwrap_pipeline(pipeline)
+        assert imp_out is imputer
+        assert clf_out is model
+
+    def test_named_steps_fallback_last_step(self) -> None:
+        """When there is no 'model' key, falls back to the last named step."""
+        step_a = MagicMock()
+        step_b = MagicMock()
+        pipeline = MagicMock()
+        pipeline.named_steps = {"a": step_a, "b": step_b}
+        imp_out, clf_out = _unwrap_pipeline(pipeline)
+        assert clf_out is step_b
+
+    def test_non_pipeline_returns_itself(self) -> None:
+        clf = MagicMock(spec=[])  # no named_steps attribute — passes through as-is
+        imp_out, clf_out = _unwrap_pipeline(clf)
+        assert imp_out is None
+        assert clf_out is clf

@@ -15,6 +15,7 @@ import pytest
 
 import canary.scoring.baseline as _baseline_mod
 from canary.scoring.baseline import (  # type: ignore[attr-defined]
+    _CAP_ADVISORY_HISTORY,
     _CAP_GOVERNANCE,
     _CAP_STALENESS,
     ScoreResult,
@@ -247,6 +248,23 @@ def test_cvss_base_score_to_label_invalid():
     assert _cvss_base_score_to_label("not-a-number") is None  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    "score,expected",
+    [
+        # Exact lower edges of each severity band
+        (3.9, "Low"),
+        (4.0, "Medium"),
+        (6.9, "Medium"),
+        (7.0, "High"),
+        (8.9, "High"),
+        (9.0, "Critical"),
+    ],
+)
+def test_cvss_base_score_to_label_exact_boundaries(score: float, expected: str) -> None:
+    """Pin the four boundary constants so off-by-one mutations are caught."""
+    assert _cvss_base_score_to_label(score) == expected
+
+
 # ---------------------------------------------------------------------------
 # _healthscore_to_risk_points
 # ---------------------------------------------------------------------------
@@ -276,6 +294,24 @@ def test_healthscore_to_risk_points_clamps_high():
 
 def test_healthscore_to_risk_points_clamps_low():
     assert _healthscore_to_risk_points(-10) == 20
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        # int(round((100 - v) / 5))  — probes both the divisor (5) and subtrahend (100)
+        (95, 1),
+        (90, 2),
+        (75, 5),
+        (60, 8),
+        (40, 12),
+        (20, 16),
+        (5, 19),
+    ],
+)
+def test_healthscore_to_risk_points_intermediate_values(value: int, expected: int) -> None:
+    """Pin the formula constants so mutations to 5.0 or 100.0 are caught."""
+    assert _healthscore_to_risk_points(value) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -983,6 +1019,30 @@ class TestStalenessPoints:
     def test_exactly_181_days_is_stale(self) -> None:
         assert _staleness_points(181, None)[0] == 3
 
+    @pytest.mark.parametrize(
+        "days,expected_pts",
+        [
+            # Exact threshold value — still in the LOWER bracket (threshold is strict >)
+            # dsc > 365 is False at 365, but dsc > 180 is True, so pts = 3
+            (365, 3),
+            # dsc > 730 is False at 730, but dsc > 365 is True, so pts = 6
+            (730, 6),
+            # dsc > 1095 is False at 1095, but dsc > 730 is True, so pts = 9
+            (1095, 9),
+            # dsc > 1825 is False at 1825, but dsc > 1095 is True, so pts = 12
+            (1825, 12),
+            # One day past each threshold — crosses into the HIGHER bracket
+            (366, 6),
+            (731, 9),
+            (1096, 12),
+            (1826, 16),
+        ],
+    )
+    def test_staleness_exact_bracket_boundaries(self, days: int, expected_pts: int) -> None:
+        """Pin every staleness threshold so mutations to the constants are caught."""
+        pts, _ = _staleness_points(days, None)
+        assert pts == expected_pts
+
 
 # ---------------------------------------------------------------------------
 # _governance_points
@@ -1099,3 +1159,129 @@ class TestGovernancePoints:
         pts, reasons = _governance_points(swh)
         assert pts == _CAP_GOVERNANCE
         assert len(reasons) == 4
+
+
+# ---------------------------------------------------------------------------
+# score_plugin_baseline — advisory formula component tests
+# ---------------------------------------------------------------------------
+# The advisory scoring formula inside score_plugin_baseline is:
+#   history_pts = min(15, advisory_count * 2)
+#   recency_pts = min(15, within_90 * 10 + max(0, within_365 - within_90) * 5)
+#   advisory_history_pts = min(_CAP_ADVISORY_HISTORY, history_pts + recency_pts)
+#
+# These tests place advisories at controlled dates to pin the exact multipliers
+# (2, 10, 5) so that mutations to those constants are detected.
+# ---------------------------------------------------------------------------
+
+
+def _days_ago(n: int) -> str:
+    """Return an ISO date string for n days before today."""
+    from datetime import timedelta
+
+    return (datetime.now(UTC).date() - timedelta(days=n)).isoformat()
+
+
+class TestAdvisoryFormulaComponents:
+    """Pin the exact history_pts and recency_pts multipliers in score_plugin_baseline."""
+
+    def _setup(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, advisories: list[dict]
+    ) -> None:
+        import canary.scoring.baseline as baseline
+
+        monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+        monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+        _write_jsonl(
+            tmp_path / "advisories" / "test-plugin.advisories.sample.jsonl",
+            advisories,
+        )
+
+    def test_history_pts_two_per_advisory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """3 old advisories → history_pts = 3*2 = 6, recency_pts = 0 → score includes exactly 6."""
+        self._setup(
+            tmp_path,
+            monkeypatch,
+            [{"advisory_id": f"A{i}", "published_date": _days_ago(400 + i)} for i in range(3)],
+        )
+        result = score_plugin_baseline("test-plugin")
+        # history_pts = 6, recency_pts = 0  →  advisory component = 6
+        # Verify by checking that the score is at least 6 and the reasons mention the count
+        assert result.score >= 6
+        assert any("3 prior advisory" in r for r in result.reasons)
+
+    def test_history_pts_caps_at_15(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """8 old advisories → history_pts = min(15, 16) = 15 (cap applies)."""
+        self._setup(
+            tmp_path,
+            monkeypatch,
+            [{"advisory_id": f"A{i}", "published_date": _days_ago(400 + i)} for i in range(8)],
+        )
+        result = score_plugin_baseline("test-plugin")
+        assert any("8 prior advisory" in r for r in result.reasons)
+        # history_pts is capped at 15 — the component total in the reason line must show <= 30
+        reason = next(r for r in result.reasons if "prior advisory" in r)
+        assert "history +15" in reason
+
+    def test_recency_pts_within_90d(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """2 advisories within 90 days → recency_pts = 2*10 = 20 (capped at 15)."""
+        self._setup(
+            tmp_path,
+            monkeypatch,
+            [
+                {"advisory_id": "A1", "published_date": _days_ago(10)},
+                {"advisory_id": "A2", "published_date": _days_ago(30)},
+            ],
+        )
+        result = score_plugin_baseline("test-plugin")
+        reason = next(r for r in result.reasons if "prior advisory" in r)
+        # 2 within 90d → within_90*10 = 20, capped at 15
+        assert "recency +15" in reason
+
+    def test_recency_pts_within_365d_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """1 advisory between 90-365 days ago → recency = (0*10 + 1*5) = 5."""
+        self._setup(
+            tmp_path,
+            monkeypatch,
+            [{"advisory_id": "A1", "published_date": _days_ago(180)}],
+        )
+        result = score_plugin_baseline("test-plugin")
+        reason = next(r for r in result.reasons if "prior advisory" in r)
+        # history=2, recency=5 → total=7
+        assert "history +2" in reason
+        assert "recency +5" in reason
+
+    def test_mixed_90d_and_365d_recency(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """1 within 90d, 2 between 90-365d → recency = 1*10 + 2*5 = 20, capped at 15."""
+        self._setup(
+            tmp_path,
+            monkeypatch,
+            [
+                {"advisory_id": "A1", "published_date": _days_ago(30)},
+                {"advisory_id": "A2", "published_date": _days_ago(180)},
+                {"advisory_id": "A3", "published_date": _days_ago(200)},
+            ],
+        )
+        result = score_plugin_baseline("test-plugin")
+        reason = next(r for r in result.reasons if "prior advisory" in r)
+        assert "recency +15" in reason  # capped: 10 + 10 = 20 → min(15, 20) = 15
+
+    def test_advisory_component_total_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Component total is capped at _CAP_ADVISORY_HISTORY = 30."""
+        self._setup(
+            tmp_path,
+            monkeypatch,
+            [{"advisory_id": f"A{i}", "published_date": _days_ago(10 + i)} for i in range(10)],
+        )
+        result = score_plugin_baseline("test-plugin")
+        reason = next(r for r in result.reasons if "prior advisory" in r)
+        # history=15 (cap), recency=15 (cap) → total=30 (= _CAP_ADVISORY_HISTORY)
+        assert f"(cap {_CAP_ADVISORY_HISTORY})" in reason
+        assert result.score <= 100

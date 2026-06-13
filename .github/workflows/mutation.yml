@@ -50,11 +50,11 @@ jobs:
 
       - name: Print summary
         if: always()
-        run: mutmut results || true
+        run: mutmut results
 
       - name: Export CI stats (JSON)
         if: always()
-        run: mutmut export-cicd-stats || true
+        run: mutmut export-cicd-stats
 
       - name: Upload mutation report
         if: always()
