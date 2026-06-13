@@ -186,3 +186,14 @@ def test_collect_software_heritage_athena_defaults_database(monkeypatch):
     collect_software_heritage(plugin_id="my-plugin", backend="athena")
 
     assert called_with[0]["database"] == "swh_jenkins"
+
+
+def test_collect_software_heritage_unsupported_backend_explicit_out_dir():
+    """Passing out_dir bypasses default_out_dir_for_backend so the raise at the
+    bottom of collect_software_heritage is reached for an unknown backend."""
+    with pytest.raises(ValueError, match="Unsupported software heritage backend"):
+        collect_software_heritage(
+            plugin_id="my-plugin",
+            backend="s3",
+            out_dir="/tmp/swh-out",
+        )

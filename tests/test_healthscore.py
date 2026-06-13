@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from canary.collectors.healthscore import (
     _extract_plugin_id,
     _iter_score_records,
     collect_health_scores,
+    fetch_health_scores,
 )
 
 # ---------------------------------------------------------------------------
@@ -218,3 +220,60 @@ def test_collect_health_scores_skips_records_without_plugin_id(tmp_path: Path, m
     result = collect_health_scores(data_dir=str(tmp_path), overwrite=True)
     assert result["processed"] == 0
     assert result["written"] == 0
+
+
+# ---------------------------------------------------------------------------
+# fetch_health_scores
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_health_scores_returns_json_body() -> None:
+    fake_response = MagicMock()
+    fake_response.json.return_value = [{"plugin_id": "git", "value": 85}]
+
+    with patch("canary.collectors.healthscore.requests.get", return_value=fake_response):
+        result = fetch_health_scores(timeout_s=5.0)
+
+    fake_response.raise_for_status.assert_called_once()
+    assert result == [{"plugin_id": "git", "value": 85}]
+
+
+# ---------------------------------------------------------------------------
+# collect_health_scores – additional branches
+# ---------------------------------------------------------------------------
+
+
+def test_collect_health_scores_skips_unsafe_plugin_id(tmp_path: Path, monkeypatch) -> None:
+    """A plugin_id with path-traversal characters causes safe_plugin_id to return
+    None; the record should be skipped (line 122 branch)."""
+    payload = [{"plugin_id": "../traversal", "value": 50}]
+
+    monkeypatch.setattr(
+        "canary.collectors.healthscore.fetch_health_scores",
+        lambda timeout_s=30.0: payload,
+    )
+
+    result = collect_health_scores(data_dir=str(tmp_path), overwrite=True)
+    # canonicalize_plugin_id leaves "../traversal" as-is (no alias); safe_plugin_id
+    # then rejects it, so the record is skipped before writing.
+    assert result["written"] == 0
+
+
+def test_collect_health_scores_write_error_is_recorded(tmp_path: Path, monkeypatch) -> None:
+    """An exception during JSON write is caught and stored in errors dict."""
+    payload = [{"plugin_id": "good-plugin", "value": 80}]
+
+    monkeypatch.setattr(
+        "canary.collectors.healthscore.fetch_health_scores",
+        lambda timeout_s=30.0: payload,
+    )
+    # First call writes scores.json (must succeed); second call is the per-plugin
+    # write that we want to fail so the errors dict branch is exercised.
+    monkeypatch.setattr(
+        "canary.collectors.healthscore._write_json",
+        MagicMock(side_effect=[None, OSError("disk full")]),
+    )
+
+    result = collect_health_scores(data_dir=str(tmp_path), overwrite=True)
+    assert result["written"] == 0
+    assert "good-plugin" in result["errors"]

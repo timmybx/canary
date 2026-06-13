@@ -350,3 +350,45 @@ def test_fetch_json_succeeds_after_transient_failure(monkeypatch):
     result = _fetch_json(_VALID_URL)
     assert result == payload
     assert attempts[0] == 3
+
+
+def test_collect_plugins_registry_real_follows_relative_next_link(monkeypatch):
+    """A 'next' value starting with '/' is combined with the base URL (lines 197-198)."""
+    page1 = {
+        "plugins": [{"name": "plugin-a"}],
+        "next": "/api/plugins?limit=1&offset=1",
+    }
+    page2 = {"plugins": [{"name": "plugin-b"}]}
+
+    calls: list[str] = []
+
+    def fake_fetch(url: str, *, timeout_s: float = 30.0):
+        calls.append(url)
+        if len(calls) == 1:
+            return page1
+        return page2
+
+    monkeypatch.setattr("canary.collectors.plugins_registry._fetch_json", fake_fetch)
+
+    # Use the default page_size (500) so that page2's single-plugin response
+    # triggers the "short page → done" heuristic instead of looping again.
+    registry, _ = collect_plugins_registry_real()
+    assert [r["plugin_id"] for r in registry] == ["plugin-a", "plugin-b"]
+    # Second call should be to the reconstructed absolute URL
+    assert calls[1].startswith("https://") and "/api/plugins" in calls[1]
+
+
+def test_collect_plugins_registry_real_skips_plugin_with_no_valid_id(monkeypatch):
+    """A dict entry with no extractable plugin_id causes _plugin_to_registry_record
+    to return None; the record is silently skipped (line 216 branch)."""
+    page = {
+        "plugins": [
+            {"title": "No ID Here"},  # _plugin_to_registry_record → None
+            {"name": "valid-plugin"},  # normal record
+        ]
+    }
+    monkeypatch.setattr("canary.collectors.plugins_registry._fetch_json", _make_fake_fetch([page]))
+
+    registry, _ = collect_plugins_registry_real(page_size=100)
+    assert len(registry) == 1
+    assert registry[0]["plugin_id"] == "valid-plugin"

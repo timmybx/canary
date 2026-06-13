@@ -426,3 +426,53 @@ def test_snapshot_file_with_no_previous_names_adds_no_aliases(tmp_path: Path):
     (plugins_dir / "clean-plugin.snapshot.json").write_text(json.dumps(snap), encoding="utf-8")
     alias_map = load_plugin_alias_map(data_dir=tmp_path)
     assert "clean-plugin" not in alias_map
+
+
+# ---------------------------------------------------------------------------
+# load_plugin_alias_map — registry JSONL edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_load_plugin_alias_map_skips_non_dict_jsonl_lines(tmp_path: Path):
+    """A JSONL line that parses as a non-dict (e.g. a bare number) is skipped."""
+    registry_dir = tmp_path / "registry"
+    registry_dir.mkdir(parents=True)
+    registry_path = registry_dir / "plugins.jsonl"
+    # Mix of a valid record, a bare number, and another valid record
+    registry_path.write_text(
+        json.dumps({"plugin_id": "good-plugin", "aliases": ["good-alias"]})
+        + "\n"
+        + "42\n"
+        + json.dumps({"plugin_id": "other-plugin", "aliases": ["other-alias"]})
+        + "\n",
+        encoding="utf-8",
+    )
+    result = load_plugin_alias_map(registry_path=registry_path, data_dir=tmp_path)
+    assert result.get("good-alias") == "good-plugin"
+    assert result.get("other-alias") == "other-plugin"
+
+
+def test_load_plugin_alias_map_registry_oserror_is_silently_ignored(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """If opening the registry file raises OSError, it's swallowed and an empty
+    map is returned (lines 119-120 branch)."""
+    registry_dir = tmp_path / "registry"
+    registry_dir.mkdir(parents=True)
+    registry_path = registry_dir / "plugins.jsonl"
+    registry_path.write_text(
+        json.dumps({"plugin_id": "my-plugin", "aliases": ["old-name"]}) + "\n",
+        encoding="utf-8",
+    )
+
+    original_open = Path.open
+
+    def bad_open(self: Path, *args, **kwargs):
+        if self == registry_path:
+            raise OSError("permission denied")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", bad_open)
+    # Should not raise; OSError is swallowed
+    result = load_plugin_alias_map(registry_path=registry_path, data_dir=tmp_path)
+    assert isinstance(result, dict)

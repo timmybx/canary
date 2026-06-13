@@ -555,3 +555,32 @@ def test_collect_real_overwrite_true_refetches_cached_files(tmp_path: Path, monk
         overwrite=True,
     )
     assert len(http_calls) >= 3, "Should refetch all endpoints when overwrite=True"
+
+
+# ---------------------------------------------------------------------------
+# _nonempty — OSError branch
+# ---------------------------------------------------------------------------
+
+
+def test_nonempty_returns_false_on_oserror(tmp_path: Path, monkeypatch) -> None:
+    p = tmp_path / "file.txt"
+    p.write_text("data", encoding="utf-8")
+    original_stat = Path.stat
+
+    def bad_stat(self: Path, *, follow_symlinks: bool = True):
+        if self == p:
+            raise OSError("permission denied")
+        return original_stat(self, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "stat", bad_stat)
+    assert _nonempty(p) is False
+
+
+# ---------------------------------------------------------------------------
+# _load_plugin_snapshot — invalid plugin_id
+# ---------------------------------------------------------------------------
+
+
+def test_load_plugin_snapshot_invalid_plugin_id_raises(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Invalid plugin_id"):
+        _load_plugin_snapshot("../traversal", data_dir=str(tmp_path))
