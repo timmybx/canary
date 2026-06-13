@@ -13,12 +13,15 @@ from pathlib import Path
 
 import pytest
 
-from canary.scoring.baseline import (
+from canary.scoring.baseline import (  # type: ignore[attr-defined]
+    _CAP_GOVERNANCE,
+    _CAP_STALENESS,
     ScoreResult,
     _advisory_record_max_cvss,
     _cvss_base_score_to_label,
     _dependency_points,
     _extract_dependency_plugin_ids,
+    _governance_points,
     _healthscore_to_risk_points,
     _load_advisories_for_plugin,
     _load_healthscore_record,
@@ -29,6 +32,7 @@ from canary.scoring.baseline import (
     _safe_join_under,
     _safe_plugin_filename,
     _safe_plugin_id,
+    _staleness_points,
     score_plugin_baseline,
 )
 
@@ -845,3 +849,247 @@ def test_score_plugin_baseline_with_five_to_nine_deps(tmp_path: Path, monkeypatc
 
     d = score_plugin_baseline("medium-plugin").to_dict()
     assert d["features"]["dependency_count"] == 7
+
+
+# ---------------------------------------------------------------------------
+# _advisory_record_max_cvss — additional edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_advisory_record_max_cvss_multiple_vulnerabilities_returns_max():
+    rec = {
+        "vulnerabilities": [
+            {"cvss": {"base_score": 4.3}},
+            {"cvss": {"base_score": 9.1}},
+            {"cvss": {"base_score": 6.5}},
+        ]
+    }
+    assert _advisory_record_max_cvss(rec) == 9.1
+
+
+def test_advisory_record_max_cvss_string_score_is_parsed():
+    rec = {"vulnerabilities": [{"cvss": {"base_score": "8.2"}}]}
+    assert _advisory_record_max_cvss(rec) == 8.2
+
+
+def test_advisory_record_max_cvss_invalid_string_skipped_valid_kept():
+    rec = {
+        "vulnerabilities": [
+            {"cvss": {"base_score": "not-a-number"}},
+            {"cvss": {"base_score": 5.0}},
+        ]
+    }
+    assert _advisory_record_max_cvss(rec) == 5.0
+
+
+def test_advisory_record_max_cvss_non_dict_vuln_entry_skipped():
+    rec = {"vulnerabilities": ["not-a-dict", {"cvss": {"base_score": 5.5}}]}
+    assert _advisory_record_max_cvss(rec) == 5.5
+
+
+def test_advisory_record_max_cvss_missing_cvss_key_skipped():
+    rec = {
+        "vulnerabilities": [
+            {"severity": "high"},
+            {"cvss": {"base_score": 7.0}},
+        ]
+    }
+    assert _advisory_record_max_cvss(rec) == 7.0
+
+
+def test_advisory_record_max_cvss_none_vulnerabilities_key():
+    assert _advisory_record_max_cvss({"vulnerabilities": None}) is None
+
+
+def test_advisory_record_max_cvss_zero_is_valid():
+    assert _advisory_record_max_cvss({"vulnerabilities": [{"cvss": {"base_score": 0.0}}]}) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _staleness_points
+# ---------------------------------------------------------------------------
+
+
+class TestStalenessPoints:
+    """Pure-function tests for _staleness_points — no I/O, no mocks needed."""
+
+    def test_no_data_returns_zero(self) -> None:
+        pts, reasons = _staleness_points(None, None)
+        assert pts == 0
+        assert reasons == []
+
+    def test_recent_commit_returns_zero_points(self) -> None:
+        pts, reasons = _staleness_points(30, None)
+        assert pts == 0
+        assert any("recent" in r.lower() or "active" in r.lower() for r in reasons)
+
+    def test_six_to_twelve_months_stale(self) -> None:
+        pts, reasons = _staleness_points(200, None)
+        assert pts == 3
+        assert any("staleness" in r.lower() for r in reasons)
+
+    def test_one_to_two_years_stale(self) -> None:
+        pts, _ = _staleness_points(400, None)
+        assert pts == 6
+
+    def test_two_to_three_years_stale(self) -> None:
+        pts, _ = _staleness_points(800, None)
+        assert pts == 9
+
+    def test_three_to_five_years_stale(self) -> None:
+        pts, _ = _staleness_points(1200, None)
+        assert pts == 12
+
+    def test_over_five_years_stale(self) -> None:
+        pts, _ = _staleness_points(2000, None)
+        assert pts == 16
+
+    def test_cap_is_respected(self) -> None:
+        pts, _ = _staleness_points(9999, 9999)
+        assert pts <= _CAP_STALENESS
+
+    def test_release_staleness_only_when_no_commits(self) -> None:
+        pts, reasons = _staleness_points(None, 800)
+        assert pts > 0
+        assert any("release" in r.lower() for r in reasons)
+
+    def test_release_staleness_not_double_counted(self) -> None:
+        pts_commit_only, _ = _staleness_points(2000, None)
+        pts_both, _ = _staleness_points(2000, 800)
+        assert pts_both <= _CAP_STALENESS
+        assert pts_both >= pts_commit_only
+
+    def test_recent_release_adds_reason(self) -> None:
+        pts, reasons = _staleness_points(None, 90)
+        assert any("recent" in r.lower() or "active" in r.lower() for r in reasons)
+
+    def test_invalid_commit_value_handled(self) -> None:
+        pts, _ = _staleness_points("not-a-number", None)  # type: ignore[arg-type]
+        assert pts == 0
+
+    def test_float_input_accepted(self) -> None:
+        pts, _ = _staleness_points(400.7, None)
+        assert pts == 6
+
+    def test_exactly_180_days_is_not_stale(self) -> None:
+        assert _staleness_points(180, None)[0] == 0
+
+    def test_exactly_181_days_is_stale(self) -> None:
+        assert _staleness_points(181, None)[0] == 3
+
+
+# ---------------------------------------------------------------------------
+# _governance_points
+# ---------------------------------------------------------------------------
+
+
+class TestGovernancePoints:
+    """Pure-function tests for _governance_points."""
+
+    def test_not_present_returns_zero(self) -> None:
+        pts, reasons = _governance_points({})
+        assert pts == 0
+        assert reasons == []
+
+    def test_not_present_flag_returns_zero(self) -> None:
+        pts, reasons = _governance_points({"swh_present": False})
+        assert pts == 0
+        assert reasons == []
+
+    def test_all_governance_artifacts_present_low_score(self) -> None:
+        swh = {
+            "swh_present": True,
+            "swh_has_security_md": True,
+            "swh_has_dependabot": True,
+            "swh_has_tests_directory": True,
+            "swh_has_changelog": True,
+        }
+        pts, reasons = _governance_points(swh)
+        assert pts == 0
+        assert reasons == []
+
+    def test_missing_security_md_adds_points(self) -> None:
+        swh = {
+            "swh_present": True,
+            "swh_has_security_md": False,
+            "swh_has_dependabot": True,
+            "swh_has_tests_directory": True,
+            "swh_has_changelog": True,
+        }
+        pts, reasons = _governance_points(swh)
+        assert pts == 3
+        assert any("SECURITY.md" in r for r in reasons)
+
+    def test_missing_automation_adds_points(self) -> None:
+        swh = {
+            "swh_present": True,
+            "swh_has_security_md": True,
+            "swh_has_dependabot": False,
+            "swh_has_github_actions": False,
+            "swh_has_tests_directory": True,
+            "swh_has_changelog": True,
+        }
+        pts, reasons = _governance_points(swh)
+        assert pts == 3
+        assert any("Dependabot" in r for r in reasons)
+
+    def test_github_actions_satisfies_automation(self) -> None:
+        swh = {
+            "swh_present": True,
+            "swh_has_security_md": True,
+            "swh_has_dependabot": False,
+            "swh_has_github_actions": True,
+            "swh_has_tests_directory": True,
+            "swh_has_changelog": True,
+        }
+        pts, _ = _governance_points(swh)
+        assert pts == 0
+
+    def test_missing_tests_directory_adds_points(self) -> None:
+        swh = {
+            "swh_present": True,
+            "swh_has_security_md": True,
+            "swh_has_dependabot": True,
+            "swh_has_tests_directory": False,
+            "swh_has_changelog": True,
+        }
+        pts, reasons = _governance_points(swh)
+        assert pts == 2
+        assert any("test" in r.lower() for r in reasons)
+
+    def test_missing_changelog_adds_points(self) -> None:
+        swh = {
+            "swh_present": True,
+            "swh_has_security_md": True,
+            "swh_has_dependabot": True,
+            "swh_has_tests_directory": True,
+            "swh_has_changelog": False,
+        }
+        pts, reasons = _governance_points(swh)
+        assert pts == 2
+        assert any("changelog" in r.lower() for r in reasons)
+
+    def test_all_missing_respects_cap(self) -> None:
+        swh = {
+            "swh_present": True,
+            "swh_has_security_md": False,
+            "swh_has_dependabot": False,
+            "swh_has_github_actions": False,
+            "swh_has_tests_directory": False,
+            "swh_has_changelog": False,
+        }
+        pts, _ = _governance_points(swh)
+        assert pts <= _CAP_GOVERNANCE
+
+    def test_all_missing_accumulates_all_penalties(self) -> None:
+        swh = {
+            "swh_present": True,
+            "swh_has_security_md": False,
+            "swh_has_dependabot": False,
+            "swh_has_github_actions": False,
+            "swh_has_tests_directory": False,
+            "swh_has_changelog": False,
+        }
+        pts, reasons = _governance_points(swh)
+        assert pts == _CAP_GOVERNANCE
+        assert len(reasons) == 4

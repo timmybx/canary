@@ -145,3 +145,27 @@ def test_main_can_allow_network_failure(monkeypatch):
     monkeypatch.setattr(pip_audit_wrapper.importlib, "import_module", fake_import_module)
 
     assert pip_audit_wrapper.main() == 0
+
+
+def test_load_ignored_vulns_empty_file_returns_empty(tmp_path: Path) -> None:
+    f = tmp_path / "ignore.txt"
+    f.write_text("", encoding="utf-8")
+    assert load_ignored_vulns(f) == []
+
+
+def test_load_ignored_vulns_single_id(tmp_path: Path) -> None:
+    f = tmp_path / "ignore.txt"
+    f.write_text("GHSA-1234-5678-abcd\n", encoding="utf-8")
+    assert load_ignored_vulns(f) == ["GHSA-1234-5678-abcd"]
+
+
+def test_load_ignored_vulns_multiple_ids(tmp_path: Path) -> None:
+    f = tmp_path / "ignore.txt"
+    f.write_text("GHSA-aaaa-bbbb-cccc\nGHSA-dddd-eeee-ffff\n", encoding="utf-8")
+    assert load_ignored_vulns(f) == ["GHSA-aaaa-bbbb-cccc", "GHSA-dddd-eeee-ffff"]
+
+
+def test_load_ignored_vulns_whitespace_only_lines_skipped(tmp_path: Path) -> None:
+    f = tmp_path / "ignore.txt"
+    f.write_text("   \nGHSA-abcd-efgh-ijkl\n   \n", encoding="utf-8")
+    assert load_ignored_vulns(f) == ["GHSA-abcd-efgh-ijkl"]

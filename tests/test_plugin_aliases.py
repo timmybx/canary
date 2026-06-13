@@ -404,3 +404,25 @@ def test_load_plugin_alias_map_snapshot_derives_id_from_filename(tmp_path: Path)
         json.dumps({"aliases": ["snap-filename-alias"]}), encoding="utf-8"
     )
     assert load_plugin_alias_map(data_dir=tmp_path).get("snap-filename-alias") == "derived-plugin"
+
+
+def test_snapshot_file_multiple_previous_names_all_registered(tmp_path: Path):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    snap = {
+        "plugin_id": "my-plugin",
+        "plugin_api": {"previousNames": ["old-plugin-name", "older-plugin-name"]},
+    }
+    (plugins_dir / "my-plugin.snapshot.json").write_text(json.dumps(snap), encoding="utf-8")
+    alias_map = load_plugin_alias_map(data_dir=tmp_path)
+    assert alias_map.get("old-plugin-name") == "my-plugin"
+    assert alias_map.get("older-plugin-name") == "my-plugin"
+
+
+def test_snapshot_file_with_no_previous_names_adds_no_aliases(tmp_path: Path):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    snap = {"plugin_id": "clean-plugin", "plugin_api": {}}
+    (plugins_dir / "clean-plugin.snapshot.json").write_text(json.dumps(snap), encoding="utf-8")
+    alias_map = load_plugin_alias_map(data_dir=tmp_path)
+    assert "clean-plugin" not in alias_map

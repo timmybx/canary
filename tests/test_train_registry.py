@@ -79,3 +79,9 @@ def test_get_model_none_model_raises():
     ):
         with pytest.raises(ValueError, match="not installed"):
             get_model("xgboost")
+
+
+def test_registry_values_are_not_strings():
+    for name, model in MODEL_REGISTRY.items():
+        if model is not None:
+            assert not isinstance(model, str), f"{name} stored as string"
