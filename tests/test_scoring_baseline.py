@@ -1,0 +1,847 @@
+"""
+Behavior tests for canary.scoring.baseline.
+
+Consolidates test_scoring.py + test_scoring_baseline_helpers.py
++ test_scoring_baseline_extra.py.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, date, datetime
+from pathlib import Path
+
+import pytest
+
+from canary.scoring.baseline import (
+    ScoreResult,
+    _advisory_record_max_cvss,
+    _cvss_base_score_to_label,
+    _dependency_points,
+    _extract_dependency_plugin_ids,
+    _healthscore_to_risk_points,
+    _load_advisories_for_plugin,
+    _load_healthscore_record,
+    _load_plugin_snapshot,
+    _parse_date,
+    _parse_iso_datetime,
+    _safe_int,
+    _safe_join_under,
+    _safe_plugin_filename,
+    _safe_plugin_id,
+    score_plugin_baseline,
+)
+
+# ---------------------------------------------------------------------------
+# Test helpers
+# ---------------------------------------------------------------------------
+
+
+def _write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _write_jsonl(path: Path, records: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for r in records:
+            f.write(json.dumps(r) + "\n")
+
+
+def _today_str() -> str:
+    return datetime.now(UTC).date().isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Live-data integration tests (no monkeypatch — use real data dir)
+# ---------------------------------------------------------------------------
+
+
+def test_score_range_and_shape():
+    r = score_plugin_baseline("workflow-cps")
+    d = r.to_dict()
+
+    assert d["plugin"] == "workflow-cps"
+    assert 0 <= d["score"] <= 100
+    assert isinstance(d["reasons"], list)
+    assert len(d["reasons"]) >= 1
+    if "features" in d:
+        assert isinstance(d["features"], dict)
+
+
+def test_score_is_deterministic():
+    d1 = score_plugin_baseline("workflow-cps").to_dict()
+    d2 = score_plugin_baseline("workflow-cps").to_dict()
+    assert d1 == d2
+
+
+def test_score_security_keyword():
+    d = score_plugin_baseline("credentials").to_dict()
+    assert d["score"] >= 20
+
+
+def test_score_default_baseline_low():
+    d = score_plugin_baseline("totally-random-plugin-name").to_dict()
+    assert 0 <= d["score"] <= 10
+
+
+# ---------------------------------------------------------------------------
+# _safe_plugin_id
+# ---------------------------------------------------------------------------
+
+
+def test_safe_plugin_id_valid():
+    assert _safe_plugin_id("cucumber-reports") == "cucumber-reports"
+    assert _safe_plugin_id("workflow_cps") == "workflow_cps"
+    assert _safe_plugin_id("plugin1.test") == "plugin1.test"
+
+
+def test_safe_plugin_id_strips_whitespace():
+    assert _safe_plugin_id("  my-plugin  ") == "my-plugin"
+
+
+def test_safe_plugin_id_empty_returns_none():
+    assert _safe_plugin_id("") is None
+    assert _safe_plugin_id("   ") is None
+
+
+def test_safe_plugin_id_invalid_chars_returns_none():
+    assert _safe_plugin_id("../etc/passwd") is None
+    assert _safe_plugin_id("plugin/subdir") is None
+    assert _safe_plugin_id("plugin name") is None
+
+
+def test_safe_plugin_id_starts_with_valid_char():
+    assert _safe_plugin_id("a") == "a"
+    assert _safe_plugin_id("1plugin") == "1plugin"
+
+
+# ---------------------------------------------------------------------------
+# _safe_plugin_filename
+# ---------------------------------------------------------------------------
+
+
+def test_safe_plugin_filename_valid():
+    assert _safe_plugin_filename("my-plugin", ".snapshot.json") == "my-plugin.snapshot.json"
+
+
+def test_safe_plugin_filename_invalid_id_returns_none():
+    assert _safe_plugin_filename("../escape", ".json") is None
+
+
+# ---------------------------------------------------------------------------
+# _safe_join_under
+# ---------------------------------------------------------------------------
+
+
+def test_safe_join_under_valid(tmp_path: Path):
+    result = _safe_join_under(tmp_path, "subdir", "file.json")
+    assert result.parent == tmp_path / "subdir"
+
+
+def test_safe_join_under_escape_raises(tmp_path: Path):
+    with pytest.raises(ValueError, match="escapes data directory"):
+        _safe_join_under(tmp_path, "..", "etc", "passwd")
+
+
+# ---------------------------------------------------------------------------
+# _parse_date
+# ---------------------------------------------------------------------------
+
+
+def test_parse_date_iso_format():
+    assert _parse_date("2025-03-15") == date(2025, 3, 15)
+
+
+def test_parse_date_datetime_string():
+    assert _parse_date("2025-03-15T12:00:00Z") == date(2025, 3, 15)
+
+
+def test_parse_date_empty():
+    assert _parse_date("") is None
+
+
+def test_parse_date_invalid():
+    assert _parse_date("not-a-date") is None
+
+
+# ---------------------------------------------------------------------------
+# _parse_iso_datetime
+# ---------------------------------------------------------------------------
+
+
+def test_parse_iso_datetime_valid():
+    dt = _parse_iso_datetime("2025-03-15T12:00:00+00:00")
+    assert dt is not None
+    assert dt.year == 2025
+
+
+def test_parse_iso_datetime_z_suffix():
+    assert _parse_iso_datetime("2025-03-15T12:00:00Z") is not None
+
+
+def test_parse_iso_datetime_empty():
+    assert _parse_iso_datetime("") is None
+
+
+def test_parse_iso_datetime_invalid():
+    assert _parse_iso_datetime("not-a-datetime") is None
+
+
+# ---------------------------------------------------------------------------
+# _safe_int
+# ---------------------------------------------------------------------------
+
+
+def test_safe_int_valid():
+    assert _safe_int(5) == 5
+    assert _safe_int("42") == 42
+
+
+def test_safe_int_default_on_invalid():
+    assert _safe_int("bad", default=0) == 0
+    assert _safe_int(None, default=-1) == -1
+
+
+# ---------------------------------------------------------------------------
+# _cvss_base_score_to_label
+# ---------------------------------------------------------------------------
+
+
+def test_cvss_base_score_to_label_none():
+    assert _cvss_base_score_to_label(None) is None
+
+
+def test_cvss_base_score_to_label_zero():
+    assert _cvss_base_score_to_label(0.0) == "None"
+
+
+def test_cvss_base_score_to_label_low():
+    assert _cvss_base_score_to_label(2.5) == "Low"
+
+
+def test_cvss_base_score_to_label_medium():
+    assert _cvss_base_score_to_label(5.0) == "Medium"
+
+
+def test_cvss_base_score_to_label_high():
+    assert _cvss_base_score_to_label(7.5) == "High"
+
+
+def test_cvss_base_score_to_label_critical():
+    assert _cvss_base_score_to_label(9.5) == "Critical"
+
+
+def test_cvss_base_score_to_label_invalid():
+    assert _cvss_base_score_to_label("not-a-number") is None  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# _healthscore_to_risk_points
+# ---------------------------------------------------------------------------
+
+
+def test_healthscore_to_risk_points_100():
+    assert _healthscore_to_risk_points(100) == 0
+
+
+def test_healthscore_to_risk_points_0():
+    assert _healthscore_to_risk_points(0) == 20
+
+
+def test_healthscore_to_risk_points_50():
+    pts = _healthscore_to_risk_points(50)
+    assert pts is not None
+    assert 0 <= pts <= 20
+
+
+def test_healthscore_to_risk_points_invalid():
+    assert _healthscore_to_risk_points("bad") is None
+
+
+def test_healthscore_to_risk_points_clamps_high():
+    assert _healthscore_to_risk_points(200) == 0
+
+
+def test_healthscore_to_risk_points_clamps_low():
+    assert _healthscore_to_risk_points(-10) == 20
+
+
+# ---------------------------------------------------------------------------
+# _advisory_record_max_cvss
+# ---------------------------------------------------------------------------
+
+
+def test_advisory_record_max_cvss_empty():
+    assert _advisory_record_max_cvss({}) is None
+
+
+def test_advisory_record_max_cvss_from_vulnerabilities():
+    rec = {
+        "vulnerabilities": [
+            {"cvss": {"base_score": 7.5}},
+            {"cvss": {"base_score": 9.1}},
+        ]
+    }
+    assert _advisory_record_max_cvss(rec) == 9.1
+
+
+def test_advisory_record_max_cvss_from_severity_summary():
+    rec = {"severity_summary": {"max_cvss_base_score": 6.4}}
+    assert _advisory_record_max_cvss(rec) == 6.4
+
+
+def test_advisory_record_max_cvss_prefers_vulnerabilities_over_summary():
+    rec = {
+        "vulnerabilities": [{"cvss": {"base_score": 4.0}}],
+        "severity_summary": {"max_cvss_base_score": 9.9},
+    }
+    assert _advisory_record_max_cvss(rec) == 4.0
+
+
+def test_advisory_record_max_cvss_ignores_non_numeric():
+    rec = {"vulnerabilities": [{"cvss": {"base_score": "not-a-number"}}]}
+    assert _advisory_record_max_cvss(rec) is None
+
+
+def test_advisory_record_max_cvss_non_dict_cvss():
+    rec = {"vulnerabilities": [{"cvss": "5.0"}]}
+    assert _advisory_record_max_cvss(rec) is None
+
+
+# ---------------------------------------------------------------------------
+# _extract_dependency_plugin_ids
+# ---------------------------------------------------------------------------
+
+
+def test_extract_dependency_plugin_ids_basic():
+    snap = {
+        "plugin_api": {
+            "dependencies": [
+                {"name": "token-macro", "version": "1.0"},
+                {"name": "plain-credentials", "version": "2.0"},
+            ]
+        }
+    }
+    assert sorted(_extract_dependency_plugin_ids(snap)) == ["plain-credentials", "token-macro"]
+
+
+def test_extract_dependency_plugin_ids_deduplicates():
+    snap = {
+        "plugin_api": {
+            "dependencies": [
+                {"name": "same-plugin"},
+                {"name": "same-plugin"},
+            ]
+        }
+    }
+    assert _extract_dependency_plugin_ids(snap) == ["same-plugin"]
+
+
+def test_extract_dependency_plugin_ids_empty_api():
+    assert _extract_dependency_plugin_ids({"plugin_api": {}}) == []
+
+
+def test_extract_dependency_plugin_ids_no_plugin_api():
+    assert _extract_dependency_plugin_ids({}) == []
+
+
+def test_extract_dependency_plugin_ids_invalid_entries():
+    snap = {
+        "plugin_api": {
+            "dependencies": [
+                {"name": "valid-plugin"},
+                "not-a-dict",
+                {"no_name": "something"},
+            ]
+        }
+    }
+    assert _extract_dependency_plugin_ids(snap) == ["valid-plugin"]
+
+
+# ---------------------------------------------------------------------------
+# _load_plugin_snapshot
+# ---------------------------------------------------------------------------
+
+
+def test_load_plugin_snapshot_returns_none_for_missing(tmp_path: Path):
+    assert _load_plugin_snapshot("no-such-plugin", tmp_path) is None
+
+
+def test_load_plugin_snapshot_returns_none_for_invalid_id(tmp_path: Path):
+    assert _load_plugin_snapshot("../invalid", tmp_path) is None
+
+
+def test_load_plugin_snapshot_reads_file(tmp_path: Path):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    snap = {"plugin_id": "my-plugin", "plugin_api": {}}
+    (plugins_dir / "my-plugin.snapshot.json").write_text(json.dumps(snap), encoding="utf-8")
+
+    result = _load_plugin_snapshot("my-plugin", tmp_path)
+    assert result is not None
+    assert result["plugin_id"] == "my-plugin"
+
+
+# ---------------------------------------------------------------------------
+# _load_advisories_for_plugin
+# ---------------------------------------------------------------------------
+
+
+def test_load_advisories_returns_empty_when_no_files(tmp_path: Path):
+    assert _load_advisories_for_plugin("no-plugin", tmp_path) == []
+
+
+def test_load_advisories_reads_real_jsonl(tmp_path: Path):
+    _write_jsonl(
+        tmp_path / "advisories" / "my-plugin.advisories.real.jsonl",
+        [{"plugin_id": "my-plugin", "advisory_id": "2025-01-01"}],
+    )
+    result = _load_advisories_for_plugin("my-plugin", tmp_path, prefer_real=True)
+    assert len(result) == 1
+    assert result[0]["advisory_id"] == "2025-01-01"
+
+
+def test_load_advisories_reads_sample_jsonl(tmp_path: Path):
+    _write_jsonl(
+        tmp_path / "advisories" / "my-plugin.advisories.sample.jsonl",
+        [{"plugin_id": "my-plugin", "advisory_id": "2025-02-01"}],
+    )
+    assert len(_load_advisories_for_plugin("my-plugin", tmp_path)) == 1
+
+
+def test_load_advisories_prefer_real_over_sample(tmp_path: Path):
+    _write_jsonl(
+        tmp_path / "advisories" / "my-plugin.advisories.real.jsonl",
+        [{"advisory_id": "real-001"}],
+    )
+    _write_jsonl(
+        tmp_path / "advisories" / "my-plugin.advisories.sample.jsonl",
+        [{"advisory_id": "sample-001"}],
+    )
+    result = _load_advisories_for_plugin("my-plugin", tmp_path, prefer_real=True)
+    assert result[0]["advisory_id"] == "real-001"
+
+
+# ---------------------------------------------------------------------------
+# _load_healthscore_record
+# ---------------------------------------------------------------------------
+
+
+def test_load_healthscore_record_returns_none_for_missing(tmp_path: Path):
+    assert _load_healthscore_record("no-plugin", tmp_path) is None
+
+
+def test_load_healthscore_record_per_plugin_file(tmp_path: Path):
+    hs_dir = tmp_path / "healthscore" / "plugins"
+    hs_dir.mkdir(parents=True)
+    payload = {
+        "plugin_id": "my-plugin",
+        "collected_at": "2024-01-01T00:00:00+00:00",
+        "record": {"plugin_id": "my-plugin", "value": 75},
+    }
+    (hs_dir / "my-plugin.healthscore.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    result = _load_healthscore_record("my-plugin", tmp_path)
+    assert result is not None
+    assert result["value"] == 75
+
+
+def test_load_healthscore_record_uses_score_field_as_fallback(tmp_path: Path):
+    hs_dir = tmp_path / "healthscore" / "plugins"
+    hs_dir.mkdir(parents=True)
+    payload = {
+        "plugin_id": "score-plugin",
+        "collected_at": "2024-01-01T00:00:00+00:00",
+        "record": {"plugin_id": "score-plugin", "score": 88},
+    }
+    (hs_dir / "score-plugin.healthscore.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    result = _load_healthscore_record("score-plugin", tmp_path)
+    assert result is not None
+    assert result["value"] == 88
+
+
+def test_load_healthscore_record_returns_none_for_invalid_id(tmp_path: Path):
+    assert _load_healthscore_record("../escape", tmp_path) is None
+
+
+def test_load_healthscore_record_aggregate_file(tmp_path: Path):
+    hs_dir = tmp_path / "healthscore"
+    hs_dir.mkdir(parents=True)
+    agg = {
+        "collected_at": "2024-01-01T00:00:00+00:00",
+        "record": {"my-plugin": {"value": 60, "date": "2024-01-01"}},
+    }
+    (hs_dir / "plugins.healthscore.json").write_text(json.dumps(agg), encoding="utf-8")
+
+    result = _load_healthscore_record("my-plugin", tmp_path)
+    assert result is not None
+    assert result["value"] == 60
+
+
+def test_load_healthscore_record_aggregate_nested_plugins_dir(tmp_path: Path):
+    hs_plugins_dir = tmp_path / "healthscore" / "plugins"
+    hs_plugins_dir.mkdir(parents=True)
+    agg = {
+        "collected_at": "2024-01-01T00:00:00+00:00",
+        "record": {"nested-plugin": {"value": 55, "date": "2024-01-01"}},
+    }
+    (hs_plugins_dir / "plugins.healthscore.json").write_text(json.dumps(agg), encoding="utf-8")
+
+    result = _load_healthscore_record("nested-plugin", tmp_path)
+    assert result is not None
+    assert result["value"] == 55
+
+
+def test_load_healthscore_record_malformed_aggregate_returns_none(tmp_path: Path):
+    hs_dir = tmp_path / "healthscore"
+    hs_dir.mkdir(parents=True)
+    (hs_dir / "plugins.healthscore.json").write_text("not json {{{", encoding="utf-8")
+    assert _load_healthscore_record("my-plugin", tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# ScoreResult
+# ---------------------------------------------------------------------------
+
+
+def test_score_result_to_dict():
+    result = ScoreResult(
+        plugin="my-plugin",
+        score=42,
+        reasons=("reason one", "reason two"),
+        features={"advisory_count": 3},
+    )
+    d = result.to_dict()
+    assert d["plugin"] == "my-plugin"
+    assert d["score"] == 42
+    assert d["reasons"] == ["reason one", "reason two"]
+    assert d["features"]["advisory_count"] == 3
+
+
+# ---------------------------------------------------------------------------
+# _dependency_points
+# ---------------------------------------------------------------------------
+
+
+def test_dependency_points_no_data(tmp_path: Path):
+    pts, details = _dependency_points(
+        "dep-plugin",
+        data_dir=tmp_path,
+        today=date.today(),
+        prefer_real=False,
+    )
+    assert pts == 0
+    assert details["advisory_count"] == 0
+    assert details["recent_advisory_365d"] is False
+
+
+def test_dependency_points_with_advisories(tmp_path: Path):
+    _write_jsonl(
+        tmp_path / "advisories" / "dep-plugin.advisories.sample.jsonl",
+        [
+            {
+                "advisory_id": "2025-01-01",
+                "published_date": _today_str(),
+                "vulnerabilities": [{"cvss": {"base_score": 7.5}}],
+            }
+        ],
+    )
+
+    pts, details = _dependency_points(
+        "dep-plugin",
+        data_dir=tmp_path,
+        today=date.today(),
+        prefer_real=False,
+    )
+    assert pts > 0
+    assert details["advisory_count"] == 1
+    assert details["recent_advisory_365d"] is True
+    assert details["max_cvss"] == 7.5
+
+
+def test_dependency_points_with_active_security_warnings(tmp_path: Path):
+    snap = {
+        "plugin_id": "dep-plugin",
+        "plugin_api": {
+            "securityWarnings": [
+                {"id": "SECURITY-1", "active": True},
+                {"id": "SECURITY-2", "active": False},
+            ]
+        },
+    }
+    _write_json(tmp_path / "plugins" / "dep-plugin.snapshot.json", snap)
+
+    pts, details = _dependency_points(
+        "dep-plugin",
+        data_dir=tmp_path,
+        today=date.today(),
+        prefer_real=False,
+    )
+    assert details["active_security_warning_count"] == 1
+    assert pts > 0
+
+
+def test_dependency_points_with_healthscore(tmp_path: Path):
+    hs_dir = tmp_path / "healthscore" / "plugins"
+    hs_dir.mkdir(parents=True)
+    (hs_dir / "dep-plugin.healthscore.json").write_text(
+        json.dumps(
+            {
+                "plugin_id": "dep-plugin",
+                "collected_at": "2024-01-01T00:00:00+00:00",
+                "record": {"value": 20},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    pts, details = _dependency_points(
+        "dep-plugin",
+        data_dir=tmp_path,
+        today=date.today(),
+        prefer_real=False,
+    )
+    assert details["healthscore"] == 20
+    assert pts > 0
+
+
+# ---------------------------------------------------------------------------
+# score_plugin_baseline — integration with monkeypatched data dir
+# ---------------------------------------------------------------------------
+
+
+def test_score_plugin_baseline_with_snapshot(tmp_path: Path, monkeypatch):
+    import canary.scoring.baseline as baseline
+
+    monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+
+    snap = {
+        "plugin_id": "test-plugin",
+        "plugin_api": {
+            "requiredCore": "2.346",
+            "dependencies": [],
+            "securityWarnings": [],
+            "releaseTimestamp": "2025-01-01T00:00:00+00:00",
+        },
+    }
+    _write_json(tmp_path / "plugins" / "test-plugin.snapshot.json", snap)
+
+    d = score_plugin_baseline("test-plugin").to_dict()
+    assert d["plugin"] == "test-plugin"
+    assert 0 <= d["score"] <= 100
+    assert any("2.346" in r for r in d["reasons"])
+
+
+def test_score_plugin_baseline_with_advisories(tmp_path: Path, monkeypatch):
+    import canary.scoring.baseline as baseline
+
+    monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+
+    _write_jsonl(
+        tmp_path / "advisories" / "test-plugin.advisories.sample.jsonl",
+        [
+            {
+                "advisory_id": "2025-01-01",
+                "published_date": _today_str(),
+                "vulnerabilities": [{"cvss": {"base_score": 9.1}}],
+            }
+        ],
+    )
+
+    d = score_plugin_baseline("test-plugin").to_dict()
+    assert d["score"] > 0
+    assert d["features"]["advisory_count"] == 1
+    assert any("advisory" in r.lower() for r in d["reasons"])
+
+
+def test_score_plugin_baseline_with_healthscore(tmp_path: Path, monkeypatch):
+    import canary.scoring.baseline as baseline
+
+    monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+
+    hs_dir = tmp_path / "healthscore" / "plugins"
+    hs_dir.mkdir(parents=True)
+    (hs_dir / "test-plugin.healthscore.json").write_text(
+        json.dumps(
+            {
+                "plugin_id": "test-plugin",
+                "collected_at": "2024-01-01T00:00:00+00:00",
+                "record": {"value": 0},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    d = score_plugin_baseline("test-plugin").to_dict()
+    assert d["features"]["healthscore_value"] == 0
+    assert any("health score" in r.lower() for r in d["reasons"])
+
+
+def test_score_plugin_baseline_with_active_security_warnings(tmp_path: Path, monkeypatch):
+    import canary.scoring.baseline as baseline
+
+    monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+
+    snap = {
+        "plugin_id": "test-plugin",
+        "plugin_api": {
+            "dependencies": [],
+            "securityWarnings": [
+                {"id": "SECURITY-100", "active": True},
+                {"id": "SECURITY-200", "active": True},
+            ],
+        },
+    }
+    _write_json(tmp_path / "plugins" / "test-plugin.snapshot.json", snap)
+
+    d = score_plugin_baseline("test-plugin").to_dict()
+    assert d["features"]["active_security_warning_count"] == 2
+    assert any("active security warning" in r.lower() for r in d["reasons"])
+
+
+def test_score_plugin_baseline_with_many_deps(tmp_path: Path, monkeypatch):
+    import canary.scoring.baseline as baseline
+
+    monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+
+    deps = [{"name": f"dep-{i}", "version": "1.0"} for i in range(12)]
+    snap = {
+        "plugin_id": "test-plugin",
+        "plugin_api": {"dependencies": deps, "securityWarnings": []},
+    }
+    _write_json(tmp_path / "plugins" / "test-plugin.snapshot.json", snap)
+
+    d = score_plugin_baseline("test-plugin").to_dict()
+    assert d["features"]["dependency_count"] == 12
+    assert any("dependency" in r.lower() for r in d["reasons"])
+
+
+def test_score_plugin_baseline_with_dep_advisories(tmp_path: Path, monkeypatch):
+    import canary.scoring.baseline as baseline
+
+    monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+
+    snap = {
+        "plugin_id": "test-plugin",
+        "plugin_api": {
+            "dependencies": [{"name": "risky-dep", "version": "1.0"}],
+            "securityWarnings": [],
+        },
+    }
+    _write_json(tmp_path / "plugins" / "test-plugin.snapshot.json", snap)
+
+    _write_jsonl(
+        tmp_path / "advisories" / "risky-dep.advisories.sample.jsonl",
+        [
+            {
+                "advisory_id": "2025-01-01",
+                "published_date": _today_str(),
+                "vulnerabilities": [{"cvss": {"base_score": 9.5}}],
+            }
+        ],
+    )
+
+    d = score_plugin_baseline("test-plugin").to_dict()
+    assert d["features"]["dependency_total"] == 1
+    assert d["features"]["dependency_risk_points"] > 0
+
+
+def test_score_plugin_baseline_invalid_plugin_id_raises(tmp_path: Path, monkeypatch):
+    import canary.scoring.baseline as baseline
+
+    monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+
+    with pytest.raises(ValueError, match="Invalid plugin id"):
+        score_plugin_baseline("../../../etc/passwd")
+
+
+def test_score_plugin_baseline_no_heuristics_returns_default(tmp_path: Path, monkeypatch):
+    import canary.scoring.baseline as baseline
+
+    monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+
+    d = score_plugin_baseline("totally-unknown-plugin-xyzzy").to_dict()
+    assert d["score"] >= 5
+    assert any("No heuristics matched" in r or "No advisories found" in r for r in d["reasons"])
+
+
+def test_score_plugin_baseline_security_keyword(tmp_path: Path, monkeypatch):
+    import canary.scoring.baseline as baseline
+
+    monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+
+    d = score_plugin_baseline("my-credentials-plugin").to_dict()
+    assert d["score"] >= 20
+    assert any("auth/security" in r.lower() for r in d["reasons"])
+
+
+def test_score_plugin_baseline_with_old_advisory_no_recency_bonus(tmp_path: Path, monkeypatch):
+    import canary.scoring.baseline as baseline
+
+    monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+
+    _write_jsonl(
+        tmp_path / "advisories" / "old-plugin.advisories.sample.jsonl",
+        [
+            {
+                "advisory_id": "2020-01-01",
+                "published_date": "2020-01-01",
+                "vulnerabilities": [],
+            }
+        ],
+    )
+
+    d = score_plugin_baseline("old-plugin").to_dict()
+    assert d["features"]["advisory_count"] == 1
+    assert d["features"]["had_advisory_within_365d"] is False
+    assert any("365 days" in r for r in d["reasons"])
+
+
+def test_score_plugin_baseline_recent_release_reduces_score(tmp_path: Path, monkeypatch):
+    import canary.scoring.baseline as baseline
+
+    monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+
+    snap = {
+        "plugin_id": "active-plugin",
+        "plugin_api": {
+            "dependencies": [],
+            "securityWarnings": [],
+            "releaseTimestamp": datetime.now(UTC).isoformat(),
+        },
+    }
+    _write_json(tmp_path / "plugins" / "active-plugin.snapshot.json", snap)
+
+    d = score_plugin_baseline("active-plugin").to_dict()
+    assert any("maintenance" in r.lower() for r in d["reasons"])
+
+
+def test_score_plugin_baseline_with_five_to_nine_deps(tmp_path: Path, monkeypatch):
+    import canary.scoring.baseline as baseline
+
+    monkeypatch.setattr(baseline, "_DATA_ROOT", tmp_path)
+    monkeypatch.setattr(baseline, "_resolved_base_dir", lambda: tmp_path)
+
+    deps = [{"name": f"dep-{i}", "version": "1.0"} for i in range(7)]
+    snap = {
+        "plugin_id": "medium-plugin",
+        "plugin_api": {"dependencies": deps, "securityWarnings": []},
+    }
+    _write_json(tmp_path / "plugins" / "medium-plugin.snapshot.json", snap)
+
+    d = score_plugin_baseline("medium-plugin").to_dict()
+    assert d["features"]["dependency_count"] == 7
