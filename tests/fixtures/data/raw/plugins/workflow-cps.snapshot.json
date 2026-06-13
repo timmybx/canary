@@ -1,0 +1,219 @@
+{
+  "plugin_id": "workflow-cps",
+  "collected_at": "2026-03-01T00:41:05.036878+00:00",
+  "plugin_api": {
+    "dependencies": [
+      {
+        "name": "ionicons-api",
+        "title": "Ionicons API",
+        "optional": false,
+        "version": "94.vcc3065403257",
+        "implied": false
+      },
+      {
+        "name": "workflow-api",
+        "title": "Pipeline: API",
+        "optional": false,
+        "version": "1384.vdc05a_48f535f",
+        "implied": false
+      },
+      {
+        "name": "workflow-scm-step",
+        "title": "Pipeline: SCM Step",
+        "optional": false,
+        "version": "437.v05a_f66b_e5ef8",
+        "implied": false
+      },
+      {
+        "name": "workflow-step-api",
+        "title": "Pipeline: Step API",
+        "optional": false,
+        "version": "706.v518c5dcb_24c0",
+        "implied": false
+      },
+      {
+        "name": "workflow-support",
+        "title": "Pipeline: Supporting APIs",
+        "optional": false,
+        "version": "976.vb_d9493c2eb_09",
+        "implied": false
+      },
+      {
+        "name": "scm-api",
+        "title": "SCM API",
+        "optional": false,
+        "version": "707.v749f968369d4",
+        "implied": false
+      },
+      {
+        "name": "script-security",
+        "title": "Script Security",
+        "optional": false,
+        "version": "1378.vf25626395f49",
+        "implied": false
+      },
+      {
+        "name": "structs",
+        "title": "Structs",
+        "optional": false,
+        "version": "353.v261ea_40a_80fb_",
+        "implied": false
+      },
+      {
+        "name": "support-core",
+        "title": "Support Core",
+        "optional": true,
+        "version": "1758.v87f0f880c067",
+        "implied": false
+      }
+    ],
+    "securityWarnings": [
+      {
+        "versions": [
+          {
+            "firstVersion": null,
+            "lastVersion": "2.36"
+          }
+        ],
+        "id": "SECURITY-551",
+        "message": "Arbitrary code execution due to incomplete sandbox protection",
+        "url": "https://jenkins.io/security/advisory/2017-07-10/",
+        "active": false
+      },
+      {
+        "versions": [
+          {
+            "firstVersion": null,
+            "lastVersion": "2.59"
+          }
+        ],
+        "id": "SECURITY-1186-workflow-cps",
+        "message": "Script Security sandbox bypass",
+        "url": "https://jenkins.io/security/advisory/2018-10-29/#SECURITY-1186",
+        "active": false
+      },
+      {
+        "versions": [
+          {
+            "firstVersion": null,
+            "lastVersion": "2.61"
+          }
+        ],
+        "id": "SECURITY-1266-workflow-cps",
+        "message": "Script Security sandbox bypass",
+        "url": "https://jenkins.io/security/advisory/2019-01-08/#SECURITY-1266",
+        "active": false
+      },
+      {
+        "versions": [
+          {
+            "firstVersion": null,
+            "lastVersion": "2.63"
+          }
+        ],
+        "id": "SECURITY-1336/2",
+        "message": "Script security sandbox bypass",
+        "url": "https://jenkins.io/security/advisory/2019-03-06/#SECURITY-1336%20(2)",
+        "active": false
+      },
+      {
+        "versions": [
+          {
+            "firstVersion": null,
+            "lastVersion": "2.64"
+          }
+        ],
+        "id": "SECURITY-1353-workflow-cps",
+        "message": "Script Security sandbox bypass",
+        "url": "https://jenkins.io/security/advisory/2019-03-25/#SECURITY-1353",
+        "active": false
+      },
+      {
+        "versions": [
+          {
+            "firstVersion": null,
+            "lastVersion": "2.78"
+          }
+        ],
+        "id": "SECURITY-1710",
+        "message": "Sandbox bypass via default method parameter expression",
+        "url": "https://jenkins.io/security/advisory/2020-02-12/#SECURITY-1710",
+        "active": false
+      },
+      {
+        "versions": [
+          {
+            "firstVersion": null,
+            "lastVersion": "2648.va9433432b33c"
+          }
+        ],
+        "id": "SECURITY-2443",
+        "message": "Sensitive information disclosure",
+        "url": "https://www.jenkins.io/security/advisory/2022-02-15/#SECURITY-2443",
+        "active": false
+      },
+      {
+        "versions": [
+          {
+            "firstVersion": null,
+            "lastVersion": "2648.va9433432b33c"
+          }
+        ],
+        "id": "SECURITY-2463-workflow-cps",
+        "message": "OS command execution vulnerabilities in Pipeline-related plugins",
+        "url": "https://www.jenkins.io/security/advisory/2022-02-15/#SECURITY-2463",
+        "active": false
+      },
+      {
+        "versions": [
+          {
+            "firstVersion": null,
+            "lastVersion": "2648.va9433432b33c"
+          }
+        ],
+        "id": "SECURITY-2613-workflow-cps",
+        "message": "Vulnerabilities in multiple Pipeline-related plugins allow reading arbitrary files on the controller",
+        "url": "https://www.jenkins.io/security/advisory/2022-02-15/#SECURITY-2613",
+        "active": false
+      },
+      {
+        "versions": [
+          {
+            "firstVersion": null,
+            "lastVersion": "2689.v434009a_31b_f1"
+          }
+        ],
+        "id": "SECURITY-359",
+        "message": "Sandbox bypass vulnerability through implicitly allowlisted platform Groovy files",
+        "url": "https://www.jenkins.io/security/advisory/2022-05-17/#SECURITY-359",
+        "active": false
+      },
+      {
+        "versions": [
+          {
+            "firstVersion": null,
+            "lastVersion": "2802.v5ea_628154b_c2"
+          }
+        ],
+        "id": "SECURITY-2824-1-workflow-cps",
+        "message": "Sandbox bypass vulnerability",
+        "url": "https://www.jenkins.io/security/advisory/2022-10-19/#SECURITY-2824%20(1)",
+        "active": false
+      },
+      {
+        "versions": [
+          {
+            "firstVersion": null,
+            "lastVersion": "3990.vd281dd77a_388"
+          }
+        ],
+        "id": "SECURITY-3362",
+        "message": "Rebuilding a run with revoked script approval allowed",
+        "url": "https://www.jenkins.io/security/advisory/2024-11-13/#SECURITY-3362",
+        "active": false
+      }
+    ],
+    "requiredCore": "2.504.3",
+    "releaseTimestamp": "2026-02-25T14:15:53.00Z"
+  }
+}

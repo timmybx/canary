@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+import canary.scoring.baseline as _baseline_mod
 from canary.scoring.baseline import (  # type: ignore[attr-defined]
     _CAP_GOVERNANCE,
     _CAP_STALENESS,
@@ -58,11 +59,13 @@ def _today_str() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Live-data integration tests (no monkeypatch — use real data dir)
+# Integration tests — use committed fixture data (tests/fixtures/data/raw/)
+# so these pass in CI without the gitignored data/raw/ tree.
 # ---------------------------------------------------------------------------
 
 
-def test_score_range_and_shape():
+def test_score_range_and_shape(fixture_data_dir, monkeypatch):
+    monkeypatch.setattr(_baseline_mod, "_DATA_ROOT", fixture_data_dir)
     r = score_plugin_baseline("workflow-cps")
     d = r.to_dict()
 
@@ -74,18 +77,21 @@ def test_score_range_and_shape():
         assert isinstance(d["features"], dict)
 
 
-def test_score_is_deterministic():
+def test_score_is_deterministic(fixture_data_dir, monkeypatch):
+    monkeypatch.setattr(_baseline_mod, "_DATA_ROOT", fixture_data_dir)
     d1 = score_plugin_baseline("workflow-cps").to_dict()
     d2 = score_plugin_baseline("workflow-cps").to_dict()
     assert d1 == d2
 
 
-def test_score_security_keyword():
+def test_score_security_keyword(fixture_data_dir, monkeypatch):
+    monkeypatch.setattr(_baseline_mod, "_DATA_ROOT", fixture_data_dir)
     d = score_plugin_baseline("credentials").to_dict()
     assert d["score"] >= 20
 
 
-def test_score_default_baseline_low():
+def test_score_default_baseline_low(fixture_data_dir, monkeypatch):
+    monkeypatch.setattr(_baseline_mod, "_DATA_ROOT", fixture_data_dir)
     d = score_plugin_baseline("totally-random-plugin-name").to_dict()
     assert 0 <= d["score"] <= 10
 
