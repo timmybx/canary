@@ -28,6 +28,7 @@ from canary.scoring.baseline import (  # type: ignore[attr-defined]
     _load_advisories_for_plugin,
     _load_healthscore_record,
     _load_plugin_snapshot,
+    _load_swh_features,
     _parse_date,
     _parse_iso_datetime,
     _safe_int,
@@ -1285,3 +1286,241 @@ class TestAdvisoryFormulaComponents:
         # history=15 (cap), recency=15 (cap) → total=30 (= _CAP_ADVISORY_HISTORY)
         assert f"(cap {_CAP_ADVISORY_HISTORY})" in reason
         assert result.score <= 100
+
+
+# ---------------------------------------------------------------------------
+# _staleness_points — release staleness sub-path
+# ---------------------------------------------------------------------------
+# The release path formula is: rel_pts = min(8, dsr // 365 * 3)
+# It only fires when dsr > 730, and only adds a *bonus* above what commit
+# staleness already gave.  These tests pin the multiplier (3), the cap (8),
+# and the bonus-only accumulation logic.
+# ---------------------------------------------------------------------------
+
+
+class TestStalenessReleaseFormula:
+    """Pin the release-staleness sub-formula so mutations to its constants are caught."""
+
+    def test_release_731_days_gives_6_pts(self) -> None:
+        # dsr=731 → 731//365=2 → 2*3=6 → min(8,6)=6
+        pts, reasons = _staleness_points(None, 731)
+        assert pts == 6
+        assert any("release" in r.lower() for r in reasons)
+
+    def test_release_1094_days_gives_6_pts(self) -> None:
+        # dsr=1094 → 1094//365=2 → 2*3=6 → min(8,6)=6
+        pts, _ = _staleness_points(None, 1094)
+        assert pts == 6
+
+    def test_release_1095_days_hits_cap(self) -> None:
+        # dsr=1095 → 1095//365=3 → 3*3=9 → min(8,9)=8 (cap applies)
+        pts, _ = _staleness_points(None, 1095)
+        assert pts == 8
+
+    def test_release_cap_is_8_not_higher(self) -> None:
+        # Very old release should not exceed 8
+        pts, _ = _staleness_points(None, 9999)
+        assert pts == 8
+
+    def test_release_bonus_over_commit_pts(self) -> None:
+        # commit=181d → 3 pts; release=731d → rel_pts=6; bonus=6-3=3 → total=6
+        pts, _ = _staleness_points(181, 731)
+        assert pts == 6
+
+    def test_release_no_bonus_when_commit_already_exceeds(self) -> None:
+        # commit=800d → 9 pts; release=731d → rel_pts=6; 6 < 9 → no bonus → still 9
+        pts, _ = _staleness_points(800, 731)
+        assert pts == 9
+
+    def test_release_recent_180d_adds_reason_no_pts(self) -> None:
+        # dsr=90 → does not exceed 730 threshold, just adds a maintenance reason
+        pts, reasons = _staleness_points(None, 90)
+        assert pts == 0
+        assert any("recent" in r.lower() or "active" in r.lower() for r in reasons)
+
+
+# ---------------------------------------------------------------------------
+# _dependency_points — exact component value tests
+# ---------------------------------------------------------------------------
+# The function accumulates points from four sub-components:
+#   advisory history: min(10, advisory_count * 2)
+#   CVSS severity:    >= 9.0 → 6,  >= 7.0 → 4,  >= 4.0 → 2,  else 0
+#   recency:          recent advisory within 365d → +3
+#   active warnings:  min(10, active_warn * 5)
+#   healthscore:      int(round((100 - hv) / 25))  capped at [0, 4]
+# Existing tests only assert pts > 0; these pin the exact formula values.
+# ---------------------------------------------------------------------------
+
+
+class TestDependencyPointsFormula:
+    """Pin exact sub-component values in _dependency_points."""
+
+    def _adv(self, cvss: float | None, days_ago: int = 400) -> dict:
+        from datetime import timedelta
+
+        pub = (date.today() - timedelta(days=days_ago)).isoformat()
+        rec: dict = {"advisory_id": "A1", "published_date": pub}
+        if cvss is not None:
+            rec["vulnerabilities"] = [{"cvss": {"base_score": cvss}}]
+        return rec
+
+    def _write_advisory(self, tmp_path: Path, records: list[dict]) -> None:
+        _write_jsonl(
+            tmp_path / "advisories" / "dep-plugin.advisories.sample.jsonl",
+            records,
+        )
+
+    def test_advisory_history_multiplier_2(self, tmp_path: Path) -> None:
+        # 3 old advisories, no recent → adv_pts = min(10, 3*2) = 6
+        self._write_advisory(tmp_path, [self._adv(None) for _ in range(3)])
+        pts, details = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        # only advisory history contributes (no cvss, no recency)
+        assert pts == 6
+        assert details["advisory_count"] == 3
+
+    def test_advisory_history_cap_at_10(self, tmp_path: Path) -> None:
+        # 6 advisories → 6*2=12 → min(10, 12)=10
+        self._write_advisory(tmp_path, [self._adv(None, days_ago=400 + i) for i in range(6)])
+        pts, _ = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert pts == 10
+
+    def test_cvss_low_boundary_4_0(self, tmp_path: Path) -> None:
+        # CVSS 4.0 → sev_pts = 2 (>= 4.0 branch)
+        self._write_advisory(tmp_path, [self._adv(4.0)])
+        _, details = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert details["max_cvss"] == 4.0
+        # adv_pts=2, sev_pts=2 → total=4 (no recency since advisory is 400d old)
+        # check severity component via reasons
+        pts, _ = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert pts == 4  # 2 (advisory) + 2 (CVSS >= 4.0)
+
+    def test_cvss_medium_boundary_7_0(self, tmp_path: Path) -> None:
+        # CVSS 7.0 → sev_pts = 4 (>= 7.0 branch)
+        self._write_advisory(tmp_path, [self._adv(7.0)])
+        pts, _ = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert pts == 6  # 2 (advisory) + 4 (CVSS >= 7.0)
+
+    def test_cvss_critical_boundary_9_0(self, tmp_path: Path) -> None:
+        # CVSS 9.0 → sev_pts = 6 (>= 9.0 branch)
+        self._write_advisory(tmp_path, [self._adv(9.0)])
+        pts, _ = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert pts == 8  # 2 (advisory) + 6 (CVSS >= 9.0)
+
+    def test_cvss_below_4_gives_zero_severity(self, tmp_path: Path) -> None:
+        # CVSS 3.9 → sev_pts = 0
+        self._write_advisory(tmp_path, [self._adv(3.9)])
+        pts, _ = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert pts == 2  # 2 (advisory) + 0 (no CVSS bonus)
+
+    def test_recency_adds_3_pts(self, tmp_path: Path) -> None:
+        # 1 advisory within 365d (no CVSS) → adv_pts=2 + recency=3 = 5
+        from datetime import timedelta
+
+        recent = (date.today() - timedelta(days=30)).isoformat()
+        self._write_advisory(tmp_path, [{"advisory_id": "A1", "published_date": recent}])
+        pts, details = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert details["recent_advisory_365d"] is True
+        assert pts == 5  # 2 + 3
+
+    def test_active_warnings_multiplier_5(self, tmp_path: Path) -> None:
+        # 2 active warnings → min(10, 2*5) = 10
+        snap = {
+            "plugin_id": "dep-plugin",
+            "plugin_api": {
+                "securityWarnings": [
+                    {"id": "W1", "active": True},
+                    {"id": "W2", "active": True},
+                ]
+            },
+        }
+        _write_json(tmp_path / "plugins" / "dep-plugin.snapshot.json", snap)
+        pts, details = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert details["active_security_warning_count"] == 2
+        assert pts == 10
+
+    def test_active_warnings_cap_at_10(self, tmp_path: Path) -> None:
+        # 3 active warnings → min(10, 3*5)=10 (same cap as 2)
+        snap = {
+            "plugin_id": "dep-plugin",
+            "plugin_api": {"securityWarnings": [{"id": f"W{i}", "active": True} for i in range(3)]},
+        }
+        _write_json(tmp_path / "plugins" / "dep-plugin.snapshot.json", snap)
+        pts, _ = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert pts == 10
+
+    def test_healthscore_formula_divisor_25(self, tmp_path: Path) -> None:
+        # hv=75 → int(round((100-75)/25)) = int(round(1.0)) = 1
+        # hv=50 → int(round((100-50)/25)) = int(round(2.0)) = 2
+        # hv=25 → int(round((100-25)/25)) = int(round(3.0)) = 3
+        hs_dir = tmp_path / "healthscore" / "plugins"
+        hs_dir.mkdir(parents=True)
+        for hv, expected_hs_pts in [(75, 1), (50, 2), (25, 3), (0, 4)]:
+            hs_tmp = tmp_path / f"hs_{hv}"
+            hs_tmp.mkdir(parents=True, exist_ok=True)
+            hs_plugin_dir = hs_tmp / "healthscore" / "plugins"
+            hs_plugin_dir.mkdir(parents=True, exist_ok=True)
+            (hs_plugin_dir / "dep-plugin.healthscore.json").write_text(
+                json.dumps(
+                    {
+                        "plugin_id": "dep-plugin",
+                        "collected_at": "2024-01-01T00:00:00Z",
+                        "record": {"value": hv},
+                    }
+                )
+            )
+            pts, _ = _dependency_points(
+                "dep-plugin", data_dir=hs_tmp, today=date.today(), prefer_real=False
+            )
+            assert pts == expected_hs_pts, f"hv={hv}: expected pts={expected_hs_pts}, got {pts}"
+
+
+# ---------------------------------------------------------------------------
+# _load_swh_features
+# ---------------------------------------------------------------------------
+
+
+def test_load_swh_features_returns_dict_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Success path: delegates to _load_software_heritage_features and returns its result."""
+    import canary.build.features_bundle as fb
+
+    expected = {"swh_present": True, "swh_commit_count": 42}
+    monkeypatch.setattr(fb, "_load_software_heritage_features", lambda pid, ddir, **kw: expected)
+    result = _load_swh_features("test-plugin", tmp_path)
+    assert result == expected
+
+
+def test_load_swh_features_returns_empty_dict_on_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exception path: any error from the inner import/call returns {}."""
+    import canary.build.features_bundle as fb
+
+    monkeypatch.setattr(
+        fb,
+        "_load_software_heritage_features",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    result = _load_swh_features("test-plugin", tmp_path)
+    assert result == {}
