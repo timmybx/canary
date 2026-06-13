@@ -3,6 +3,28 @@
 # To run on all files: pre-commit run --all-files
 
 repos:
+  # Fast hygiene checks (whitespace, file endings, conflict markers, TOML/YAML syntax)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+
+  # Typo detection (crate-ci/typos)
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.46.0
+    hooks:
+      - id: typos
+
+  # Validate pyproject.toml against PEP 517/518/621 schemas
+  - repo: https://github.com/abravalheri/validate-pyproject
+    rev: v0.25
+    hooks:
+      - id: validate-pyproject
+
   # Unit tests must pass before lint/type/security hooks run.
   - repo: local
     hooks:
