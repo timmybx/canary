@@ -60,5 +60,6 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.pyright]
 include = ["canary", "tests"]
+pythonVersion = "3.12"
 typeCheckingMode = "basic"
 reportMissingTypeStubs = "none"

@@ -384,7 +384,7 @@ def _extract_drivers(
 
     # Impute values the same way the pipeline does so contributions are accurate
     try:
-        X_raw = pd.DataFrame([raw_values], columns=feature_columns)
+        X_raw = pd.DataFrame([raw_values], columns=feature_columns)  # pyright: ignore[reportArgumentType]
         X_imputed: Any = imputer_step.transform(X_raw) if imputer_step is not None else X_raw.values
     except Exception as exc:
         LOGGER.debug("Imputation failed in driver extraction; using zero-fill.", exc_info=exc)
@@ -515,7 +515,7 @@ def score_plugin_ml(
     # Align to a single-row DataFrame in the exact column order the pipeline expects
     X = pd.DataFrame(
         [[feature_vector.get(col) for col in scorer.feature_columns]],
-        columns=scorer.feature_columns,
+        columns=scorer.feature_columns,  # pyright: ignore[reportArgumentType]
     )
 
     # Predict

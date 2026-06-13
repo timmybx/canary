@@ -138,7 +138,7 @@ def _rows_to_matrix(rows: list[dict[str, Any]], feature_cols: list[str]) -> pd.D
     data = []
     for row in rows:
         data.append({col: _coerce_numeric(row.get(col)) for col in feature_cols})
-    return pd.DataFrame(data, columns=feature_cols)
+    return pd.DataFrame(data, columns=feature_cols)  # pyright: ignore[reportArgumentType]
 
 
 def _write_predictions_csv(
