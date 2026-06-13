@@ -2,7 +2,8 @@ name: Mutation Testing
 
 # Runs every Monday night and on manual dispatch.  Results are informational —
 # a survived mutant is not an immediate blocker, but the trend matters.
-# Download the "mutation-report" artifact from a run to see per-file scores.
+# Kill-rate summary is written to the Job Summary tab of each run.
+# Download the "mutation-report" artifact for per-file / per-mutant detail.
 
 on:
   schedule:
@@ -55,6 +56,48 @@ jobs:
       - name: Export CI stats (JSON)
         if: always()
         run: mutmut export-cicd-stats
+
+      - name: Write Job Summary
+        if: always()
+        run: |
+          python - <<'EOF'
+          import json, os, pathlib
+
+          stats_file = pathlib.Path("mutmut-cicd-stats.json")
+          if not stats_file.exists():
+              print("No stats file found — skipping summary.")
+              exit(0)
+
+          s = json.loads(stats_file.read_text())
+          total   = s.get("total", 0)
+          killed  = s.get("killed", 0)
+          survived = s.get("survived", 0)
+          timeout = s.get("timeout", 0)
+          kill_rate = round(100 * killed / total, 1) if total else 0.0
+
+          bar_filled = round(kill_rate / 5)   # 20 blocks = 100%
+          bar = "█" * bar_filled + "░" * (20 - bar_filled)
+
+          lines = [
+              "## 🧬 Mutation Testing Results",
+              "",
+              f"| Metric | Value |",
+              f"|--------|-------|",
+              f"| **Kill rate** | {kill_rate}% |",
+              f"| Killed | {killed} |",
+              f"| Survived | {survived} |",
+              f"| Timeout | {timeout} |",
+              f"| Total mutants | {total} |",
+              "",
+              f"`{bar}` {kill_rate}%",
+              "",
+              "> Survived mutants are informational — download the artifact for per-file detail.",
+          ]
+
+          summary_file = pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"])
+          summary_file.write_text("\n".join(lines) + "\n")
+          print(f"Summary written — kill rate {kill_rate}% ({killed}/{total})")
+          EOF
 
       - name: Upload mutation report
         if: always()
