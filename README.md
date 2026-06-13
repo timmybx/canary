@@ -11,6 +11,7 @@
 [![ClusterFuzzLite PR fuzzing](https://github.com/timmybx/canary/actions/workflows/cflite_pr.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/cflite_pr.yml)
 [![zizmor](https://github.com/timmybx/canary/actions/workflows/zizmor.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/zizmor.yml)
 [![CodeQL](https://github.com/timmybx/canary/actions/workflows/codeql.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/codeql.yml)
+[![Mutation Testing](https://github.com/timmybx/canary/actions/workflows/mutation.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/mutation.yml)
 
 # 🐤 CANARY — Component Analytics & Near-term Advisory Risk Yardstick
 

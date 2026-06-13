@@ -63,3 +63,12 @@ include = ["canary", "tests"]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
 reportMissingTypeStubs = "none"
+
+[tool.mutmut]
+# Scope mutation to the highest-value packages: scoring logic and data collectors.
+# Expanding to canary/features or canary/train is easy — just add more paths.
+source_paths = ["canary/scoring", "canary/collectors"]
+# Disable coverage during mutation runs: --cov adds ~10x overhead per mutant
+# and --cov-fail-under would produce false "killed" results.
+pytest_add_cli_args = ["--no-cov", "-p", "no:cacheprovider", "-q", "--no-header"]
+
