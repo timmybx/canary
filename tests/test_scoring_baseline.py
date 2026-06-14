@@ -19,6 +19,7 @@ from canary.scoring.baseline import (  # type: ignore[attr-defined]
     _CAP_GOVERNANCE,
     _CAP_STALENESS,
     ScoreResult,
+    _advisory_candidates,
     _advisory_record_max_cvss,
     _cvss_base_score_to_label,
     _dependency_points,
@@ -1514,13 +1515,450 @@ def test_load_swh_features_returns_dict_on_success(
 def test_load_swh_features_returns_empty_dict_on_exception(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Exception path: any error from the inner import/call returns {}."""
+    """Exception path: any exception from the delegate returns an empty dict."""
     import canary.build.features_bundle as fb
 
-    monkeypatch.setattr(
-        fb,
-        "_load_software_heritage_features",
-        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
-    )
+    def _boom(pid: str, ddir: object, **kw: object) -> dict:
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(fb, "_load_software_heritage_features", _boom)
     result = _load_swh_features("test-plugin", tmp_path)
     assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# _load_healthscore_record -- full return-value structure
+# ---------------------------------------------------------------------------
+# Surviving mutants (61) cluster in the JSON key lookups and conditional
+# logic.  Existing tests only assert result["value"]; these pin every field
+# of the returned dict and exercise all date / details fallback branches.
+# ---------------------------------------------------------------------------
+
+
+class TestLoadHealthscoreRecordStructure:
+    """Pin the full dict returned by _load_healthscore_record."""
+
+    def _per_plugin_dir(self, tmp_path: Path) -> Path:
+        d = tmp_path / "healthscore" / "plugins"
+        d.mkdir(parents=True)
+        return d
+
+    # -- per-plugin file: complete record with all keys -----------------------
+
+    def test_per_plugin_returns_all_four_fields(self, tmp_path: Path) -> None:
+        d = self._per_plugin_dir(tmp_path)
+        payload = {
+            "collected_at": "2024-06-01T00:00:00+00:00",
+            "record": {
+                "value": 80,
+                "date": "2024-06-01",
+                "details": {"comment": "ok"},
+            },
+        }
+        (d / "my-plugin.healthscore.json").write_text(json.dumps(payload))
+        result = _load_healthscore_record("my-plugin", tmp_path)
+        assert result is not None
+        assert result["value"] == 80
+        assert result["date"] == "2024-06-01"
+        assert result["details"] == {"comment": "ok"}
+        assert result["collected_at"] == "2024-06-01T00:00:00+00:00"
+
+    def test_per_plugin_score_field_fallback(self, tmp_path: Path) -> None:
+        """When 'value' key absent, 'score' is used."""
+        d = self._per_plugin_dir(tmp_path)
+        payload = {
+            "collected_at": "2024-01-01T00:00:00Z",
+            "record": {"score": 65, "date": "2024-01-01"},
+        }
+        (d / "fallback-plugin.healthscore.json").write_text(json.dumps(payload))
+        result = _load_healthscore_record("fallback-plugin", tmp_path)
+        assert result is not None
+        assert result["value"] == 65
+
+    def test_per_plugin_value_takes_precedence_over_score(self, tmp_path: Path) -> None:
+        """When both 'value' and 'score' present, 'value' wins."""
+        d = self._per_plugin_dir(tmp_path)
+        payload = {
+            "collected_at": "2024-01-01T00:00:00Z",
+            "record": {"value": 70, "score": 30, "date": "2024-01-01"},
+        }
+        (d / "both-plugin.healthscore.json").write_text(json.dumps(payload))
+        result = _load_healthscore_record("both-plugin", tmp_path)
+        assert result is not None
+        assert result["value"] == 70
+
+    # -- date field fallback chain: updated, timestamp ------------------------
+
+    def test_per_plugin_updated_field_as_date(self, tmp_path: Path) -> None:
+        """Falls back to 'updated' when 'date' is absent."""
+        d = self._per_plugin_dir(tmp_path)
+        payload = {
+            "collected_at": "2024-01-01T00:00:00Z",
+            "record": {"value": 50, "updated": "2024-03-15"},
+        }
+        (d / "updated-plugin.healthscore.json").write_text(json.dumps(payload))
+        result = _load_healthscore_record("updated-plugin", tmp_path)
+        assert result is not None
+        assert result["date"] == "2024-03-15"
+
+    def test_per_plugin_timestamp_field_as_date(self, tmp_path: Path) -> None:
+        """Falls back to 'timestamp' when 'date' and 'updated' are absent."""
+        d = self._per_plugin_dir(tmp_path)
+        payload = {
+            "collected_at": "2024-01-01T00:00:00Z",
+            "record": {"value": 40, "timestamp": "2023-12-01"},
+        }
+        (d / "ts-plugin.healthscore.json").write_text(json.dumps(payload))
+        result = _load_healthscore_record("ts-plugin", tmp_path)
+        assert result is not None
+        assert result["date"] == "2023-12-01"
+
+    def test_per_plugin_no_date_fields_returns_none_date(self, tmp_path: Path) -> None:
+        """When no date/updated/timestamp key exists, result['date'] is None."""
+        d = self._per_plugin_dir(tmp_path)
+        payload = {
+            "collected_at": "2024-01-01T00:00:00Z",
+            "record": {"value": 90},
+        }
+        (d / "nodates-plugin.healthscore.json").write_text(json.dumps(payload))
+        result = _load_healthscore_record("nodates-plugin", tmp_path)
+        assert result is not None
+        assert result["date"] is None
+
+    # -- details field conditional --------------------------------------------
+
+    def test_per_plugin_details_key_present_uses_it(self, tmp_path: Path) -> None:
+        """When 'details' key is in the record, result['details'] is that value."""
+        d = self._per_plugin_dir(tmp_path)
+        inner = {"build": "passing", "coverage": 92}
+        payload = {
+            "collected_at": "2024-01-01T00:00:00Z",
+            "record": {"value": 85, "details": inner},
+        }
+        (d / "details-plugin.healthscore.json").write_text(json.dumps(payload))
+        result = _load_healthscore_record("details-plugin", tmp_path)
+        assert result is not None
+        assert result["details"] == inner
+
+    def test_per_plugin_no_details_key_returns_rec_itself(self, tmp_path: Path) -> None:
+        """When 'details' key is absent, result['details'] is the whole record."""
+        d = self._per_plugin_dir(tmp_path)
+        rec = {"value": 72, "date": "2024-01-01", "extra_field": "foo"}
+        payload = {"collected_at": "2024-01-01T00:00:00Z", "record": rec}
+        (d / "nodetails-plugin.healthscore.json").write_text(json.dumps(payload))
+        result = _load_healthscore_record("nodetails-plugin", tmp_path)
+        assert result is not None
+        assert result["details"] == rec
+
+    # -- collected_at field ---------------------------------------------------
+
+    def test_per_plugin_collected_at_is_returned(self, tmp_path: Path) -> None:
+        d = self._per_plugin_dir(tmp_path)
+        payload = {
+            "collected_at": "2025-05-01T12:00:00+00:00",
+            "record": {"value": 55},
+        }
+        (d / "cat-plugin.healthscore.json").write_text(json.dumps(payload))
+        result = _load_healthscore_record("cat-plugin", tmp_path)
+        assert result is not None
+        assert result["collected_at"] == "2025-05-01T12:00:00+00:00"
+
+    # -- error paths ----------------------------------------------------------
+
+    def test_per_plugin_non_dict_payload_returns_none(self, tmp_path: Path) -> None:
+        d = self._per_plugin_dir(tmp_path)
+        (d / "list-plugin.healthscore.json").write_text(json.dumps([1, 2, 3]))
+        assert _load_healthscore_record("list-plugin", tmp_path) is None
+
+    def test_per_plugin_non_dict_record_returns_none(self, tmp_path: Path) -> None:
+        d = self._per_plugin_dir(tmp_path)
+        (d / "rec-plugin.healthscore.json").write_text(json.dumps({"record": "not-a-dict"}))
+        assert _load_healthscore_record("rec-plugin", tmp_path) is None
+
+    def test_per_plugin_json_error_returns_none(self, tmp_path: Path) -> None:
+        d = self._per_plugin_dir(tmp_path)
+        (d / "bad-plugin.healthscore.json").write_text("{bad json{{{")
+        assert _load_healthscore_record("bad-plugin", tmp_path) is None
+
+    # -- aggregate file: full structure ---------------------------------------
+
+    def test_aggregate_returns_all_four_fields(self, tmp_path: Path) -> None:
+        hs_dir = tmp_path / "healthscore"
+        hs_dir.mkdir(parents=True)
+        agg = {
+            "collected_at": "2024-04-01T00:00:00Z",
+            "record": {
+                "agg-plugin": {
+                    "value": 68,
+                    "date": "2024-04-01",
+                    "details": {"trend": "stable"},
+                }
+            },
+        }
+        (hs_dir / "plugins.healthscore.json").write_text(json.dumps(agg))
+        result = _load_healthscore_record("agg-plugin", tmp_path)
+        assert result is not None
+        assert result["value"] == 68
+        assert result["date"] == "2024-04-01"
+        assert result["details"] == {"trend": "stable"}
+        assert result["collected_at"] == "2024-04-01T00:00:00Z"
+
+    def test_aggregate_score_fallback(self, tmp_path: Path) -> None:
+        """Aggregate path also falls back from 'value' to 'score'."""
+        hs_dir = tmp_path / "healthscore"
+        hs_dir.mkdir(parents=True)
+        agg = {
+            "collected_at": "2024-01-01T00:00:00Z",
+            "record": {"score-plugin": {"score": 77}},
+        }
+        (hs_dir / "plugins.healthscore.json").write_text(json.dumps(agg))
+        result = _load_healthscore_record("score-plugin", tmp_path)
+        assert result is not None
+        assert result["value"] == 77
+
+    def test_aggregate_plugin_not_in_record_returns_none(self, tmp_path: Path) -> None:
+        hs_dir = tmp_path / "healthscore"
+        hs_dir.mkdir(parents=True)
+        agg = {"collected_at": "2024-01-01T00:00:00Z", "record": {"other-plugin": {"value": 50}}}
+        (hs_dir / "plugins.healthscore.json").write_text(json.dumps(agg))
+        assert _load_healthscore_record("missing-plugin", tmp_path) is None
+
+    def test_aggregate_non_dict_plugin_entry_returns_none(self, tmp_path: Path) -> None:
+        hs_dir = tmp_path / "healthscore"
+        hs_dir.mkdir(parents=True)
+        agg = {"collected_at": "2024-01-01T00:00:00Z", "record": {"bad-plugin": "not-a-dict"}}
+        (hs_dir / "plugins.healthscore.json").write_text(json.dumps(agg))
+        assert _load_healthscore_record("bad-plugin", tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# _staleness_points -- missing boundary values
+# ---------------------------------------------------------------------------
+# Existing tests cover 365/730/1095/1825 commit boundaries and the release
+# sub-formula.  The 180-day commit boundary and the dsr=730 / dsr<=180
+# release boundaries are untested, leaving ~8 mutants alive.
+# ---------------------------------------------------------------------------
+
+
+class TestStalenessBoundaries:
+    """Pin the 180-day commit boundary and the release path boundaries."""
+
+    # commit path: 180/181 day threshold
+    def test_commit_180_days_gives_zero_pts(self) -> None:
+        # dsc=180 -> dsc > 180 is False -> pts = 0
+        pts, _ = _staleness_points(180, None)
+        assert pts == 0
+
+    def test_commit_181_days_gives_three_pts(self) -> None:
+        # dsc=181 -> dsc > 180 is True, dsc > 365 False -> pts = 3
+        pts, _ = _staleness_points(181, None)
+        assert pts == 3
+
+    # release path: dsr=730 boundary (> 730 vs <= 730)
+    def test_release_730_days_gives_zero_pts(self) -> None:
+        # dsr=730 -> dsr > 730 is False -> release branch not entered -> 0 pts
+        pts, _ = _staleness_points(None, 730)
+        assert pts == 0
+
+    def test_release_731_days_gives_pts(self) -> None:
+        # dsr=731 -> dsr > 730 True -> 731//365=2 -> 2*3=6 -> min(8,6)=6
+        pts, _ = _staleness_points(None, 731)
+        assert pts == 6
+
+    # release path: dsr<=180 "recent release" branch
+    def test_release_180_days_adds_recent_reason(self) -> None:
+        # dsr=180 -> dsr2 <= 180 True -> reason added, 0 pts
+        pts, reasons = _staleness_points(None, 180)
+        assert pts == 0
+        assert any("recent" in r.lower() or "active" in r.lower() for r in reasons)
+
+    def test_release_181_days_no_recent_reason(self) -> None:
+        # dsr=181 -> NOT > 730 so outer if not taken, BUT also not <= 180
+        # -> falls into elif branch but dsr2=181 > 180 -> no reason added
+        pts, reasons = _staleness_points(None, 181)
+        assert pts == 0
+        assert not any("recent" in r.lower() for r in reasons)
+
+
+# ---------------------------------------------------------------------------
+# _governance_points -- exact per-flag point values
+# ---------------------------------------------------------------------------
+# Mutants 13, 17, 33, 44-46, 55-57 survive because existing tests check
+# individual flags but not the exact accumulated totals from pairs.
+# These tests pin each flag's contribution precisely.
+# ---------------------------------------------------------------------------
+
+
+class TestGovernancePointValues:
+    """Pin exact point contributions from each governance flag."""
+
+    _BASE = {
+        "swh_present": True,
+        "swh_has_security_md": True,
+        "swh_has_dependabot": True,
+        "swh_has_github_actions": True,
+        "swh_has_tests_directory": True,
+        "swh_has_changelog": True,
+    }
+
+    def _with(self, **overrides: bool) -> dict:
+        return {**self._BASE, **overrides}
+
+    def test_security_md_missing_is_exactly_3(self) -> None:
+        pts, _ = _governance_points(self._with(swh_has_security_md=False))
+        assert pts == 3
+
+    def test_no_dependabot_no_actions_is_exactly_3(self) -> None:
+        pts, _ = _governance_points(
+            self._with(swh_has_dependabot=False, swh_has_github_actions=False)
+        )
+        assert pts == 3
+
+    def test_dependabot_alone_satisfies_automation(self) -> None:
+        pts, _ = _governance_points(
+            self._with(swh_has_dependabot=True, swh_has_github_actions=False)
+        )
+        assert pts == 0
+
+    def test_github_actions_alone_satisfies_automation(self) -> None:
+        pts, _ = _governance_points(
+            self._with(swh_has_dependabot=False, swh_has_github_actions=True)
+        )
+        assert pts == 0
+
+    def test_tests_directory_missing_is_exactly_2(self) -> None:
+        pts, _ = _governance_points(self._with(swh_has_tests_directory=False))
+        assert pts == 2
+
+    def test_changelog_missing_is_exactly_2(self) -> None:
+        pts, _ = _governance_points(self._with(swh_has_changelog=False))
+        assert pts == 2
+
+    def test_tests_and_changelog_missing_is_exactly_4(self) -> None:
+        pts, _ = _governance_points(
+            self._with(swh_has_tests_directory=False, swh_has_changelog=False)
+        )
+        assert pts == 4
+
+    def test_security_md_and_automation_missing_is_exactly_6(self) -> None:
+        pts, _ = _governance_points(
+            self._with(
+                swh_has_security_md=False,
+                swh_has_dependabot=False,
+                swh_has_github_actions=False,
+            )
+        )
+        assert pts == 6
+
+    def test_all_four_missing_reaches_cap(self) -> None:
+        # 3 + 3 + 2 + 2 = 10 = _CAP_GOVERNANCE
+        pts, _ = _governance_points(
+            self._with(
+                swh_has_security_md=False,
+                swh_has_dependabot=False,
+                swh_has_github_actions=False,
+                swh_has_tests_directory=False,
+                swh_has_changelog=False,
+            )
+        )
+        assert pts == _CAP_GOVERNANCE
+        assert pts == 10
+
+
+# ---------------------------------------------------------------------------
+# _advisory_candidates -- suffix ordering and deduplication
+# ---------------------------------------------------------------------------
+# 12 surviving mutants in the suffix tuple ordering and seen-set logic.
+# ---------------------------------------------------------------------------
+
+
+class TestAdvisoryCandidates:
+    """Pin the path ordering and deduplication of _advisory_candidates."""
+
+    def test_prefer_real_puts_real_first(self, tmp_path: Path) -> None:
+        paths = _advisory_candidates(tmp_path, "my-plugin", prefer_real=True)
+        # First path for a plugin should be the .real.jsonl variant
+        assert str(paths[0]).endswith(".advisories.real.jsonl")
+
+    def test_prefer_sample_puts_sample_first(self, tmp_path: Path) -> None:
+        paths = _advisory_candidates(tmp_path, "my-plugin", prefer_real=False)
+        assert str(paths[0]).endswith(".advisories.sample.jsonl")
+
+    def test_prefer_real_includes_all_three_suffixes(self, tmp_path: Path) -> None:
+        paths = _advisory_candidates(tmp_path, "my-plugin", prefer_real=True)
+        suffixes = [p.name.split("my-plugin")[-1] for p in paths]
+        assert ".advisories.real.jsonl" in suffixes
+        assert ".advisories.sample.jsonl" in suffixes
+        assert ".advisories.jsonl" in suffixes
+
+    def test_prefer_sample_includes_all_three_suffixes(self, tmp_path: Path) -> None:
+        paths = _advisory_candidates(tmp_path, "my-plugin", prefer_real=False)
+        suffixes = [p.name.split("my-plugin")[-1] for p in paths]
+        assert ".advisories.sample.jsonl" in suffixes
+        assert ".advisories.real.jsonl" in suffixes
+        assert ".advisories.jsonl" in suffixes
+
+    def test_prefer_real_second_suffix_is_sample(self, tmp_path: Path) -> None:
+        paths = _advisory_candidates(tmp_path, "my-plugin", prefer_real=True)
+        assert str(paths[1]).endswith(".advisories.sample.jsonl")
+
+    def test_prefer_sample_second_suffix_is_real(self, tmp_path: Path) -> None:
+        paths = _advisory_candidates(tmp_path, "my-plugin", prefer_real=False)
+        assert str(paths[1]).endswith(".advisories.real.jsonl")
+
+    def test_invalid_plugin_id_returns_empty(self, tmp_path: Path) -> None:
+        paths = _advisory_candidates(tmp_path, "../escape", prefer_real=True)
+        assert paths == []
+
+
+# ---------------------------------------------------------------------------
+# _dependency_points -- recency boundary (365 / 366 days)
+# ---------------------------------------------------------------------------
+# The `recent_advisory_365d` flag uses `(today - latest_adv).days <= 365`.
+# No existing test sits exactly at 365 or 366, leaving the <= vs < boundary
+# undetected by mutmut.
+# ---------------------------------------------------------------------------
+
+
+class TestDependencyRecencyBoundary:
+    """Pin the exact 365-day recency boundary in _dependency_points."""
+
+    def _write_advisory_dated(self, tmp_path: Path, days_ago: int) -> None:
+        from datetime import timedelta
+
+        pub = (date.today() - timedelta(days=days_ago)).isoformat()
+        _write_jsonl(
+            tmp_path / "advisories" / "dep-plugin.advisories.sample.jsonl",
+            [{"advisory_id": "A1", "published_date": pub}],
+        )
+
+    def test_advisory_exactly_365_days_ago_is_recent(self, tmp_path: Path) -> None:
+        # (today - pub).days == 365 -> <= 365 is True -> recent_advisory_365d = True
+        self._write_advisory_dated(tmp_path, 365)
+        _, details = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert details["recent_advisory_365d"] is True
+
+    def test_advisory_exactly_366_days_ago_is_not_recent(self, tmp_path: Path) -> None:
+        # (today - pub).days == 366 -> <= 365 is False -> recent_advisory_365d = False
+        self._write_advisory_dated(tmp_path, 366)
+        _, details = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert details["recent_advisory_365d"] is False
+
+    def test_recency_adds_3_pts_at_boundary(self, tmp_path: Path) -> None:
+        # Exactly 365 days -> recency contributes +3 on top of advisory base
+        self._write_advisory_dated(tmp_path, 365)
+        pts, _ = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert pts == 5  # 2 (advisory count) + 3 (recency)
+
+    def test_no_recency_pts_at_366_days(self, tmp_path: Path) -> None:
+        self._write_advisory_dated(tmp_path, 366)
+        pts, _ = _dependency_points(
+            "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert pts == 2  # 2 (advisory count) only

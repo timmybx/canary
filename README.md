@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/github/license/timmybx/canary)](https://github.com/timmybx/canary/blob/main/LICENSE)
 [![Last Commit](https://img.shields.io/github/last-commit/timmybx/canary)](https://github.com/timmybx/canary/commits/main)
 ![Ruff](https://img.shields.io/badge/lint-ruff-2ea44f?logo=ruff)
-![Dependabot](https://img.shields.io/badge/dependabot-enabled-2ea44f?logo=dependabot)
+[![Dependabot](https://img.shields.io/badge/dependabot-enabled-2ea44f?logo=dependabot)](https://github.com/timmybx/canary/network/updates)
 ![Python](https://img.shields.io/badge/python-3.12-blue?logo=python)
 [![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://microsoft.github.io/pyright/)
 [![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
@@ -21,7 +21,7 @@ A live demo is available at **[canary-score.com](https://canary-score.com)**, wh
 
 The project includes a Docker-based CLI, a publicly deployed web console, collectors for registry/snapshot/advisory/healthscore/GitHub/GHArchive/Software Heritage data, an ML scoring pipeline trained on seven years of historical data, feature selection analysis, operational precision@k evaluation, and an AI-powered explanation feature.
 
-> **Dependency source of truth:** `pyproject.toml` is the source of dependency declarations.  
+> **Dependency source of truth:** `pyproject.toml` is the source of dependency declarations.
 > `requirements*.txt` files are generated lockfiles used for reproducible installs.
 
 ---
