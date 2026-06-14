@@ -63,7 +63,7 @@ jobs:
           python - <<'EOF'
           import json, os, pathlib
 
-          stats_file = pathlib.Path("mutmut-cicd-stats.json")
+          stats_file = pathlib.Path("mutants/mutmut-cicd-stats.json")
           if not stats_file.exists():
               print("No stats file found — skipping summary.")
               exit(0)

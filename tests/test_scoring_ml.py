@@ -651,3 +651,216 @@ class TestUnwrapPipeline:
         imp_out, clf_out = _unwrap_pipeline(clf)
         assert imp_out is None
         assert clf_out is clf
+
+
+# ---------------------------------------------------------------------------
+# _extract_drivers  -- SHAP paths (tree + linear)
+# ---------------------------------------------------------------------------
+
+
+def _make_shap_tree_pipeline():
+    """Return a fitted Pipeline(SimpleImputer, GradientBoostingClassifier).
+
+    GradientBoostingClassifier triggers _is_tree_model (name contains
+    "Gradient") and is supported by shap.TreeExplainer without installing
+    LightGBM or XGBoost.
+    """
+    from sklearn.ensemble import GradientBoostingClassifier
+    from sklearn.impute import SimpleImputer
+    from sklearn.pipeline import Pipeline
+
+    rng = np.random.default_rng(42)
+    X = rng.standard_normal((40, 4))
+    # Deterministic binary labels driven by first two features.
+    y = ((X[:, 0] + X[:, 1]) > 0).astype(int)
+    pipe = Pipeline(
+        [
+            ("impute", SimpleImputer(strategy="mean")),
+            ("model", GradientBoostingClassifier(n_estimators=10, random_state=42)),
+        ]
+    )
+    pipe.fit(X, y)
+    return pipe
+
+
+def _make_shap_linear_pipeline():
+    """Return a fitted Pipeline(SimpleImputer, LogisticRegression).
+
+    LogisticRegression triggers _is_linear_model (has coef_ after fit)
+    and is supported by shap.LinearExplainer.
+    """
+    from sklearn.impute import SimpleImputer
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import Pipeline
+
+    rng = np.random.default_rng(0)
+    X = rng.standard_normal((40, 3))
+    y = (X[:, 0] > 0).astype(int)
+    pipe = Pipeline(
+        [
+            ("impute", SimpleImputer(strategy="mean")),
+            ("model", LogisticRegression(random_state=0, max_iter=200)),
+        ]
+    )
+    pipe.fit(X, y)
+    return pipe
+
+
+_SHAP_TREE_COLS = ["feat_a", "feat_b", "feat_c", "feat_d"]
+_SHAP_TREE_VEC: dict[str, float | None] = {
+    "feat_a": 1.5,
+    "feat_b": -0.5,
+    "feat_c": 0.2,
+    "feat_d": 0.0,
+}
+_SHAP_LINEAR_COLS = ["feat_x", "feat_y", "feat_z"]
+_SHAP_LINEAR_VEC: dict[str, float | None] = {
+    "feat_x": 2.0,
+    "feat_y": -1.0,
+    "feat_z": 0.5,
+}
+
+
+class TestExtractDriversSHAPTree:
+    """_extract_drivers tree path via shap.TreeExplainer.
+
+    Uses a real GradientBoostingClassifier fitted on synthetic data so
+    shap.TreeExplainer runs the actual SHAP algorithm rather than a mock.
+    Pins: shap_out index selection, top_n enforcement, rank sequencing,
+    direction mapping, and window-feature exclusion.
+    """
+
+    @pytest.fixture(scope="class")
+    def tree_pipeline(self):
+        return _make_shap_tree_pipeline()
+
+    def test_returns_list_of_feature_drivers(self, tree_pipeline) -> None:
+        drivers = _extract_drivers(tree_pipeline, _SHAP_TREE_COLS, _SHAP_TREE_VEC, top_n=4)
+        assert isinstance(drivers, list)
+        assert all(isinstance(d, FeatureDriver) for d in drivers)
+
+    def test_top_n_limits_output(self, tree_pipeline) -> None:
+        drivers = _extract_drivers(tree_pipeline, _SHAP_TREE_COLS, _SHAP_TREE_VEC, top_n=2)
+        assert len(drivers) <= 2
+
+    def test_top_n_one_returns_single_driver(self, tree_pipeline) -> None:
+        drivers = _extract_drivers(tree_pipeline, _SHAP_TREE_COLS, _SHAP_TREE_VEC, top_n=1)
+        assert len(drivers) == 1
+        assert drivers[0].rank == 1
+
+    def test_ranks_start_at_one_and_are_sequential(self, tree_pipeline) -> None:
+        drivers = _extract_drivers(tree_pipeline, _SHAP_TREE_COLS, _SHAP_TREE_VEC, top_n=4)
+        assert [d.rank for d in drivers] == list(range(1, len(drivers) + 1))
+
+    def test_direction_values_are_valid(self, tree_pipeline) -> None:
+        drivers = _extract_drivers(tree_pipeline, _SHAP_TREE_COLS, _SHAP_TREE_VEC, top_n=4)
+        valid = {"increases_risk", "decreases_risk", "neutral"}
+        assert all(d.direction in valid for d in drivers)
+
+    def test_positive_shap_means_increases_risk(self, tree_pipeline) -> None:
+        """Driver direction must match the sign of the actual SHAP value."""
+        import pandas as pd  # pyright: ignore[reportMissingModuleSource]
+        import shap  # pyright: ignore[reportMissingImports]
+
+        imputer, clf = _unwrap_pipeline(tree_pipeline)
+        raw = [_SHAP_TREE_VEC.get(c) for c in _SHAP_TREE_COLS]
+        X_raw = pd.DataFrame([raw], columns=_SHAP_TREE_COLS)
+        X_imp = imputer.transform(X_raw) if imputer is not None else X_raw.values  # pyright: ignore[reportOptionalMemberAccess]
+        explainer = shap.TreeExplainer(clf)
+        shap_out = explainer.shap_values(X_imp)
+        contrib = (shap_out[1] if isinstance(shap_out, list) else shap_out)[0]
+
+        drivers = _extract_drivers(tree_pipeline, _SHAP_TREE_COLS, _SHAP_TREE_VEC, top_n=4)
+        name_to_shap = dict(zip(_SHAP_TREE_COLS, contrib, strict=True))
+        for d in drivers:
+            sv = name_to_shap[d.name]
+            if sv > 0:
+                assert d.direction == "increases_risk", f"{d.name}: sv={sv}, dir={d.direction}"
+            elif sv < 0:
+                assert d.direction == "decreases_risk", f"{d.name}: sv={sv}, dir={d.direction}"
+
+    def test_names_come_from_feature_columns(self, tree_pipeline) -> None:
+        drivers = _extract_drivers(tree_pipeline, _SHAP_TREE_COLS, _SHAP_TREE_VEC, top_n=4)
+        assert all(d.name in _SHAP_TREE_COLS for d in drivers)
+
+    def test_value_matches_feature_vector(self, tree_pipeline) -> None:
+        drivers = _extract_drivers(tree_pipeline, _SHAP_TREE_COLS, _SHAP_TREE_VEC, top_n=4)
+        for d in drivers:
+            assert d.value == _SHAP_TREE_VEC.get(d.name)
+
+    def test_window_features_excluded(self, tree_pipeline) -> None:
+        cols_with_window = ["feat_a", "feat_b", "window_index", "window_month"]
+        vec_with_window: dict[str, float | None] = {
+            "feat_a": 1.5,
+            "feat_b": -0.5,
+            "window_index": 60.0,
+            "window_month": 6.0,
+        }
+        drivers = _extract_drivers(tree_pipeline, cols_with_window, vec_with_window, top_n=10)
+        driver_names = {d.name for d in drivers}
+        assert "window_index" not in driver_names
+        assert "window_month" not in driver_names
+
+
+class TestExtractDriversSHAPLinear:
+    """_extract_drivers linear path via shap.LinearExplainer.
+
+    Uses a real LogisticRegression fitted on synthetic data.
+    Pins: LinearExplainer code path, background construction, top_n
+    enforcement, rank sequencing, and direction mapping.
+    """
+
+    @pytest.fixture(scope="class")
+    def linear_pipeline(self):
+        return _make_shap_linear_pipeline()
+
+    def test_returns_list_of_feature_drivers(self, linear_pipeline) -> None:
+        drivers = _extract_drivers(linear_pipeline, _SHAP_LINEAR_COLS, _SHAP_LINEAR_VEC, top_n=3)
+        assert isinstance(drivers, list)
+        assert all(isinstance(d, FeatureDriver) for d in drivers)
+
+    def test_top_n_limits_output(self, linear_pipeline) -> None:
+        drivers = _extract_drivers(linear_pipeline, _SHAP_LINEAR_COLS, _SHAP_LINEAR_VEC, top_n=1)
+        assert len(drivers) <= 1
+
+    def test_ranks_start_at_one_and_are_sequential(self, linear_pipeline) -> None:
+        drivers = _extract_drivers(linear_pipeline, _SHAP_LINEAR_COLS, _SHAP_LINEAR_VEC, top_n=3)
+        assert [d.rank for d in drivers] == list(range(1, len(drivers) + 1))
+
+    def test_direction_values_are_valid(self, linear_pipeline) -> None:
+        drivers = _extract_drivers(linear_pipeline, _SHAP_LINEAR_COLS, _SHAP_LINEAR_VEC, top_n=3)
+        valid = {"increases_risk", "decreases_risk", "neutral"}
+        assert all(d.direction in valid for d in drivers)
+
+    def test_positive_shap_means_increases_risk(self, linear_pipeline) -> None:
+        """Driver direction must match the sign of the actual SHAP value."""
+        import pandas as pd  # pyright: ignore[reportMissingModuleSource]
+        import shap  # pyright: ignore[reportMissingImports]
+        import shap.maskers  # pyright: ignore[reportMissingImports]
+
+        imputer, clf = _unwrap_pipeline(linear_pipeline)
+        raw = [_SHAP_LINEAR_VEC.get(c) for c in _SHAP_LINEAR_COLS]
+        X_raw = pd.DataFrame([raw], columns=_SHAP_LINEAR_COLS)
+        X_imp = imputer.transform(X_raw) if imputer is not None else X_raw.values  # pyright: ignore[reportOptionalMemberAccess]
+        background = np.zeros((1, len(_SHAP_LINEAR_COLS)))
+        explainer = shap.LinearExplainer(clf, shap.maskers.Independent(background))
+        shap_out = explainer.shap_values(X_imp)
+        contrib = shap_out[0]
+
+        drivers = _extract_drivers(linear_pipeline, _SHAP_LINEAR_COLS, _SHAP_LINEAR_VEC, top_n=3)
+        name_to_shap = dict(zip(_SHAP_LINEAR_COLS, contrib, strict=True))
+        for d in drivers:
+            sv = name_to_shap[d.name]
+            if sv > 0:
+                assert d.direction == "increases_risk", f"{d.name}: sv={sv}, dir={d.direction}"
+            elif sv < 0:
+                assert d.direction == "decreases_risk", f"{d.name}: sv={sv}, dir={d.direction}"
+
+    def test_value_matches_feature_vector(self, linear_pipeline) -> None:
+        drivers = _extract_drivers(linear_pipeline, _SHAP_LINEAR_COLS, _SHAP_LINEAR_VEC, top_n=3)
+        for d in drivers:
+            assert d.value == _SHAP_LINEAR_VEC.get(d.name)
+
+    def test_names_come_from_feature_columns(self, linear_pipeline) -> None:
+        drivers = _extract_drivers(linear_pipeline, _SHAP_LINEAR_COLS, _SHAP_LINEAR_VEC, top_n=3)
+        assert all(d.name in _SHAP_LINEAR_COLS for d in drivers)

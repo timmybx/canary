@@ -63,17 +63,17 @@ python -m pre_commit run --all-files
 
 Generate pinned runtime deps:
 ```bash
-python -m piptools compile --output-file requirements.txt pyproject.toml
+python -m piptools compile --allow-unsafe --generate-hashes --output-file requirements.txt pyproject.toml
 ```
 
-Generate pinned dev deps:
+Generate pinned dev deps (source is `requirements-dev.in`, not `pyproject.toml`):
 ```bash
-python -m piptools compile --extra dev --output-file requirements-dev.txt pyproject.toml
+python -m piptools compile --allow-unsafe --generate-hashes --output-file requirements-dev.txt requirements-dev.in
 ```
 
-Generate pinned CI deps:
+Generate pinned CI deps (minimal lockfile for the pre-commit autoupdate workflow only):
 ```bash
-python -m piptools compile --output-file requirements-ci.txt requirements-ci.in
+python -m piptools compile --allow-unsafe --generate-hashes --output-file requirements-ci.txt requirements-ci.in
 ```
 
 ## Pull request guidelines
