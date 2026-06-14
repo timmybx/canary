@@ -476,3 +476,43 @@ def test_load_plugin_alias_map_registry_oserror_is_silently_ignored(
     # Should not raise; OSError is swallowed
     result = load_plugin_alias_map(registry_path=registry_path, data_dir=tmp_path)
     assert isinstance(result, dict)
+
+
+# ---------------------------------------------------------------------------
+# load_plugin_alias_map -- snapshot not a dict, alias file not a dict,
+# alias equal to canonical after normalization
+# ---------------------------------------------------------------------------
+
+
+def test_load_plugin_alias_map_snapshot_not_a_dict_is_skipped(tmp_path: Path) -> None:
+    # line 138: "if not isinstance(payload, dict): continue"
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir(parents=True)
+    (plugins_dir / "my-plugin.snapshot.json").write_text(
+        json.dumps(["not", "a", "dict"]), encoding="utf-8"
+    )
+    result = load_plugin_alias_map(data_dir=tmp_path)
+    assert "my-plugin" not in result
+
+
+def test_load_plugin_alias_map_alias_file_not_a_dict_is_skipped(tmp_path: Path) -> None:
+    # line 126->122: alias file is a list, not a dict
+    registry_dir = tmp_path / "registry"
+    registry_dir.mkdir(parents=True)
+    (registry_dir / "plugin_aliases.json").write_text(
+        json.dumps(["old-name", "new-name"]), encoding="utf-8"
+    )
+    result = load_plugin_alias_map(data_dir=tmp_path)
+    assert isinstance(result, dict)
+    assert "old-name" not in result
+
+
+def test_load_plugin_alias_map_skips_alias_equal_to_canonical(tmp_path: Path) -> None:
+    # line 130->127: alias_norm == canonical_norm -> skipped
+    registry_dir = tmp_path / "registry"
+    registry_dir.mkdir(parents=True)
+    (registry_dir / "plugin_aliases.json").write_text(
+        json.dumps({"my-plugin": "my-plugin"}), encoding="utf-8"
+    )
+    result = load_plugin_alias_map(data_dir=tmp_path)
+    assert "my-plugin" not in result

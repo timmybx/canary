@@ -503,3 +503,91 @@ def test_rate_limiter_blocks_after_max_requests():
     webapp._EXPLAIN_RATE_LIMIT[ip] = [now] * webapp._EXPLAIN_RATE_MAX
     assert webapp._check_explain_rate_limit(ip) is False
     webapp._EXPLAIN_RATE_LIMIT.pop(ip, None)
+
+
+# ---------------------------------------------------------------------------
+# _load_plugin_choices -- edge cases in JSONL parsing (services.py lines 35-44)
+# ---------------------------------------------------------------------------
+
+
+def test_load_plugin_choices_skips_blank_lines(tmp_path: Path) -> None:
+    # line 35-36: "if not line: continue"
+    registry = tmp_path / "plugins.jsonl"
+    registry.write_text(
+        '{"plugin_id": "alpha"}\n\n{"plugin_id": "beta"}\n',
+        encoding="utf-8",
+    )
+    result = _load_plugin_choices(str(registry))
+    assert "alpha" in result
+    assert "beta" in result
+
+
+def test_load_plugin_choices_skips_malformed_json_lines(tmp_path: Path) -> None:
+    # line 39-40: "except json.JSONDecodeError: continue"
+    registry = tmp_path / "plugins.jsonl"
+    registry.write_text(
+        '{"plugin_id": "good-plugin"}\nnot valid json {{{\n{"plugin_id": "also-good"}\n',
+        encoding="utf-8",
+    )
+    result = _load_plugin_choices(str(registry))
+    assert "good-plugin" in result
+    assert "also-good" in result
+
+
+def test_load_plugin_choices_skips_records_without_plugin_id(tmp_path: Path) -> None:
+    # line 42->33: "if plugin_id:" is False (empty string after strip)
+    registry = tmp_path / "plugins.jsonl"
+    registry.write_text(
+        '{"plugin_id": ""}\n{"no_id_field": true}\n{"plugin_id": "real-plugin"}\n',
+        encoding="utf-8",
+    )
+    result = _load_plugin_choices(str(registry))
+    assert result == ["real-plugin"]
+
+
+# ---------------------------------------------------------------------------
+# _inject_live_commit_signal (services.py lines 134-160)
+# ---------------------------------------------------------------------------
+
+
+def test_inject_live_commit_signal_no_live_date_returns_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # line 135-136: live_date is falsy -> original score_result returned unchanged
+    monkeypatch.setattr("canary.web.services._fetch_live_commit_date", lambda pid: None)
+    original = {"reasons": ["Some reason."], "score": 5}
+    result = webapp._inject_live_commit_signal(original, "my-plugin")
+    assert result is original
+
+
+def test_inject_live_commit_signal_replaces_matching_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # lines 148-150: stale commit reason is found and replaced
+    monkeypatch.setattr(
+        "canary.web.services._fetch_live_commit_date",
+        lambda pid: "June 1, 2026",
+    )
+    score_result = {
+        "reasons": [
+            "Recent commit activity (45 days ago) suggests active maintenance.",
+            "No advisories found.",
+        ]
+    }
+    result = webapp._inject_live_commit_signal(score_result, "my-plugin")
+    assert result["reasons"][0] == "Last commit: June 1, 2026 — live data from GitHub."
+    assert result["reasons"][1] == "No advisories found."
+
+
+def test_inject_live_commit_signal_prepends_when_no_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # lines 155-156: no stale reason found -> live date prepended
+    monkeypatch.setattr(
+        "canary.web.services._fetch_live_commit_date",
+        lambda pid: "May 20, 2026",
+    )
+    score_result = {"reasons": ["No advisories found.", "Low staleness."]}
+    result = webapp._inject_live_commit_signal(score_result, "my-plugin")
+    assert result["reasons"][0] == "Last commit: May 20, 2026 — live data from GitHub."
+    assert "No advisories found." in result["reasons"]
