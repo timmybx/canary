@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1962,3 +1963,185 @@ class TestDependencyRecencyBoundary:
             "dep-plugin", data_dir=tmp_path, today=date.today(), prefer_real=False
         )
         assert pts == 2  # 2 (advisory count) only
+
+
+# ---------------------------------------------------------------------------
+# _extract_dependency_plugin_ids -- non-list deps and invalid pid
+# ---------------------------------------------------------------------------
+
+
+class TestExtractDependencyPluginIdsBranches:
+    """Branch coverage for _extract_dependency_plugin_ids."""
+
+    def test_deps_not_a_list_returns_empty(self) -> None:
+        # 117->127: isinstance(deps, list) is False
+        snapshot = {"plugin_api": {"dependencies": {"name": "token-macro"}}}
+        assert _extract_dependency_plugin_ids(snapshot) == []
+
+    def test_invalid_pid_string_is_skipped(self) -> None:
+        # 124->118: _safe_plugin_id returns None (invalid chars) -> skipped
+        snapshot = {"plugin_api": {"dependencies": [{"name": "../../escape"}]}}
+        assert _extract_dependency_plugin_ids(snapshot) == []
+
+    def test_mixed_valid_and_invalid_pids(self) -> None:
+        # valid pid returned; invalid and blank ones skipped
+        snapshot = {
+            "plugin_api": {
+                "dependencies": [
+                    {"name": "token-macro"},
+                    {"name": "../../escape"},
+                ]
+            }
+        }
+        assert _extract_dependency_plugin_ids(snapshot) == ["token-macro"]
+
+
+# ---------------------------------------------------------------------------
+# _advisory_record_max_cvss -- non-list vulns and non-dict severity_summary
+# ---------------------------------------------------------------------------
+
+
+class TestAdvisoryRecordMaxCvssEdgePaths:
+    """Partial-branch coverage for _advisory_record_max_cvss fallback paths."""
+
+    def test_vulns_not_a_list_falls_back_to_summary(self) -> None:
+        # 548->565: isinstance(vulns, list) is False; falls through to severity_summary
+        rec = {
+            "vulnerabilities": {"unexpected": "dict"},
+            "severity_summary": {"max_cvss_base_score": 7.5},
+        }
+        assert _advisory_record_max_cvss(rec) == 7.5
+
+    def test_severity_summary_not_a_dict_returns_none(self) -> None:
+        # 567->574: isinstance(summ, dict) is False -> None returned
+        rec = {
+            "vulnerabilities": {"unexpected": "dict"},
+            "severity_summary": "High",
+        }
+        assert _advisory_record_max_cvss(rec) is None
+
+    def test_severity_summary_non_numeric_max_cvss_returns_none(self) -> None:
+        # 572-573: float(bs) raises ValueError -> max_score stays None
+        rec = {"severity_summary": {"max_cvss_base_score": "N/A"}}
+        assert _advisory_record_max_cvss(rec) is None
+
+
+# ---------------------------------------------------------------------------
+# _dependency_points -- advisory with bad date, sec_warnings not a list,
+#                       healthscore producing zero points, non-float healthscore
+# ---------------------------------------------------------------------------
+
+
+class TestDependencyPointsBranchPaths:
+    """Partial-branch coverage for _dependency_points edge cases."""
+
+    def test_advisory_with_unparsable_date_is_skipped(self, tmp_path: Path) -> None:
+        # 145->143: _parse_date returns None -> advisory_dates stays empty
+        _write_jsonl(
+            tmp_path / "advisories" / "dep.advisories.sample.jsonl",
+            [{"advisory_id": "A1", "published_date": "not-a-date"}],
+        )
+        _, details = _dependency_points(
+            "dep", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert details["latest_advisory_date"] is None
+        assert details["recent_advisory_365d"] is False
+
+    def test_sec_warnings_not_a_list_is_ignored(self, tmp_path: Path) -> None:
+        # 164->171: isinstance(sec_warnings, list) is False -> counts stay 0
+        snap_path = tmp_path / "plugins" / "dep.snapshot.json"
+        snap_path.parent.mkdir(parents=True, exist_ok=True)
+        snap_path.write_text(
+            json.dumps({"plugin_api": {"securityWarnings": "HIGH"}}),
+            encoding="utf-8",
+        )
+        _, details = _dependency_points(
+            "dep", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert details["security_warning_count"] == 0
+        assert details["active_security_warning_count"] == 0
+
+    def test_healthscore_100_gives_zero_risk_points(self, tmp_path: Path) -> None:
+        # 210->216: hs_pts == 0 -> the if hs_pts: branch is False
+        hs_path = tmp_path / "healthscore" / "plugins" / "dep.healthscore.json"
+        hs_path.parent.mkdir(parents=True, exist_ok=True)
+        hs_path.write_text(
+            json.dumps({"record": {"value": 100}, "collected_at": "2024-01-01"}),
+            encoding="utf-8",
+        )
+        _, details = _dependency_points(
+            "dep", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        # round((100-100)/25) == 0 -> no healthscore risk points added
+        assert details["healthscore"] == 100
+
+    def test_healthscore_non_float_value_is_ignored(self, tmp_path: Path) -> None:
+        # 213-214: float(hs_value) raises ValueError -> hv = None, no crash
+        hs_path = tmp_path / "healthscore" / "plugins" / "dep.healthscore.json"
+        hs_path.parent.mkdir(parents=True, exist_ok=True)
+        hs_path.write_text(
+            json.dumps({"record": {"value": "unknown"}, "collected_at": "2024-01-01"}),
+            encoding="utf-8",
+        )
+        pts, details = _dependency_points(
+            "dep", data_dir=tmp_path, today=date.today(), prefer_real=False
+        )
+        assert isinstance(pts, int)
+
+
+# ---------------------------------------------------------------------------
+# _load_healthscore_record -- aggregate "record" not a dict
+# ---------------------------------------------------------------------------
+
+
+class TestLoadHealthscoreRecordAggregateNonDict:
+    """267->257: aggregate file with non-dict record is skipped."""
+
+    def test_aggregate_record_not_dict_returns_none(self, tmp_path: Path) -> None:
+        agg_path = tmp_path / "healthscore" / "plugins.healthscore.json"
+        agg_path.parent.mkdir(parents=True, exist_ok=True)
+        agg_path.write_text(
+            json.dumps({"record": "not-a-dict", "collected_at": "2024-01-01"}),
+            encoding="utf-8",
+        )
+        result = _load_healthscore_record("myplugin", tmp_path)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _staleness_points -- non-convertible days_since_release covers both
+#                      except blocks (417-418 and 434-435)
+# ---------------------------------------------------------------------------
+
+
+class TestStalenessNonConvertibleRelease:
+    """417-418 and 434-435: both except blocks hit with a non-int days_since_release."""
+
+    def test_non_int_days_since_release_does_not_raise(self) -> None:
+        # int("N/A") raises ValueError at line 416 -> dsr = None (417-418 hit)
+        # elif days_since_release is not None: -> True -> int("N/A") again (434-435 hit)
+        bad_release: Any = "N/A"
+        pts, reasons = _staleness_points(None, bad_release)
+        assert isinstance(pts, int)
+        assert isinstance(reasons, list)
+
+
+# ---------------------------------------------------------------------------
+# _load_advisories_for_plugin -- blank lines in JSONL are skipped (line 607)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadAdvisoriesBlankLines:
+    """607: the `if not line: continue` branch is taken for blank lines."""
+
+    def test_blank_lines_in_jsonl_are_skipped(self, tmp_path: Path) -> None:
+        adv_path = tmp_path / "advisories" / "myplugin.advisories.sample.jsonl"
+        adv_path.parent.mkdir(parents=True, exist_ok=True)
+        adv_path.write_text(
+            '{"advisory_id": "A1"}\n\n{"advisory_id": "A2"}\n',
+            encoding="utf-8",
+        )
+        records = _load_advisories_for_plugin("myplugin", tmp_path, prefer_real=False)
+        assert len(records) == 2
+        assert records[0]["advisory_id"] == "A1"
+        assert records[1]["advisory_id"] == "A2"

@@ -791,34 +791,34 @@ def _months_since_last_nonzero(rows: list[dict[str, Any]], idx: int, key: str) -
     return None
 
 
-def _safe_div(numer: float, denom: float) -> float | None:
+def _safe_div(numerator: float, denom: float) -> float | None:
     if denom <= 0:
         return None
-    return numer / denom
+    return numerator / denom
 
 
 def _safe_div_min(
-    numer: float,
+    numerator: float,
     denom: float,
     *,
     min_denom: float = 1.0,
 ) -> float | None:
     if denom < min_denom:
         return None
-    return numer / denom
+    return numerator / denom
 
 
 def _safe_div_smooth(
-    numer: float,
+    numerator: float,
     denom: float,
     *,
     min_denom: float = 1.0,
-    numer_smooth: float = 1.0,
+    numerator_smooth: float = 1.0,
     denom_smooth: float = 2.0,
 ) -> float | None:
     if denom < min_denom:
         return None
-    return (numer + numer_smooth) / (denom + denom_smooth)
+    return (numerator + numerator_smooth) / (denom + denom_smooth)
 
 
 def _clip(

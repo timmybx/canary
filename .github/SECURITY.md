@@ -8,10 +8,10 @@ If you believe you’ve found a security vulnerability, please do **not** open a
 
 Instead, please report it via one of the following methods:
 
-1) **GitHub Security Advisories (preferred)**  
+1) **GitHub Security Advisories (preferred)**
    Use the repository’s “Report a vulnerability” button (Security tab), which creates a private report.
 
-2) **Email (backup)**  
+2) **Email (backup)**
    Email: tebrennan@gwu.edu
    Please include “CANARY security” in the subject line.
 

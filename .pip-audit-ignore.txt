@@ -3,5 +3,3 @@
 #
 # Use this only for known issues with no available fix yet.
 # Remove entries as soon as an upstream patched release exists.
-
-

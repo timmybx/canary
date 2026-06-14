@@ -665,14 +665,16 @@ def _make_shap_tree_pipeline():
     "Gradient") and is supported by shap.TreeExplainer without installing
     LightGBM or XGBoost.
     """
+    import pandas as pd  # pyright: ignore[reportMissingModuleSource]
     from sklearn.ensemble import GradientBoostingClassifier
     from sklearn.impute import SimpleImputer
     from sklearn.pipeline import Pipeline
 
     rng = np.random.default_rng(42)
-    X = rng.standard_normal((40, 4))
+    cols = ["feat_a", "feat_b", "feat_c", "feat_d"]
+    X = pd.DataFrame(rng.standard_normal((40, 4)), columns=cols)
     # Deterministic binary labels driven by first two features.
-    y = ((X[:, 0] + X[:, 1]) > 0).astype(int)
+    y = ((X["feat_a"] + X["feat_b"]) > 0).astype(int)
     pipe = Pipeline(
         [
             ("impute", SimpleImputer(strategy="mean")),
@@ -689,13 +691,15 @@ def _make_shap_linear_pipeline():
     LogisticRegression triggers _is_linear_model (has coef_ after fit)
     and is supported by shap.LinearExplainer.
     """
+    import pandas as pd  # pyright: ignore[reportMissingModuleSource]
     from sklearn.impute import SimpleImputer
     from sklearn.linear_model import LogisticRegression
     from sklearn.pipeline import Pipeline
 
     rng = np.random.default_rng(0)
-    X = rng.standard_normal((40, 3))
-    y = (X[:, 0] > 0).astype(int)
+    cols = ["feat_x", "feat_y", "feat_z"]
+    X = pd.DataFrame(rng.standard_normal((40, 3)), columns=cols)
+    y = (X["feat_x"] > 0).astype(int)
     pipe = Pipeline(
         [
             ("impute", SimpleImputer(strategy="mean")),

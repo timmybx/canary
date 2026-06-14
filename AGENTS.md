@@ -51,7 +51,7 @@ python -m pip install --require-hashes -r requirements.txt
 python -m pip install --require-hashes -r requirements-dev.txt
 ```
 
-> `pyproject.toml` is the **source of truth** for declared dependencies.  
+> `pyproject.toml` is the **source of truth** for declared dependencies.
 > `requirements*.txt` files are generated, hash-pinned lockfiles — do not edit
 > them by hand.  Regenerate with `make reqs` (requires Docker) or with
 > `pip-compile` directly.
@@ -200,7 +200,7 @@ This is applied consistently across the entire package and tests.
 
 ### Ruff rule set
 
-`E`, `F`, `I` (isort), `B` (flake8-bugbear), `UP` (pyupgrade).  
+`E`, `F`, `I` (isort), `B` (flake8-bugbear), `UP` (pyupgrade).
 Target: Python 3.12.  Run `ruff check . --fix` to autofix most violations.
 
 ### Type annotations

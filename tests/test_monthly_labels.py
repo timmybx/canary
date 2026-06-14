@@ -193,7 +193,7 @@ def test_helper_contract_month_keys_sort_chronologically() -> None:
         ("has_advisory_this_month", True, False, 1),
         ("advisory_this_month", True, False, 1),
         ("advisory_count_this_month", 2, 0, 1),
-        # an unparseable count is treated as "no advisory", not an error
+        # an unparsable count is treated as "no advisory", not an error
         ("advisory_count_this_month", "not-a-number", 0, 0),
     ],
 )
