@@ -15,8 +15,10 @@ ENV PIP_NO_CACHE_DIR=1 \
 COPY requirements-build.txt /app/
 RUN python -m pip install --no-cache-dir --require-hashes -r requirements-build.txt
 
-# OS deps (optional: pin version if you want full immutability)
+# OS deps — upgrade first to pull in any security patches (e.g. openssl),
+# then install the packages we need.
 RUN apt-get update \
+ && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends libatomic1 libgomp1 jq rsync \
  && rm -rf /var/lib/apt/lists/*
 

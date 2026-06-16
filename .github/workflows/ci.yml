@@ -104,4 +104,5 @@ jobs:
           command: cves,recommendations
           image: local://canary:ci
           only-severities: critical,high
+          only-fixed: true
           exit-code: true
