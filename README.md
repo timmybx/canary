@@ -743,6 +743,14 @@ Apache-2.0
 
 ---
 
+## 🤖 AI Use Attribution
+
+Portions of this project were developed with assistance from generative AI tools, including ChatGPT, Copilot and Claude. AI assistance was used to support software development activities such as code generation, refactoring, debugging, test development, and documentation drafting.
+
+All AI-assisted code was reviewed, tested, and integrated by the author. The author remains responsible for the design decisions, implementation, validation, interpretation of results, and ability to explain the code and methodology to academic advisors, course instructors, and defense committee members.
+
+---
+
 ## ⚠️ Disclaimer
 
 This is a research prototype. Scores are **not** security guarantees and should not be used as the sole basis for operational risk decisions.
