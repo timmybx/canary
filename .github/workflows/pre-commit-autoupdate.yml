@@ -37,7 +37,16 @@ jobs:
 
       - name: Update pre-commit hooks
         run: |
-          pre-commit autoupdate
+          # Update each remote repo individually.
+          # crate-ci/typos is intentionally excluded: it publishes a floating v1
+          # major-version tag that pre-commit autoupdate resolves instead of the
+          # specific v1.x.y release, causing the pinned rev to regress every run.
+          # Update the crate-ci/typos rev in .pre-commit-config.yaml manually.
+          pre-commit autoupdate --repo https://github.com/pre-commit/pre-commit-hooks
+          pre-commit autoupdate --repo https://github.com/abravalheri/validate-pyproject
+          pre-commit autoupdate --repo https://github.com/astral-sh/ruff-pre-commit
+          pre-commit autoupdate --repo https://github.com/PyCQA/bandit
+          pre-commit autoupdate --repo https://github.com/RobertCraigie/pyright-python
 
       - name: Run pre-commit (all files)
         run: |
