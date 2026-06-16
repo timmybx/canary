@@ -50,12 +50,12 @@ jobs:
           token: ${{ secrets.PR_BOT_TOKEN }}
           branch: chore/pre-commit-autoupdate
           delete-branch: true
-          title: "chore: pre-commit autoupdate"
-          commit-message: "chore: pre-commit autoupdate"
+          title: "chore: pre-commit autoupdate --freeze"
+          commit-message: "chore: pre-commit autoupdate --freeze"
           body: |
             This PR was created automatically by the scheduled workflow.
 
-            It runs `pre-commit autoupdate` to bump hook revisions in `.pre-commit-config.yaml`
+            It runs `pre-commit autoupdate --freeze` to bump hook revisions in `.pre-commit-config.yaml`
             and then executes `pre-commit run --all-files` to verify hooks still pass.
           labels: |
             dependencies
