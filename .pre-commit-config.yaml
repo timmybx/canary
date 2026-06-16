@@ -5,7 +5,7 @@
 repos:
   # Fast hygiene checks (whitespace, file endings, conflict markers, TOML/YAML syntax)
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
     hooks:
       - id: end-of-file-fixer
       - id: trailing-whitespace
@@ -15,13 +15,13 @@ repos:
 
   # Typo detection (crate-ci/typos)
   - repo: https://github.com/crate-ci/typos
-    rev: v1.47.2
+    rev: d80b8e26878e372a041833cd67163dbdb6a4336e  # frozen: v1
     hooks:
       - id: typos
 
   # Validate pyproject.toml against PEP 517/518/621 schemas
   - repo: https://github.com/abravalheri/validate-pyproject
-    rev: v0.25
+    rev: 4b2e70d08cb2ccd26d1fba73588de41c7a5d50b7  # frozen: v0.25
     hooks:
       - id: validate-pyproject
 
@@ -36,7 +36,7 @@ repos:
 
   # Ruff (lint + autofix) + Ruff formatter
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.17
+    rev: 3b3f7c3f57fe9925356faf5fe6230835138be230  # frozen: v0.15.17
     hooks:
       - id: ruff-check
         args: [--fix]
@@ -44,7 +44,7 @@ repos:
 
   # Bandit (Python security linter)
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.9.4
+    rev: 92ae8b82fb422a639f0ed8d99e96cea769594e08  # frozen: 1.9.4
     hooks:
       - id: bandit
         pass_filenames: false
@@ -63,7 +63,7 @@ repos:
 
   # Pyright (Type checking similar to a compiler)
   - repo: https://github.com/RobertCraigie/pyright-python
-    rev: v1.1.410
+    rev: 509391adec397533e39c65449e0c85d93d48e777  # frozen: v1.1.410
     hooks:
       - id: pyright
         additional_dependencies:
