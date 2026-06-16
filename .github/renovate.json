@@ -3,12 +3,12 @@
     "config:recommended",
     "docker:pinDigests"
   ],
+  "timezone": "America/Denver",
   "packageRules": [
     {
       "matchDatasources": ["docker"],
       "matchPackageNames": ["python"],
       "matchUpdateTypes": ["digest"],
-      "schedule": ["before 6am on monday"],
       "automerge": false
     }
   ]
