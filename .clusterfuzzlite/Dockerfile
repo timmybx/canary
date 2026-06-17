@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bullseye@sha256:411fa4dcfdce7e7a3057c45662beba9dcd4fa36b2e50a2bfcd6c9333e59bf0db AS python312
+FROM python:3.13-slim-bullseye@sha256:e98b521460ee75bca92175c16247bdf7275637a8faaeb2bcfa19d879ae5c4b9a AS python312
 
 FROM gcr.io/oss-fuzz-base/base-builder-python@sha256:99c714c91ec30778a3ce3ae5b37491a81fc043808bc8f2955159c2f608f80116
 
