@@ -1,6 +1,6 @@
 FROM python:3.12-slim-bullseye@sha256:411fa4dcfdce7e7a3057c45662beba9dcd4fa36b2e50a2bfcd6c9333e59bf0db AS python312
 
-FROM gcr.io/oss-fuzz-base/base-builder-python@sha256:99c714c91ec30778a3ce3ae5b37491a81fc043808bc8f2955159c2f608f80116
+FROM gcr.io/oss-fuzz-base/base-builder-python@sha256:4c99232e00b08977686d0831264a2fc19213e09e256ab9dc04fd280c2ee91237
 
 # ClusterFuzzLite's Python base image still ships Python 3.11, but this repo
 # locks deps for Python 3.12 and requires shap>=0.52.0. Overlay the same
