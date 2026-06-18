@@ -10,7 +10,7 @@
 [![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 [![ClusterFuzzLite PR fuzzing](https://github.com/timmybx/canary/actions/workflows/cflite_pr.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/cflite_pr.yml)
 [![zizmor](https://github.com/timmybx/canary/actions/workflows/zizmor.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/zizmor.yml)
-[![CodeQL](https://github.com/timmybx/canary/actions/workflows/codeql.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/codeql.yml)
+[![CodeQL](https://img.shields.io/badge/CodeQL-enabled-brightgreen?logo=github)](https://github.com/timmybx/canary/security/code-scanning)
 [![Mutation Testing](https://github.com/timmybx/canary/actions/workflows/mutation.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/mutation.yml)
 
 # 🐤 CANARY — Component Analytics & Near-term Advisory Risk Yardstick
