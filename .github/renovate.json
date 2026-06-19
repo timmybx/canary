@@ -11,6 +11,9 @@
   "pip_requirements": {
     "enabled": false
   },
+  "pre-commit": {
+    "pinDigests": true
+  },
   "packageRules": [
     {
       "matchDatasources": ["docker"],

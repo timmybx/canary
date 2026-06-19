@@ -53,6 +53,7 @@ import json
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,20 @@ _GITHUB_RE = re.compile(
     r"https?://(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)",
     re.IGNORECASE,
 )
+
+_GITHUB_HOSTS = {"github.com", "www.github.com"}
+
+
+def _is_github_url(url: str) -> bool:
+    """Return True only if *url* has github.com as its exact hostname.
+
+    Using urlparse rather than a substring check prevents false positives
+    from domains like ``evilgithub.com`` or ``github.com.evil.com``.
+    """
+    try:
+        return urllib.parse.urlparse(url).netloc.lower() in _GITHUB_HOSTS
+    except Exception:
+        return False
 
 
 def _extract_github_owner_repo(text: str) -> tuple[str, str] | None:
@@ -127,7 +142,7 @@ def _find_github_url(info: dict[str, Any]) -> tuple[str, str] | None:
     checked: list[str] = []
     for key in priority_keys:
         url = project_urls.get(key, "")
-        if url and "github.com" in url.lower():
+        if url and _is_github_url(url):
             result = _extract_github_owner_repo(url)
             if result:
                 return result
@@ -136,14 +151,14 @@ def _find_github_url(info: dict[str, Any]) -> tuple[str, str] | None:
 
     # Try all remaining project_urls values
     for key, url in project_urls.items():
-        if key not in priority_keys and url and "github.com" in url.lower():
+        if key not in priority_keys and url and _is_github_url(url):
             result = _extract_github_owner_repo(url)
             if result:
                 return result
 
     # 2. home_page field
     home = info.get("home_page") or ""
-    if "github.com" in home.lower():
+    if _is_github_url(home):
         result = _extract_github_owner_repo(home)
         if result:
             return result
