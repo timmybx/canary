@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.11] - 2026-06-23
+### Added
+- PyPI cross-validation study (`crossval/pypi/`) demonstrating that CANARY's advisory-history signal generalises beyond the Jenkins plugin ecosystem. Four self-contained scripts collect the package universe, download OSV advisories, build a monthly labeled dataset, and train/evaluate advisory-only models with a side-by-side comparison against Jenkins. After correcting for selection bias by scoping to the top-8,000 PyPI packages by downloads (regardless of advisory history), both ecosystems exhibit near-identical positive rates (~1.7% vs ~1.9%), and advisory history remains predictive above base rate in both (XGBoost AP 0.27 vs base rate 0.017). A `crossval/pypi/README.md` documents the methodology, results, and limitations.
+
+### Changed
+- Removed `pre-commit-autoupdate.yml` nightly workflow and `dependabot.yml`; Renovate now handles all dependency update automation (GitHub Actions, pip, pip-compile, pre-commit hooks, and Docker digests) from a single configuration. Added `"pre-commit": {"pinDigests": true}` to `renovate.json` to preserve frozen SHA pinning equivalent to `pre-commit autoupdate --freeze`.
+- Removed the custom CodeQL GitHub Actions workflow (`codeql.yml`); GitHub's default dynamic CodeQL scanning now runs analysis, eliminating the duplicate failing run that was occurring on every push.
+- Renovate configuration hardened: narrowed pip-compile manager to `requirements-dev.txt` only via `managerFilePatterns`, disabled `pip_requirements` manager to avoid conflicts, restricted Python version updates to `<3.13` for both Docker and GitHub Actions managers, and added `America/Denver` timezone.
+- CI workflow updates: `docker/login-action` bumped to v4 (#127); Docker job permissions hardened with explicit `contents: read`; fixed-only vulnerability scan mode enabled; `actions/checkout` bumped to v7 (#148); `github/codeql-action` bumped to v4.36.x (#131, #143); `docker/scout-action` bumped to v1.21.0 (#132) then v1.22.0 (#156); `zizmorcore/zizmor-action` bumped to v0.5.7 (#153).
+- Dependency pin refreshes: `ruff` to 0.15.17 (#135), `pyinstaller` to 6.21.0 (#137), `atheris` to 3.1.0 (#136), `msgpack` to 1.2.1 (#151); multiple `gcr.io/oss-fuzz-base/base-builder-python` digest refreshes (#146, #149, #151, #152, #154, #157) and `python:3.12-slim` digest refreshes (#129); pip-compile output refreshes (#139, #155).
+
+### Fixed
+- Replaced incomplete URL substring checks (`"github.com" in url.lower()`) with proper hostname validation via `urllib.parse.urlparse()` in `crossval/pypi/00_collect_universe.py`, resolving three CodeQL "Incomplete URL substring sanitization" (high severity) findings that could allow lookalike-domain bypass.
+- Updated CodeQL badge in README from a dynamic badge (which showed stale/misleading state) to a static shields.io badge linking directly to the code scanning results page (#147).
+
 ## [0.1.10] - 2026-06-06
 ### Added
 - SHAP-based signed feature importances for tree models (XGBoost/LightGBM): `_extract_feature_importance` now accepts an `X_sample` parameter and uses `shap.TreeExplainer` to compute `mean_shap` (direction) and `mean_abs_shap` (magnitude), assembling top positive/negative feature lists with a fallback to `feature_importances_` when SHAP or sample data are unavailable. The ML results UI surfaces "risk-raising" vs "risk-reducing" semantics accordingly.

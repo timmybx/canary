@@ -1,13 +1,13 @@
 -c requirements.txt
 
-pytest>=8.0.0
-pytest-cov>=5.0.0
+pytest>=9.1.1
+pytest-cov>=7.1.0
 Pygments>=2.20.0
 ruff>=0.15.18
-bandit>=1.7.9
-pip-audit>=2.7.3
-pip-tools>=7.4.1
+bandit>=1.9.4
+pip-audit>=2.10.1
+pip-tools>=7.5.3
 pyright>=1.1.410
-pre-commit
-atheris>=2.3.0
+pre-commit>=4.6.0
+atheris>=3.1.0
 mutmut==3.6.0

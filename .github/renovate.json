@@ -6,7 +6,8 @@
   ],
   "timezone": "America/Denver",
   "pip-compile": {
-    "managerFilePatterns": ["/(^|/)requirements-dev\\.txt$/"]
+    "managerFilePatterns": ["/(^|/)requirements-dev\\.txt$/"],
+    "rangeStrategy": "bump"
   },
   "pip_requirements": {
     "enabled": false
