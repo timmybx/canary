@@ -674,7 +674,7 @@ def _load_software_heritage_features_athena(plugin_id: str, data_raw_dir: Path) 
         )
 
     if visits:
-        latest_visit = visits[0]
+        latest_visit = max(visits, key=lambda v: v.get("visit_date") or "")
         row["swh_has_readme"] = bool(latest_visit.get("has_readme"))
         row["swh_has_dot_github"] = bool(latest_visit.get("has_dot_github"))
         row["swh_has_jenkinsfile"] = bool(latest_visit.get("has_jenkinsfile"))

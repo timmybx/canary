@@ -718,6 +718,49 @@ def test_load_swh_athena_visit_dates_present_computes_last_365d(tmp_path: Path) 
     assert result["swh_visits_last_365d"] >= 1
 
 
+def test_load_swh_athena_uses_most_recent_visit_for_features(tmp_path: Path) -> None:
+    # Regression test: visits are stored oldest-first in the JSONL file.
+    # The loader must pick the record with the LATEST visit_date for feature
+    # extraction, not visits[0] (which is the oldest).
+    swh_dir = tmp_path / "software_heritage_athena"
+    swh_dir.mkdir(parents=True)
+    (swh_dir / "demo-plugin.swh_athena_index.json").write_text(
+        json.dumps({"record_count": 2}), encoding="utf-8"
+    )
+    visits_path = swh_dir / "demo-plugin.swh_athena_visits.jsonl"
+    # Oldest visit: has_readme=False, days_since_last_commit=230, commit_count=10
+    # Newest visit: has_readme=True,  days_since_last_commit=5,   commit_count=100
+    visits_path.write_text(
+        json.dumps(
+            {
+                "visit_date": "2020-01-01",
+                "has_readme": False,
+                "days_since_last_commit": 230.0,
+                "commit_count": 10,
+                "has_dot_github": False,
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "visit_date": "2025-06-01",
+                "has_readme": True,
+                "days_since_last_commit": 5.0,
+                "commit_count": 100,
+                "has_dot_github": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result = _load_software_heritage_features_athena("demo-plugin", tmp_path)
+    # Must reflect the NEWEST visit, not the oldest
+    assert result["swh_has_readme"] is True, "should use newest visit, not visits[0]"
+    assert result["swh_days_since_last_commit"] == 5.0
+    assert result["swh_commit_count"] == 100
+    assert result["swh_has_dot_github"] is True
+
+
 def test_load_swh_api_index_not_present(tmp_path: Path) -> None:
     # index_path does not exist
     swh_dir = tmp_path / "software_heritage_api"
