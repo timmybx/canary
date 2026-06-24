@@ -1,6 +1,7 @@
 [![CI](https://github.com/timmybx/canary/actions/workflows/ci.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/timmybx/canary/branch/main/graph/badge.svg)](https://codecov.io/gh/timmybx/canary)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/timmybx/canary/badge)](https://scorecard.dev/viewer/?uri=github.com/timmybx/canary)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11904/badge)](https://www.bestpractices.dev/projects/11904)
 [![License](https://img.shields.io/github/license/timmybx/canary)](https://github.com/timmybx/canary/blob/main/LICENSE)
 [![Last Commit](https://img.shields.io/github/last-commit/timmybx/canary)](https://github.com/timmybx/canary/commits/main)
 ![Ruff](https://img.shields.io/badge/lint-ruff-2ea44f?logo=ruff)
