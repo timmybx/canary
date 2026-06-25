@@ -7,7 +7,7 @@ ruff>=0.15.19
 bandit>=1.9.4
 pip-audit>=2.10.1
 pip-tools>=7.5.3
-pyright>=1.1.410
+pyright>=1.1.411
 pre-commit>=4.6.0
 atheris>=3.1.0
 mutmut==3.6.0
