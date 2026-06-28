@@ -14,6 +14,7 @@ compose.override.yaml
 .local
 .cache
 *.zip
+*.pptx
 
 # --- Generated data outputs (ignore by default) ---
 data/archive/**
