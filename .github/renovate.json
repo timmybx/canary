@@ -26,6 +26,12 @@
       "matchManagers": ["github-actions"],
       "matchDepNames": ["python"],
       "allowedVersions": "<3.13"
+    },
+    {
+      "description": "Throttle fuzzer Docker digest updates to weekly",
+      "matchManagers": ["dockerfile"],
+      "matchFileNames": [".clusterfuzzlite/Dockerfile"],
+      "schedule": ["on monday"]
     }
   ]
 }
