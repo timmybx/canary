@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.12] - 2026-07-04
+### Added
+- OpenSSF Best Practices badge added to the README.
+
+### Changed
+- Renovate configuration: fuzz-image Docker digest updates are now batched on a weekly schedule instead of opening a PR per digest.
+- CI workflow updates: `github/codeql-action` bumped to v4.36.3 (#172) then v4.37.0 (#179); `docker/scout-action` bumped to v1.23.0 (#173) then v1.23.1 (#175); `docker/login-action` digest refreshes (#171, #174); `actions/setup-python` bumped to v6.3.0 (#161).
+- Dependency pin refreshes: `ruff` to >=0.15.19 (#159) then >=0.15.20 (#164); `pyright` to >=1.1.411 (#162); multiple `gcr.io/oss-fuzz-base/base-builder-python` digest refreshes (#158, #163, #165, #166, #167, #168, #170, #176, #178) and `python:3.12-slim` digest refreshes (#160, #169); pip-compile output refreshes (#177).
+- `.gitignore` now excludes PowerPoint working files (symposium presentation drafts).
+
+### Fixed
+- Software Heritage feature extraction now selects the visit with the latest `visit_date` (visits are stored oldest-first in the JSONL), instead of `visits[0]`, so `swh_has_readme`, `swh_days_since_last_commit`, `swh_commit_count`, and `swh_has_dot_github` reflect the most recent archive visit. Added a regression test covering the newest-visit selection.
+
 ## [0.1.11] - 2026-06-23
 ### Added
 - PyPI cross-validation study (`crossval/pypi/`) demonstrating that CANARY's advisory-history signal generalises beyond the Jenkins plugin ecosystem. Four self-contained scripts collect the package universe, download OSV advisories, build a monthly labeled dataset, and train/evaluate advisory-only models with a side-by-side comparison against Jenkins. After correcting for selection bias by scoping to the top-8,000 PyPI packages by downloads (regardless of advisory history), both ecosystems exhibit near-identical positive rates (~1.7% vs ~1.9%), and advisory history remains predictive above base rate in both (XGBoost AP 0.27 vs base rate 0.017). A `crossval/pypi/README.md` documents the methodology, results, and limitations.
