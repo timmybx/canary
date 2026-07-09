@@ -1678,10 +1678,13 @@ def _render_ranking_row(ranking: dict[str, Any], base_rate: float) -> str:
         return ""
     return (
         "<div>"
-        '<h4 style="margin-bottom:.5rem">Ranking precision (top-K)</h4>'
+        '<h4 style="margin-bottom:.5rem">Ranking precision (top-K, observation-level)</h4>'
         f'<div class="ranking-row">{"".join(cells)}</div>'
         '<p style="font-size:.82rem;color:var(--muted);margin-top:.5rem">'
-        "Of the top K plugins ranked by predicted risk, what fraction received an advisory in the test window?"
+        "Of the top K plugin-month observations ranked by predicted risk, what fraction "
+        "received an advisory in the test window? A plugin can appear in more than one test "
+        "month; component-level (deduplicated) values are shown under Operational scenario "
+        "analysis."
         "</p>"
         "</div>"
     )
@@ -1802,11 +1805,49 @@ def _render_operational_panel(pk: dict[str, Any]) -> str:
     split_label = "time split" if split == "time" else "group-time split"
     context = (
         f'<p style="font-size:.84rem;color:var(--muted);margin:.4rem 0 .9rem">'
-        f"Based on {n_test:,} test observations, {n_pos} future advisory plugins, "
+        f"Based on {n_test:,} plugin-month test observations, {n_pos} positive observations, "
         f"base rate {base_rate * 100:.2f}% &mdash; evaluated under <strong>{split_label}</strong>. "
         f"Time-split results represent continuous monitoring of a known plugin inventory."
         f"</p>"
     )
+
+    # Component-level (deduplicated) precision — the primary triage view.
+    # Present when the model directory has test_predictions.csv; each plugin
+    # is ranked once, by its highest-scored test observation.
+    component = pk.get("component_level") or {}
+    component_rows = component.get("p_at_k") or []
+    component_html = ""
+    if component_rows:
+        n_comp = component.get("n_components", 0)
+        n_comp_pos = component.get("n_positive_components", 0)
+        comp_cells = ""
+        for c in component_rows:
+            c_prec = c.get("precision", 0.0)
+            if c_prec >= 0.5:
+                c_cls = "rank-cell__val--good"
+            elif c_prec >= 0.2:
+                c_cls = "rank-cell__val--warn"
+            else:
+                c_cls = "rank-cell__val--muted"
+            comp_cells += (
+                f'<div class="rank-cell">'
+                f'<div class="rank-cell__k">P@{c.get("k", 0)} (distinct plugins)</div>'
+                f'<div class="rank-cell__val {c_cls}">{c_prec:.0%}</div>'
+                f'<div class="rank-cell__lift">{c.get("true_positives", 0)} of '
+                f"{n_comp_pos} &middot; {c.get('lift', 0.0):.1f}&times; base rate</div>"
+                f"</div>"
+            )
+        component_html = (
+            '<div style="margin-bottom:1rem">'
+            "<h4>Component-level precision (distinct plugins)</h4>"
+            f'<p style="font-size:.84rem;color:var(--muted);margin:.4rem 0 .6rem">'
+            f"Primary triage view: each of the {n_comp:,} plugins is ranked once, by its "
+            f"highest-scored test observation; {n_comp_pos} plugins received an advisory in "
+            f"the window. The scenario table below is observation-level (plugin-months)."
+            f"</p>"
+            f'<div class="ranking-row">{comp_cells}</div>'
+            "</div>"
+        )
 
     # Scenario table
     rows_html = ""
@@ -1903,13 +1944,16 @@ def _render_operational_panel(pk: dict[str, Any]) -> str:
         "<div>"
         "<h4>Operational scenario analysis</h4>"
         + context
+        + component_html
         + headline
         + table_html
         + callouts_html
         + '<p style="font-size:.78rem;color:var(--muted);margin-top:.6rem">'
         "Precision = fraction of flagged plugins that had a future advisory. "
         "Recall = fraction of all future advisory plugins that were flagged. "
-        "vs. random = improvement over baseline rate of selecting plugins at random."
+        "vs. random = improvement over baseline rate of selecting plugins at random. "
+        "Scenario rows rank plugin-month observations; the component-level cells above "
+        "deduplicate to distinct plugins."
         "</p>"
         "</div>"
     )

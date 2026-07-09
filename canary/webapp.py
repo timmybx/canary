@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # ruff: noqa: E501
+import csv
 import json
 import logging
 import mimetypes
@@ -315,7 +316,13 @@ def _call_anthropic_explain(prompt: str) -> str:
 # Feature descriptions: what the feature measures and why it was collected,
 # based on the literature motivating its inclusion. No results-based judgements.
 def _load_precision_at_k(model_out_dir: str | Path) -> dict[str, Any] | None:
-    """Load precision_at_k.json from a model directory if it exists."""
+    """Load precision_at_k.json from a model directory if it exists.
+
+    The stored values rank plugin-month observations. When the model
+    directory also contains ``test_predictions.csv``, a component-level
+    (deduplicated) recomputation is attached under ``component_level`` so
+    the UI can present the triage-relevant view alongside the stored one.
+    """
     try:
         parts = _model_output_dir_parts(model_out_dir)
     except ValueError:
@@ -328,10 +335,90 @@ def _load_precision_at_k(model_out_dir: str | Path) -> dict[str, Any] | None:
     ]:
         if target.exists():
             try:
-                return json.loads(target.read_text(encoding="utf-8"))
+                data = json.loads(target.read_text(encoding="utf-8"))
             except Exception:  # noqa: BLE001
                 return None
+            component = _load_component_precision(model_out_dir)
+            if component:
+                data["component_level"] = component
+            return data
     return None
+
+
+def _load_component_precision(
+    model_out_dir: str | Path, ks: tuple[int, ...] = (10, 25, 50, 100)
+) -> dict[str, Any] | None:
+    """
+    Component-level (deduplicated) precision-at-k from test_predictions.csv.
+
+    The evaluation ranking is over plugin-month observations, so one plugin
+    can occupy several top-k rows. This keeps each plugin's single
+    highest-scored test row and recomputes precision-at-k over distinct
+    plugins — "of the k distinct plugins ranked riskiest, what fraction
+    received an advisory in the prediction window" — which is the number a
+    triage queue actually delivers. Lift is measured against the
+    component-level base rate (plugins whose selected row is positive, over
+    all plugins in the test set).
+    """
+    try:
+        parts = _model_output_dir_parts(model_out_dir)
+    except ValueError:
+        return None
+    stem = Path(str(model_out_dir)).name
+    csv_path: Path | None = None
+    for target in [
+        MODEL_OUTPUTS_ROOT / stem / "test_predictions.csv",
+        MODEL_OUTPUTS_ROOT.joinpath(*parts, "test_predictions.csv"),
+    ]:
+        if target.exists():
+            csv_path = target
+            break
+    if csv_path is None:
+        return None
+    # Keep each plugin's highest-probability row; the label of the selected
+    # row is what a ranked triage queue would actually have delivered.
+    best: dict[str, tuple[float, int]] = {}
+    try:
+        with csv_path.open(encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                plugin_id = str(row.get("plugin_id") or row.get("package_id") or "")
+                if not plugin_id:
+                    continue
+                prob = float(row.get("y_prob") or 0.0)
+                truth = int(row.get("y_true") or 0)
+                prev = best.get(plugin_id)
+                if prev is None or prob > prev[0]:
+                    best[plugin_id] = (prob, truth)
+    except Exception:  # noqa: BLE001
+        return None
+    if not best:
+        return None
+    ranked = sorted(best.values(), key=lambda item: item[0], reverse=True)
+    n_components = len(ranked)
+    n_positive = sum(truth for _, truth in ranked)
+    base_rate = n_positive / n_components if n_components else 0.0
+    p_at_k: list[dict[str, Any]] = []
+    for k in ks:
+        if n_components < k:
+            continue
+        true_positives = sum(truth for _, truth in ranked[:k])
+        precision = true_positives / k
+        p_at_k.append(
+            {
+                "k": k,
+                "true_positives": true_positives,
+                "precision": round(precision, 4),
+                "lift": round(precision / base_rate, 2) if base_rate > 0 else 0.0,
+            }
+        )
+    if not p_at_k:
+        return None
+    return {
+        "n_components": n_components,
+        "n_positive_components": n_positive,
+        "component_base_rate": round(base_rate, 6),
+        "p_at_k": p_at_k,
+    }
 
 
 # ---------------------------------------------------------------------------

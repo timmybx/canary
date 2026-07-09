@@ -7,6 +7,7 @@ Consolidated from test_webapp_extra.py and test_webapp.py.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -448,6 +449,97 @@ def test_render_operational_panel_includes_headline_and_callouts():
     assert "group-time split" in html
     assert "Key finding" in html
     assert "50% recall" in html
+    # Without component_level data the deduplicated block is absent.
+    assert "Component-level precision" not in html
+
+
+def test_render_operational_panel_shows_component_level_block():
+    html = webapp._render_operational_panel(
+        {
+            "n_positive": 20,
+            "n_test": 1000,
+            "base_rate": 0.02,
+            "split_strategy": "time",
+            "scenarios": [
+                {
+                    "label": "Top 10",
+                    "k": 10,
+                    "true_positives": 10,
+                    "precision": 1.0,
+                    "recall": 0.13,
+                    "lift": 53.3,
+                },
+            ],
+            "recall_targets": [],
+            "component_level": {
+                "n_components": 500,
+                "n_positive_components": 18,
+                "component_base_rate": 0.036,
+                "p_at_k": [
+                    {"k": 10, "true_positives": 9, "precision": 0.9, "lift": 25.0},
+                    {"k": 25, "true_positives": 21, "precision": 0.84, "lift": 23.3},
+                ],
+            },
+        }
+    )
+    assert "Component-level precision (distinct plugins)" in html
+    assert "90%" in html
+    assert "9 of 18" in html
+    assert "distinct plugins" in html
+    # Observation-level scenario table is still rendered and labelled.
+    assert "Operational scenario analysis" in html
+    assert "observation-level (plugin-months)" in html
+
+
+def test_load_component_precision_dedups_by_plugin(tmp_path, monkeypatch):
+    model_root = tmp_path / "models"
+    model_dir = model_root / "xgb_test_model"
+    model_dir.mkdir(parents=True)
+    rows = [
+        # plugin-a: two test months; highest-scored row is positive.
+        ("plugin-a", "2025-05", 1, 0.95),
+        ("plugin-a", "2025-06", 1, 0.90),
+        # plugin-b: highest-scored row is negative even though a lower row is positive.
+        ("plugin-b", "2025-05", 1, 0.70),
+        ("plugin-b", "2025-06", 0, 0.85),
+        # plugin-c .. plugin-l: negatives to pad the universe past k=10.
+    ] + [(f"plugin-{chr(ord('c') + i)}", "2025-05", 0, 0.10 + i / 100) for i in range(10)]
+    lines = ["plugin_id,month,y_true,y_prob"]
+    lines += [f"{p},{m},{t},{s}" for p, m, t, s in rows]
+    (model_dir / "test_predictions.csv").write_text("\n".join(lines), encoding="utf-8")
+
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT", model_root)
+    result = webapp._load_component_precision("data/processed/models/xgb_test_model", ks=(10,))
+
+    assert result is not None
+    assert result["n_components"] == 12
+    # Positive components counted from each plugin's selected (highest) row:
+    # plugin-a positive, plugin-b negative at its highest-scored row.
+    assert result["n_positive_components"] == 1
+    entry = result["p_at_k"][0]
+    assert entry["k"] == 10
+    assert entry["true_positives"] == 1
+    assert entry["precision"] == 0.1
+
+
+def test_load_precision_at_k_attaches_component_level(tmp_path, monkeypatch):
+    model_root = tmp_path / "models"
+    model_dir = model_root / "xgb_test_model"
+    model_dir.mkdir(parents=True)
+    (model_dir / "precision_at_k.json").write_text(
+        json.dumps({"base_rate": 0.02, "scenarios": []}), encoding="utf-8"
+    )
+    lines = ["plugin_id,month,y_true,y_prob"] + [
+        f"plugin-{i},2025-05,{1 if i == 0 else 0},0.{99 - i:02d}" for i in range(12)
+    ]
+    (model_dir / "test_predictions.csv").write_text("\n".join(lines), encoding="utf-8")
+
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT", model_root)
+    data = webapp._load_precision_at_k("data/processed/models/xgb_test_model")
+
+    assert data is not None
+    assert "component_level" in data
+    assert data["component_level"]["n_components"] == 12
 
 
 def test_render_feature_selection_panel_with_show_controls():
