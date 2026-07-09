@@ -63,7 +63,7 @@ repos:
 
   # Pyright (Type checking similar to a compiler)
   - repo: https://github.com/RobertCraigie/pyright-python
-    rev: 509391adec397533e39c65449e0c85d93d48e777  # frozen: v1.1.410
+    rev: 392b6ba8e54be6d603e02e9f8d601d27b7a48d12  # frozen: v1.1.411
     hooks:
       - id: pyright
         additional_dependencies:
