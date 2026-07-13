@@ -8,13 +8,13 @@ beautifulsoup4==4.15.0 \
     --hash=sha256:288e3ca7d54b06f2ac191970bc275c1939cb46d450b255bf6718b04aa37ab4f7 \
     --hash=sha256:d6f88de62e1d4e38ecb1077eb9724cd0eff29d2a08ca16a401e9b9e93f117cf9
     # via canary (pyproject.toml)
-boto3==1.43.31 \
-    --hash=sha256:69c5521ad864f33d4d53b0e18a3927697f4558210693b1cb4dd97da959d1f7b9 \
-    --hash=sha256:8165b79c02955affbe4b4e9aa7c560684d0d4d86b4b9de66a37b45eb79fc4b69
+boto3==1.43.46 \
+    --hash=sha256:66c0d943b049a46a492ec4ec2ebe73c930b1842c7137bee83aad6d93e95d4d96 \
+    --hash=sha256:69453e2c1bcb9fd9806527ab99950cacfc2826cb0dce9a3a0414d19270c06c3c
     # via canary (pyproject.toml)
-botocore==1.43.31 \
-    --hash=sha256:4c51c63f39515fc1a2b8e3e2c29e452009c988ba55ad489251658fdd3aedad6e \
-    --hash=sha256:c249625faaa353c5b4004043706a394a4f3bcd3643e242f6b01fff6dc70e988b
+botocore==1.43.46 \
+    --hash=sha256:59f2e1ac3cdc66d191cae91c0804bc41847ce817dc8147cf43eaada8f76a5533 \
+    --hash=sha256:cb673891e623ae6e6a1bf24d94ef169504f3eb02584adb5d5bee2f6aae819b60
     # via
     #   boto3
     #   s3transfer
@@ -307,9 +307,9 @@ google-auth[pyopenssl]==2.55.0 \
     #   google-api-core
     #   google-cloud-bigquery
     #   google-cloud-core
-google-cloud-bigquery==3.42.0 \
-    --hash=sha256:4491a75f82d905101e75b690ca4c6791984bf4f50653706747537b05baa90213 \
-    --hash=sha256:9df6a73043363cad17000c29591ed829be5f630ec30b85b29bc29062ab8b19a4
+google-cloud-bigquery==3.42.2 \
+    --hash=sha256:08d4b264e5ee4790f719724c76b538f204b7190999328a2f1a6a95eaab74ca39 \
+    --hash=sha256:41658c19e8ed5b83307011b4e55aca3b1f72052545a22788f1d637984615173f
     # via canary (pyproject.toml)
 google-cloud-core==2.6.0 \
     --hash=sha256:6d63ac8e5eca6d9e4319d0a1e2265fadcd7f1049904378caecfa01cf52dd869e \
@@ -663,9 +663,9 @@ protobuf==7.35.1 \
     #   googleapis-common-protos
     #   grpcio-status
     #   proto-plus
-pyasn1==0.6.3 \
-    --hash=sha256:697a8ecd6d98891189184ca1fa05d1bb00e2f84b5977c481452050549c8a72cf \
-    --hash=sha256:a80184d120f0864a52a073acc6fc642847d0be408e7c7252f31390c0f4eadcde
+pyasn1==0.6.4 \
+    --hash=sha256:9c447d8431c947fe4c8febc4ed9e760bc29011a5b01e5c74b67025bd9fb8ce81 \
+    --hash=sha256:deda9277cfd454080ec40b207fb6df82206a3a2688735233cdcd8d3d565f088b
     # via
     #   canary (pyproject.toml)
     #   pyasn1-modules
@@ -856,11 +856,11 @@ waitress==3.0.2 \
     --hash=sha256:682aaaf2af0c44ada4abfb70ded36393f0e307f4ab9456a215ce0020baefc31f \
     --hash=sha256:c56d67fd6e87c2ee598b76abdd4e96cfad1f24cacdea5078d382b1f9d7b5ed2e
     # via canary (pyproject.toml)
-xgboost==3.2.0 \
-    --hash=sha256:0d169736fd836fc13646c7ab787167b3a8110351c2c6bc770c755ee1618f0442 \
-    --hash=sha256:2f661966d3e322536d9c448090a870fcba1e32ee5760c10b7c46bac7a342079a \
-    --hash=sha256:852eabc6d3b3702a59bf78dbfdcd1cb9c4d3a3b6e5ed1f8781d8b9512354fdd2 \
-    --hash=sha256:99b0e9a2a64896cdaf509c5e46372d336c692406646d20f2af505003c0c5d70d \
-    --hash=sha256:99b4a6bbcb47212fec5cf5fbe12347215f073c08967431b0122cfbd1ee70312c \
-    --hash=sha256:eabbd40d474b8dbf6cb3536325f9150b9e6f0db32d18de9914fb3227d0bef5b7
+xgboost==3.3.0 \
+    --hash=sha256:07688a377046b8640897b62421150bf73c6cc7101823474ec6ad08b93290f587 \
+    --hash=sha256:58bcb8a4cace648cdab7b94fa4f16d2c9ff26d90dd4d26907168106fa06d8746 \
+    --hash=sha256:624a83aeb1e7ba081719795db179f4ce6fff12e79de05cd9baf15ee48fd22f0e \
+    --hash=sha256:af7cea10f418b7c251ddc8da440f57bdab2990b5fc9f74a35a92b0f150ea287d \
+    --hash=sha256:b06057f6a018fc04e6b3e0c15568ca636b8151a5b5f333478e500fcaf4fc7594 \
+    --hash=sha256:f59edaf28eccd1c519788607c72ed907ee6cedfa933d706620bc1612d24b354e
     # via canary (pyproject.toml)
