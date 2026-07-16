@@ -6,13 +6,14 @@
   ],
   "timezone": "America/Denver",
   "pip-compile": {
-    "managerFilePatterns": ["/(^|/)requirements-dev\\.txt$/"],
+    "managerFilePatterns": ["/(^|/)requirements(-dev|-build|-ci)?\\.txt$/"],
     "rangeStrategy": "bump"
   },
   "pip_requirements": {
     "enabled": false
   },
   "pre-commit": {
+    "enabled": true,
     "pinDigests": true
   },
   "packageRules": [
