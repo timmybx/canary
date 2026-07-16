@@ -1,4 +1,7 @@
 build:
+	docker compose build canary
+
+build-clean:
 	docker compose build --no-cache canary
 
 test:
@@ -37,7 +40,7 @@ demo:
 	docker compose run --rm canary canary score cucumber-reports --data-dir data/raw --json
 
 
-.PHONY: metrics metrics-top clean help
+.PHONY: build build-clean metrics metrics-top clean help
 
 # Quick metrics to summarize severity distribution in the collected real advisories.
 # Counts are based on CVSS v3.x base_score buckets (None/Low/Medium/High/Critical).
@@ -62,7 +65,8 @@ clean:
 
 help:
 	@echo "Common targets:"
-	@echo "  make build            Build the Docker image"
+	@echo "  make build            Build the Docker image (uses cache)"
+	@echo "  make build-clean      Build the Docker image from scratch (--no-cache)"
 	@echo "  make test             Run pytest (writes htmlcov/)"
 	@echo "  make ruff             Run ruff lint + format"
 	@echo "  make security         Run bandit + pip-audit"
