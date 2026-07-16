@@ -15,7 +15,7 @@ repos:
 
   # Typo detection (crate-ci/typos)
   - repo: https://github.com/crate-ci/typos
-    rev: d80b8e26878e372a041833cd67163dbdb6a4336e  # frozen: v1.47.2
+    rev: 37bb98842b0d8c4ffebdb75301a13db0267cef89  # frozen: v1.47.2
     hooks:
       - id: typos
 
