@@ -3,7 +3,7 @@ name = "canary"
 version = "0.1.12"
 description = "CANARY: Component Analytics & Near-term Advisory Risk Yardstick"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14.6"
 dependencies = [
   "boto3>=1.43.50",
   "requests>=2.34.2",
