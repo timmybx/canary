@@ -17,7 +17,7 @@ dependencies = [
   "pyasn1>=0.6.4",
   "waitress>=3.0.2",
   "xgboost>=3.3.0",
-  "lightgbm>=4.6.0",
+  "lightgbm>=4.7.0",
   "shap>=0.52.0",
 ]
 
