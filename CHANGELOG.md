@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
-## [0.1.13] - 2026-07-17
+## [0.1.13] - 2026-07-20
 ### Added
 - Component-level (deduplicated) precision-at-k as the primary operational ranking metric. Evaluation rankings are over plugin-month observations, so a single high-risk component could occupy several top-k rows; metrics are now also computed over distinct components (each component's highest-scored row). Jenkins headline results were robust to the correction (advisory+SWH time-split P@10 1.00 -> 0.90; full-feature model dedup P@10 1.00, P@25 0.92).
 - Web console ML tab now shows a "Component-level precision (distinct plugins)" block as the primary operational view, with the observation-level table explicitly labeled as such; regression tests added (`tests/test_webapp_rendering.py`).
