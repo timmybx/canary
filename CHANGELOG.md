@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.13] - 2026-07-17
+### Added
+- Component-level (deduplicated) precision-at-k as the primary operational ranking metric. Evaluation rankings are over plugin-month observations, so a single high-risk component could occupy several top-k rows; metrics are now also computed over distinct components (each component's highest-scored row). Jenkins headline results were robust to the correction (advisory+SWH time-split P@10 1.00 -> 0.90; full-feature model dedup P@10 1.00, P@25 0.92).
+- Web console ML tab now shows a "Component-level precision (distinct plugins)" block as the primary operational view, with the observation-level table explicitly labeled as such; regression tests added (`tests/test_webapp_rendering.py`).
+- `tools/dedup_precision.py`: generic stdlib CLI that recomputes row-level vs deduplicated P@k from any saved `test_predictions.csv` (auto-detects `plugin_id`/`package_id`, configurable k values, optional JSON output).
+- `crossval/pypi/04_dedup_precision.py`: package-level deduplicated P@k robustness check for the PyPI cross-validation study (XGBoost dedup P@10 0.70, ~42x base rate).
+- `make build-clean` target for from-scratch (`--no-cache`) image builds; `make build` now uses the Docker layer cache for day-to-day rebuilds.
+
+### Changed
+- Dockerfile: pip installs now use BuildKit cache mounts and `--resume-retries 5` (pip 26) so interrupted wheel downloads resume instead of failing the build; removed the global `PIP_NO_CACHE_DIR` env (the editable install keeps an explicit `--no-cache-dir`). Hash-locked installs (`--require-hashes`) unchanged.
+- `crossval/pypi/README.md`: documented container execution as the standard (library-version sensitivity: XGBoost/LightGBM reproduce exactly across versions, Random Forest/Logistic Regression shift), added July 2026 container-run results and the deduplicated P@k comparison table.
+- Renovate configuration: pre-commit manager explicitly enabled (it is disabled by default, so hook `rev` pins were not being updated); pip-compile manager patterns broadened from `requirements-dev.txt` only to all four compiled outputs (`requirements.txt`, `-dev`, `-build`, `-ci`).
+- Pre-commit hooks: `crate-ci/typos` to v1.48.0 (#195) plus digest refresh (#191); `pyright` hook to v1.1.411 (#181).
+- CI workflow updates: `actions/setup-python` to v7 (#203); `github/codeql-action` to v4.37.1 (#190); `zizmorcore/zizmor-action` to v0.6.0 (#187).
+- Dependency pin refreshes: `lightgbm` to >=4.7.0 (#202); `pip-tools` to >=7.6.0 (#201); `boto3` (#192, #193, #200); `setuptools` to v83 (#197, #199); `cryptography` to >=49.0.0 (#194); `ruff` to >=0.15.21 (#180) then >=0.15.22 (#189); `python:3.12-slim` digest refreshes (#186, #188); `gcr.io/oss-fuzz-base/base-builder-python` digest refreshes (#183, #185, #204); pip-compile output refreshes (#182, #184).
+
 ## [0.1.12] - 2026-07-04
 ### Added
 - OpenSSF Best Practices badge added to the README.
