@@ -11,3 +11,4 @@ pyright>=1.1.411
 pre-commit>=4.6.1
 atheris>=3.1.0
 mutmut==3.6.0
+matplotlib>=3.11.1
