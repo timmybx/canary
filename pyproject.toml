@@ -5,7 +5,7 @@ description = "CANARY: Component Analytics & Near-term Advisory Risk Yardstick"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "boto3>=1.43.53",
+  "boto3>=1.43.54",
   "requests>=2.34.2",
   "beautifulsoup4>=4.15.0",
   "google-cloud-bigquery>=3.42.2",
