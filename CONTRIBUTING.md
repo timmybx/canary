@@ -99,6 +99,7 @@ If you add a new live-data integration test:
    ```python
    import canary.scoring.baseline as _baseline_mod
 
+
    def test_something(fixture_data_dir, monkeypatch):
        monkeypatch.setattr(_baseline_mod, "_DATA_ROOT", fixture_data_dir)
        result = score_plugin_baseline("workflow-cps")

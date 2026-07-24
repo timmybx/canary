@@ -229,8 +229,8 @@ Always use `pathlib.Path`.  Open files with `encoding="utf-8"` explicitly.
 ### JSON output
 
 ```python
-json.dumps(record, ensure_ascii=False)          # compact / JSONL
-json.dumps(record, indent=2, ensure_ascii=False) # pretty-print
+json.dumps(record, ensure_ascii=False)  # compact / JSONL
+json.dumps(record, indent=2, ensure_ascii=False)  # pretty-print
 ```
 
 ### JSONL reading pattern
