@@ -1,8 +1,10 @@
 """
 tools/simpson_stratified.py
 ============================
-Stratified companion to the H1 odds ratio test: demonstrate the
-marginal-vs-conditional reversal (Simpson's paradox) directly.
+Stratified companion to the H1 odds ratio test: test whether the marginal
+reversal has a Simpson's-paradox structure under a single attention proxy.
+(Result: it does not flip within strata; it attenuates monotonically —
+see tools/README.md for the interpretation.)
 
 The marginal test (tools/h1_odds_ratio.py) shows staleness is associated with
 *lower* advisory odds. The proposed mechanism is surveillance bias: advisory

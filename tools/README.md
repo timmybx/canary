@@ -13,6 +13,8 @@ docker compose run --rm canary python tools/<script>.py
 | `dedup_precision.py` | What is precision-at-k over *distinct components* rather than component-month rows? |
 | `h1_odds_ratio.py` | Does hypothesis H1's marginal claim (stale/small → ≥50% higher advisory odds) hold? |
 | `heuristic_baseline.py` | Does the ML model beat the trivial rule "flag anything with a prior advisory"? |
+| `simpson_stratified.py` | Does the H1 reversal survive stratification by an attention proxy? |
+| `make_figures.py` | Renders praxis/defense figures from the saved artifacts above. |
 
 ---
 
@@ -71,12 +73,51 @@ of actively maintained ones (train-window ORs 0.31-0.41 with tight CIs).
 This does not mean neglected plugins are safer. The label measures *published*
 advisories, and publication requires attention: active plugins attract
 scrutiny, scrutiny produces labels, and quiet plugins accumulate unexamined
-risk that never becomes one. Conditional on the full feature set, SHAP
-attribution still ranks maintenance staleness as risk-increasing — a
-marginal-vs-conditional reversal (Simpson's paradox) driven by surveillance
-bias in advisory-labeled data. Test-window estimates are underpowered (few
-positives) and partially right-censored; the train window is authoritative.
-H1 is therefore **not supported as stated**; see praxis Section 4.6.
+risk that never becomes one. This is a form of **surveillance bias** — the
+outcome can only be recorded where someone is looking, so maintenance
+conditions that correlate with attention inherit a protective-looking
+marginal association. Conditional on the full feature set, SHAP attribution
+still ranks maintenance staleness as risk-increasing. Test-window estimates
+are underpowered (few positives) and partially right-censored; the train
+window is authoritative. H1 is therefore **not supported as stated**; see
+praxis Section 4.6, and `simpson_stratified.py` below for a direct test of
+the mechanism.
+
+---
+
+## simpson_stratified.py — attention-stratified test of the H1 reversal
+
+If the reversal is surveillance bias, stratifying by an attention proxy
+should weaken it. This tool splits plugin-months into three strata of
+`gharchive_unique_actors` (none / at-or-below median nonzero / above median)
+and compares stale vs fresh advisory rates per stratum and pooled.
+
+```bash
+docker compose run --rm canary python tools/simpson_stratified.py \
+    --json data/processed/results/simpson_stratified.json
+```
+
+### Results (container run, July 2026; releases factor, train window)
+
+| Stratum | n | Fresh rate | Stale rate | Stale/fresh ratio |
+|---|---|---|---|---|
+| No observed activity | 44,549 | 4.30% | 1.57% | 0.37 |
+| Lower activity | 25,300 | 5.12% | 3.21% | 0.63 |
+| Higher activity | 19,742 | 7.05% | 5.13% | 0.73 |
+| **All pooled** | 89,591 | 5.52% | 2.00% | **0.36** |
+
+### Interpretation
+
+The sign does **not** flip within strata, so this is not a textbook Simpson's
+paradox demonstration: staleness remains marginally protective in every
+stratum. What the stratification shows instead is a **monotone attenuation**
+exactly where the surveillance mechanism predicts it: the stale/fresh ratio
+climbs from 0.37 among unwatched plugins toward 0.73 in the most active
+stratum. A single activity proxy captures attention only coarsely (the top
+stratum still spans a wide attention range), which is consistent with the
+residual protective association within strata and with the full multivariate
+conditioning (SHAP) being what recovers the risk-increasing direction of
+staleness. Mechanism supported; textbook label withheld.
 
 ---
 
