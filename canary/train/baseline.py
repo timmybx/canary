@@ -414,6 +414,20 @@ def train_model(
     if not test_rows:
         raise ValueError("No test rows found. Adjust test_start_month.")
 
+    # Advisory-family features derive from the Jenkins security advisory feed,
+    # which is complete by construction: a missing value means the plugin has
+    # no advisory history, not that the data went unobserved. Zero-filling
+    # encodes that ("no severity / count / recency to date"). The previous
+    # global median imputation placed no-history plugins in the middle of the
+    # observed severity range, entangling them with genuine mid-severity
+    # history (praxis Section 4.4.6). All other families keep median
+    # imputation, where missingness reflects incomplete public coverage.
+    # NOTE: feature_cols is reordered so that the saved feature_columns.json
+    # matches the ColumnTransformer's output order (advisory block first).
+    advisory_cols = [c for c in feature_cols if c.startswith(("advisory_", "advisories_"))]
+    other_cols = [c for c in feature_cols if not c.startswith(("advisory_", "advisories_"))]
+    feature_cols = advisory_cols + other_cols
+
     X_train = _rows_to_matrix(train_rows, feature_cols)
     X_test = _rows_to_matrix(test_rows, feature_cols)
 
@@ -421,10 +435,18 @@ def train_model(
     y_test = np.array([int(row[target_col]) for row in test_rows], dtype=int)
 
     # Imputation wraps the estimator so it never sees NaNs
-    imputer = ColumnTransformer(
-        transformers=[("impute", SimpleImputer(strategy="median"), feature_cols)],
-        remainder="drop",
-    )
+    impute_transformers = []
+    if advisory_cols:
+        impute_transformers.append(
+            (
+                "impute_advisory_zero",
+                SimpleImputer(strategy="constant", fill_value=0.0),
+                advisory_cols,
+            )
+        )
+    if other_cols:
+        impute_transformers.append(("impute_median", SimpleImputer(strategy="median"), other_cols))
+    imputer = ColumnTransformer(transformers=impute_transformers, remainder="drop")
     full_pipeline = Pipeline(steps=[("impute", imputer), ("model", estimator)])
     full_pipeline.fit(X_train, y_train)
 

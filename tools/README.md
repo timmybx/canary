@@ -1,8 +1,8 @@
 # CANARY analysis tools
 
 Standalone analysis scripts that operate on the pipeline's saved outputs
-(`data/processed/`). Each is a plain-stdlib CLI designed to run inside the
-project container so results are reproducible under pinned dependencies:
+(`data/processed/`). Each is designed to run inside the project container so
+results are reproducible under pinned dependencies:
 
 ```bash
 docker compose run --rm canary python tools/<script>.py
@@ -10,11 +10,50 @@ docker compose run --rm canary python tools/<script>.py
 
 | Tool | Question it answers |
 |---|---|
+| `run_monthly_ablation_experiments.sh` | (driver) Trains the full 64-configuration ablation suite. |
+| `summarize_ablation_metrics.py` | Summarizes metrics across the trained suite. |
 | `dedup_precision.py` | What is precision-at-k over *distinct components* rather than component-month rows? |
 | `h1_odds_ratio.py` | Does hypothesis H1's marginal claim (stale/small → ≥50% higher advisory odds) hold? |
-| `heuristic_baseline.py` | Does the ML model beat the trivial rule "flag anything with a prior advisory"? |
 | `simpson_stratified.py` | Does the H1 reversal survive stratification by an attention proxy? |
+| `heuristic_baseline.py` | Does the ML model beat the trivial rule "flag anything with a prior advisory"? |
+| `shap_single_model.py` | **Source of record for feature interpretation**: signed SHAP for one specified model, direction from feature values, binned dependence profiles. |
+| `shap_consistency.py` | Robustness check only: is a feature's importance stable across model configurations? |
+| `compare_model_metrics.py` | How much did a pipeline change move the metrics? (before/after retrain diff) |
 | `make_figures.py` | Renders praxis/defense figures from the saved artifacts above. |
+
+---
+
+## July 2026: advisory imputation correction
+
+Advisory-family features (`advisory_*`, `advisories_*`) derive from the
+Jenkins security advisory feed, which is **complete by construction** — a
+missing value means the plugin has no advisory history, not that data went
+unobserved. These features are now **zero-filled** instead of median-imputed
+(`canary/train/baseline.py`; same fix mirrored in `crossval/pypi/03_train.py`
+and `04_dedup_precision.py`). The previous global median imputation placed
+no-history plugins in the middle of the observed severity range, entangling
+them with genuine mid-severity history.
+
+Consequences for the results in this README:
+
+- **Dataset-level analyses are unaffected** (`h1_odds_ratio.py`,
+  `simpson_stratified.py`): they read the labeled JSONL directly and never
+  touch a model. Their result tables below remain current.
+- **Model-derived results predate the correction** (`heuristic_baseline.py`
+  results table, all SHAP outputs) and regenerate after the suite retrain.
+  Use `compare_model_metrics.py` against the pre-correction snapshot to
+  quantify the change.
+
+---
+
+## run_monthly_ablation_experiments.sh — training driver
+
+Trains the full experiment matrix (4 model families x 2 split strategies x 8
+feature families) plus the feature selection runs behind the H3 analysis.
+Sections can be run individually; `--skip-filter` reuses existing per-family
+feature files (they are dataset-level and unaffected by pipeline changes);
+`--dry-run` prints commands. Full suite is roughly 5.5 hours.
+`summarize_ablation_metrics.py` tabulates the resulting metrics.
 
 ---
 
@@ -36,6 +75,8 @@ the praxis (Tables 4-4 and 4-6).
 ---
 
 ## h1_odds_ratio.py — direct marginal test of H1
+
+*Dataset-level; unaffected by model retraining.*
 
 H1 states that infrequent releases or small contributor teams raise six-month
 advisory odds by at least fifty percent (OR ≥ 1.5). This tool computes the
@@ -76,16 +117,16 @@ scrutiny, scrutiny produces labels, and quiet plugins accumulate unexamined
 risk that never becomes one. This is a form of **surveillance bias** — the
 outcome can only be recorded where someone is looking, so maintenance
 conditions that correlate with attention inherit a protective-looking
-marginal association. Conditional on the full feature set, SHAP attribution
-still ranks maintenance staleness as risk-increasing. Test-window estimates
-are underpowered (few positives) and partially right-censored; the train
-window is authoritative. H1 is therefore **not supported as stated**; see
-praxis Section 4.6, and `simpson_stratified.py` below for a direct test of
-the mechanism.
+marginal association. Test-window estimates are underpowered (few positives)
+and partially right-censored; the train window is authoritative. H1 is
+therefore **not supported as stated**; see praxis Section 4.6, and
+`simpson_stratified.py` below for a direct test of the mechanism.
 
 ---
 
 ## simpson_stratified.py — attention-stratified test of the H1 reversal
+
+*Dataset-level; unaffected by model retraining.*
 
 If the reversal is surveillance bias, stratifying by an attention proxy
 should weaken it. This tool splits plugin-months into three strata of
@@ -115,18 +156,17 @@ exactly where the surveillance mechanism predicts it: the stale/fresh ratio
 climbs from 0.37 among unwatched plugins toward 0.73 in the most active
 stratum. A single activity proxy captures attention only coarsely (the top
 stratum still spans a wide attention range), which is consistent with the
-residual protective association within strata and with the full multivariate
-conditioning (SHAP) being what recovers the risk-increasing direction of
-staleness. Mechanism supported; textbook label withheld.
+residual protective association within strata. Mechanism supported; textbook
+label withheld.
 
 ---
 
 ## heuristic_baseline.py — trivial rule vs the ML ranking
 
-Because advisory history is CANARY's dominant signal family, a fair question
-is whether the model beats the obvious rule: "flag any plugin that has ever
-had an advisory." This tool compares, on a single fully-labeled observation
-month (default 2025-05):
+Because advisory history is a natural candidate policy, a fair question is
+whether the model beats the obvious rule: "flag any plugin that has ever had
+an advisory." This tool compares, on a single fully-labeled observation month
+(default 2025-05):
 
 1. the flag rule as a set (size, precision, coverage, lift),
 2. CANARY's top-N at the same review budget N as the rule flagged,
@@ -138,7 +178,7 @@ docker compose run --rm canary python tools/heuristic_baseline.py \
     --json data/processed/results/heuristic_baseline.json
 ```
 
-### Results (container run, July 2026; model `xgb_6m_full_cleaned_time`)
+### Results (July 2026, `xgb_6m_full_cleaned_time` — PRE-CORRECTION; regenerate after retrain)
 
 Snapshot 2025-05: 2,053 plugins, 37 positive (component base rate 1.80%).
 (37 is the distinct advisory plugins for this single observation month's
@@ -158,22 +198,136 @@ Ranked comparison at fixed review sizes:
 | 50 | 0.000 | 0% | 0.620 | 84% |
 | 100 | 0.060 | 16% | 0.350 | 95% |
 
-Heuristic ranking tie groups (plugins per advisory count, top values):
-24:1, 10:1, 9:1, 8:1, 6:2 — within a tie group ordering is arbitrary.
-JSON artifact: `data/processed/results/heuristic_baseline.json`.
-
 ### Interpretation
 
-The trivial rule is operationally worthless: it flags 30.6% of the entire
-ecosystem for a lift of exactly **1.0x** — prior-advisory status alone is
-literally no better than random review selection, because a third of the
-ecosystem has advisory history and almost all of it is currently fine. At
-the same 629-plugin budget the model achieves 3.3x lift and 100% coverage
-(every one of the 37 upcoming advisory plugins appears in its top 629).
-Ranked by advisory count, the heuristic finds **zero** true positives in the
-top 10, 25, and 50 — the plugins with the most historical advisories are not
-the ones about to receive new ones — while the model scores 1.000/0.920/0.620
-at the same cutoffs. A count ranking is also dominated by ties and cannot be
-cut to a review budget in a principled way; the model produces a total order.
-Advisory history is a strong *feature*; it is a weak *policy*. The
-multivariate model is what converts the signal into a useful ranking.
+The trivial rule is operationally worthless: it flags 30.6% of the ecosystem
+for a lift of exactly **1.0x** — prior-advisory status alone is no better
+than random review selection. At the same 629-plugin budget the model
+achieves 3.3x lift and 100% coverage. Ranked by advisory count, the heuristic
+finds **zero** true positives in the top 10, 25, and 50. Advisory history is
+a *feature*; it is a weak *policy*. The multivariate model is what converts
+signals into a useful ranking. The rule itself is model-independent, so only
+the CANARY columns change with the retrain.
+
+---
+
+## shap_single_model.py — feature interpretation (source of record)
+
+Computes exact TreeExplainer SHAP for **one specified model configuration**
+over the full test set, and reports for each feature:
+
+- **magnitude**: mean |SHAP| (importance ranking),
+- **direction**: the Pearson correlation between imputed feature values and
+  per-row SHAP contributions — answering "do HIGH values raise or lower
+  predicted risk?", the question praxis prose actually asks. (The per-model
+  `mean_shap` sign answers a different question — "which way is the *average*
+  plugin pushed?" — and is unstable for zero-inflated features.) Correlations
+  with |r| < 0.2 are flagged weak.
+- **binned dependence profiles**: mean SHAP within value bins, with adaptive
+  binning (quintiles; one bin per value for low-cardinality features; a
+  minimum-value bin plus terciles for zero-inflated features). A `bin_shape`
+  verdict (increasing / decreasing / non-monotone) is derived per feature.
+- **observed-only profiles** for features with >10% missingness: bins over
+  only the rows where the value was genuinely observed, excluding imputed
+  rows. This is what isolated the advisory severity signal from the
+  pre-correction median imputation.
+- **version-drift self-check**: reproduces the model's saved
+  `test_predictions.csv` before computing SHAP and reports the max
+  difference, so unpickling under newer library versions can never silently
+  change what is being explained. (July 2026 runs: max |diff| = 0.0 on both
+  reported models.)
+
+Temporal window features are excluded (praxis Section 4.4.1).
+
+```bash
+# interpretation model (deployed full configuration)
+docker compose run --rm canary python tools/shap_single_model.py \
+    --model-dir data/processed/models/xgb_6m_full_cleaned_time \
+    --json data/processed/results/shap_full_model.json
+
+# Advisory+SWH headline configuration (robustness comparison)
+docker compose run --rm canary python tools/shap_single_model.py \
+    --json data/processed/results/shap_single_model.json
+```
+
+Results live in the JSON artifacts and regenerate after the imputation
+correction retrain; see praxis Sections 4.4.5-4.4.9 for the reported
+interpretation.
+
+---
+
+## shap_consistency.py — cross-model stability check (NOT a source of record)
+
+Aggregates the `top_positive_features` / `top_negative_features` lists from
+each model's `metrics.json` across a set of configurations. Useful as a
+*stability check* (does a feature appear among top contributors in many
+configurations?) and it is the tool that caught the temporal window features
+topping the raw rankings. It is **not** used for reported importance numbers
+because the aggregation:
+
+- mixes signed SHAP (XGBoost/LightGBM) with unsigned fallbacks (Random
+  Forest MDI, logistic coefficients),
+- averages magnitudes that are not comparable across feature-set sizes
+  (a 5-feature model concentrates SHAP mass that a 40-feature model spreads),
+- counts appearances in a way that favors small models,
+- inherits the mean-sign direction instability described above.
+
+```bash
+docker compose run --rm canary python tools/shap_consistency.py \
+    --json data/processed/results/shap_consistency.json
+```
+
+---
+
+## compare_model_metrics.py — before/after retrain diff
+
+Quantifies how much a pipeline change moved the metrics, so a retrain's
+effect is measured rather than eyeballed.
+
+```bash
+# BEFORE retraining: snapshot the small artifacts
+tar czf models_backup_$(date +%Y%m%d).tgz \
+    data/processed/models/*/metrics.json \
+    data/processed/models/*/feature_selection.json \
+    data/processed/models/*/precision_at_k.json
+
+# AFTER retraining:
+mkdir -p /tmp/before && tar xzf models_backup_*.tgz -C /tmp/before
+docker compose run --rm canary python tools/compare_model_metrics.py \
+    --before /tmp/before/data/processed/models \
+    --after data/processed/models \
+    --json data/processed/results/imputation_fix_deltas.json
+```
+
+Reports AP/ROC-AUC per model with deltas, the largest movers, and the max
+absolute change across the suite.
+
+---
+
+## make_figures.py — praxis and defense figures
+
+Renders figures from the saved artifacts above (no retraining, no new
+experiments). Requires matplotlib (dev dependency).
+
+| Figure | Source artifact |
+|---|---|
+| `h1_forest.png` | `results/h1_odds.json` |
+| `simpson.png` | `results/simpson_stratified.json` |
+| `precision_coverage.png` | `<model>/test_predictions.csv` (component-level) |
+| `h3_retention.png` | `<model>/feature_selection.json` |
+| `calibration.png` | `<model>/test_predictions.csv` |
+| `shap_single.png` | `results/shap_single_model.json` (diverging importance) |
+| `shap_profiles.png` | `results/shap_single_model.json` (dependence small-multiples) |
+| `shap_consistency.png` | `results/shap_consistency.json` (stability check) |
+| `shap_importance.png` | `<model>/feature_selection.json` (superseded by shap_single) |
+
+```bash
+# everything
+docker compose run --rm canary python tools/make_figures.py
+
+# praxis interpretation figures from the full model
+docker compose run --rm canary python tools/make_figures.py \
+    --only shap_single shap_profiles \
+    --shap-single-json data/processed/results/shap_full_model.json \
+    --out-dir data/processed/figures/praxis
+```

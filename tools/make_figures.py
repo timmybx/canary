@@ -246,6 +246,140 @@ def fig_shap_importance(out: Path, model_dir: str, top_n: int = 15) -> None:
     plt.close(fig)
 
 
+SHAP_CONSISTENCY_JSON = "data/processed/results/shap_consistency.json"
+
+FAMILY_COLORS = {
+    "Advisory History": "#1f4e79",
+    "Software Heritage": "#0F6E56",
+    "GitHub Archive": "#BA7517",
+}
+
+
+def fig_shap_consistency(out: Path, src: str, top_n: int = 8) -> None:
+    """Diverging feature-importance chart: risk increasing vs risk decreasing."""
+    j = json.loads(Path(src).read_text())
+    min_models = max(3, j.get("n_models_used", 25) // 6)
+    inc = [r for r in j["increasing"] if r["models"] >= min_models][:top_n]
+    dec = [r for r in j["decreasing"] if r["models"] >= min_models][:top_n]
+    rows = [(r, -1) for r in reversed(dec)] + [(r, 1) for r in reversed(inc)]
+    fig, ax = plt.subplots(figsize=(8.0, 0.30 * len(rows) + 1.6))
+    for i, (r, sign) in enumerate(rows):
+        color = FAMILY_COLORS.get(r["family"], "#888780")
+        ax.barh(i, sign * r["avg_shap"], height=0.7, color=color, alpha=1.0 if sign > 0 else 0.55)
+        ax.annotate(
+            f"{r['avg_shap']:.3f} ({r['models']}/25)",
+            (sign * r["avg_shap"], i),
+            textcoords="offset points",
+            xytext=(5 if sign > 0 else -5, 0),
+            ha="left" if sign > 0 else "right",
+            va="center",
+            fontsize=7.5,
+        )
+    ax.set_yticks(range(len(rows)))
+    ax.set_yticklabels([r["feature"] for r, _ in rows], fontsize=8)
+    ax.axvline(0, color="#5F5E5A", linewidth=1)
+    lim = max(r["avg_shap"] for r, _ in rows) * 1.45
+    ax.set_xlim(-lim, lim)
+    ax.set_xticks([t for t in ax.get_xticks() if abs(t) <= lim])
+    ax.set_xticklabels([f"{abs(t):.1f}" for t in ax.get_xticks()], fontsize=8)
+    ax.set_xlabel("Mean |SHAP| across 25 time split models (risk decrease <-- | --> risk increase)")
+    ax.set_title(
+        f"Feature importance by SHAP consistency across "
+        f"{j.get('n_models_used', 25)} time split models"
+    )
+    handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in FAMILY_COLORS.values()]
+    ax.legend(handles, list(FAMILY_COLORS), loc="lower right", fontsize=8, framealpha=1.0)
+    fig.tight_layout()
+    fig.savefig(out / "shap_consistency.png")
+    plt.close(fig)
+
+
+SHAP_SINGLE_JSON = "data/processed/results/shap_single_model.json"
+
+
+def fig_shap_single(out: Path, src: str, top_n: int = 16) -> None:
+    """Diverging importance chart for one model; direction by value correlation."""
+    j = json.loads(Path(src).read_text())
+    feats = j["features"][:top_n]
+    inc = [f for f in feats if f["direction"] == "increasing"]
+    dec = [f for f in feats if f["direction"] == "decreasing"]
+    rows = [(f, -1) for f in reversed(dec)] + [(f, 1) for f in reversed(inc)]
+    fig, ax = plt.subplots(figsize=(8.0, 0.30 * len(rows) + 1.7))
+    for i, (f, sign) in enumerate(rows):
+        color = FAMILY_COLORS.get(f["family"], "#888780")
+        ax.barh(
+            i,
+            sign * f["mean_abs_shap"],
+            height=0.7,
+            color=color,
+            alpha=0.45 if f.get("direction_weak") else 1.0,
+        )
+        weak = ", weak" if f.get("direction_weak") else ""
+        ax.annotate(
+            f"{f['mean_abs_shap']:.3f} (r={f['value_shap_corr']:+.2f}{weak})",
+            (sign * f["mean_abs_shap"], i),
+            textcoords="offset points",
+            xytext=(5 if sign > 0 else -5, 0),
+            ha="left" if sign > 0 else "right",
+            va="center",
+            fontsize=7.5,
+        )
+    ax.set_yticks(range(len(rows)))
+    ax.set_yticklabels([f["feature"] for f, _ in rows], fontsize=8)
+    ax.axvline(0, color="#5F5E5A", linewidth=1)
+    lim = max(f["mean_abs_shap"] for f, _ in rows) * 1.55
+    ax.set_xlim(-lim, lim)
+    ticks = [t for t in ax.get_xticks() if abs(t) <= lim]
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([f"{abs(t):.1f}" for t in ticks], fontsize=8)
+    ax.set_xlabel("Mean |SHAP|  (high value lowers risk <-- | --> high value raises risk)")
+    ax.set_title(f"Top {len(rows)} features by SHAP importance ({j['model']})", fontsize=12)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in FAMILY_COLORS.values()]
+    ax.legend(handles, list(FAMILY_COLORS), loc="lower right", fontsize=8, framealpha=1.0)
+    fig.tight_layout()
+    fig.savefig(out / "shap_single.png")
+    plt.close(fig)
+
+
+def fig_shap_profiles(out: Path, src: str, n_feats: int = 8) -> None:
+    """Small-multiples dependence profiles: mean SHAP per value quintile."""
+    j = json.loads(Path(src).read_text())
+    feats = [f for f in j["features"] if f.get("bin_profile")][:n_feats]
+    if not feats:
+        print("SKIP shap_profiles: no bin_profile data (rerun shap_single_model.py)")
+        return
+    ncols = 4
+    nrows = (len(feats) + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(11, 2.6 * nrows), squeeze=False)
+    for idx, f in enumerate(feats):
+        ax = axes[idx // ncols][idx % ncols]
+        prof = f["bin_profile"]
+        xs = list(range(len(prof)))
+        ys = [b["mean_shap"] for b in prof]
+        color = FAMILY_COLORS.get(f["family"], "#888780")
+        ax.axhline(0, color="#B4B2A9", linewidth=0.8)
+        ax.plot(xs, ys, "o-", color=color, linewidth=1.8, markersize=5)
+        ax.set_title(f["feature"], fontsize=8.5)
+        ax.set_xticks(xs)
+        ax.set_xticklabels([f"{b['value_lo']:g}\n-{b['value_hi']:g}" for b in prof], fontsize=6)
+        ax.tick_params(axis="y", labelsize=7)
+        shape = f.get("bin_shape") or ""
+        ax.annotate(
+            f"r={f['value_shap_corr']:+.2f}  {shape}",
+            (0.02, 0.94),
+            xycoords="axes fraction",
+            fontsize=7,
+            va="top",
+        )
+    for idx in range(len(feats), nrows * ncols):
+        axes[idx // ncols][idx % ncols].axis("off")
+    fig.suptitle(f"SHAP dependence profiles by value quintile ({j['model']})", fontsize=12)
+    fig.supylabel("Mean SHAP in bin", fontsize=9)
+    fig.tight_layout(rect=(0.035, 0, 1, 0.95))
+    fig.savefig(out / "shap_profiles.png")
+    plt.close(fig)
+
+
 STRATUM_TITLES = {
     "none": "No observed activity",
     "lower": "Lower activity",
@@ -312,6 +446,9 @@ def fig_simpson(out: Path, simpson_json: str) -> None:
 
 
 FIGURES = {
+    "shap_profiles": lambda out, a: fig_shap_profiles(out, a.shap_single_json),
+    "shap_single": lambda out, a: fig_shap_single(out, a.shap_single_json),
+    "shap_consistency": lambda out, a: fig_shap_consistency(out, a.shap_consistency_json),
     "simpson": lambda out, a: fig_simpson(out, a.simpson_json),
     "h1_forest": lambda out, a: fig_h1_forest(out, a.h1_json),
     "precision_coverage": lambda out, a: fig_precision_coverage(out, a.pc_model),
@@ -326,6 +463,8 @@ def main() -> None:
     parser.add_argument("--out-dir", default=OUT_DIR)
     parser.add_argument("--h1-json", default=H1_JSON)
     parser.add_argument("--simpson-json", default=SIMPSON_JSON)
+    parser.add_argument("--shap-consistency-json", default=SHAP_CONSISTENCY_JSON)
+    parser.add_argument("--shap-single-json", default=SHAP_SINGLE_JSON)
     parser.add_argument(
         "--pc-model", default=PC_MODEL, help="model dir for precision/coverage and calibration"
     )

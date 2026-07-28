@@ -184,7 +184,10 @@ def main() -> None:
     y_test = np.asarray(test_df.loc[:, TARGET_COL], dtype=np.int_)
 
     # Impute missing values (NaN → median of training set)
-    imputer = SimpleImputer(strategy="median")
+    # Advisory features from OSV are complete by construction: missing means
+    # no advisory history, so zero-fill rather than median-impute (matches the
+    # Jenkins pipeline correction; see canary/train/baseline.py).
+    imputer = SimpleImputer(strategy="constant", fill_value=0.0)
     X_train = np.asarray(imputer.fit_transform(X_train), dtype=np.float64)
     X_test = np.asarray(imputer.transform(X_test), dtype=np.float64)
 
