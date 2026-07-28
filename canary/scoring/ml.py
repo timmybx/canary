@@ -384,7 +384,9 @@ def _extract_drivers(
 
     # Impute values the same way the pipeline does so contributions are accurate
     try:
-        X_raw = pd.DataFrame([raw_values], columns=feature_columns)  # pyright: ignore[reportArgumentType]
+        X_raw = pd.DataFrame(  # pyright: ignore[reportArgumentType]
+            [raw_values], columns=feature_columns, dtype=float
+        )  # float64 contract: None -> NaN so the imputers mask it (see baseline.py)
         X_imputed: Any = imputer_step.transform(X_raw) if imputer_step is not None else X_raw.values
     except Exception as exc:
         LOGGER.debug("Imputation failed in driver extraction; using zero-fill.", exc_info=exc)

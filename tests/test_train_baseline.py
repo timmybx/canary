@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import joblib
 import numpy as np
 import pandas as pd
 import pytest
@@ -476,6 +477,45 @@ def test_train_baseline_runs_and_returns_metrics(tmp_path: Path):
     assert (tmp_path / "model" / "metrics.json").exists()
     assert (tmp_path / "model" / "test_predictions.csv").exists()
     assert (tmp_path / "model" / "pr_curve.json").exists()
+
+
+def test_train_baseline_persists_feature_family_imputation_policy(tmp_path: Path):
+    in_path = tmp_path / "labeled.jsonl"
+    rows = _make_labeled_rows()
+    for index, row in enumerate(rows):
+        if row["month"] == "2025-01":
+            row["advisory_max_cvss_to_date"] = 8.0 if index % 2 else 6.0
+            row["advisories_last_365d"] = 3.0 if index % 2 else 1.0
+            row["github_stars"] = 20.0 if index % 2 else 10.0
+        else:
+            row["advisory_max_cvss_to_date"] = None
+            row["advisories_last_365d"] = None
+            row["github_stars"] = None
+    _write_labeled_jsonl(in_path, rows)
+
+    out_dir = tmp_path / "model"
+    metrics = train_baseline(
+        in_path=in_path,
+        target_col="label_advisory_within_6m",
+        out_dir=out_dir,
+        test_start_month="2025-10",
+    )
+
+    feature_columns = metrics["feature_columns"]
+    assert feature_columns[:2] == [
+        "advisories_last_365d",
+        "advisory_max_cvss_to_date",
+    ]
+    pipeline = joblib.load(out_dir / "model.joblib")
+    # Production contract: pipeline inputs are float64 with NaN for missing
+    # (_rows_to_matrix uses dtype=float; scoring/ml.py builds X_raw the same way).
+    missing_features = pd.DataFrame([{column: None for column in feature_columns}], dtype=float)
+    transformed = pipeline.named_steps["impute"].transform(missing_features)
+    transformed_by_feature = dict(zip(feature_columns, transformed[0], strict=True))
+
+    assert transformed_by_feature["advisories_last_365d"] == 0.0
+    assert transformed_by_feature["advisory_max_cvss_to_date"] == 0.0
+    assert transformed_by_feature["github_stars"] == 15.0
 
 
 def test_train_baseline_raises_when_no_usable_rows(tmp_path: Path):
