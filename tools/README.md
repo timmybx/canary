@@ -292,9 +292,10 @@ tar czf models_backup_$(date +%Y%m%d).tgz \
     data/processed/models/*/precision_at_k.json
 
 # AFTER retraining:
-mkdir -p /tmp/before && tar xzf models_backup_*.tgz -C /tmp/before
+# extract INSIDE the repo tree (host /tmp is not mounted into the container)
+mkdir -p data/tmp_before && tar xzf models_backup_*.tgz -C data/tmp_before
 docker compose run --rm canary python tools/compare_model_metrics.py \
-    --before /tmp/before/data/processed/models \
+    --before data/tmp_before/data/processed/models \
     --after data/processed/models \
     --json data/processed/results/imputation_fix_deltas.json
 ```

@@ -23,6 +23,7 @@ data/raw/**
 data/processed/**
 data/cache/**
 data/pypi/**
+data/tmp*/**
 
 # Keep folder structure + docs/samples
 !data/**/.gitkeep
