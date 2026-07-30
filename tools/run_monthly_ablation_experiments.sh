@@ -49,6 +49,10 @@
 #   # Dry-run: print commands without executing:
 #   bash tools/run_monthly_ablation_experiments.sh --dry-run
 #
+#   # Resume: skip feature-selects whose feature_selection.json is already
+#   # newer than the model's model.joblib (crash recovery):
+#   bash tools/run_monthly_ablation_experiments.sh --section 8 --skip-filter --resume
+#
 # Estimated wall time (Docker, single machine)
 # --------------------------------------------
 #   Logistic experiments (~12):        ~6 min
@@ -84,6 +88,7 @@ RANDOM_SEED="42"
 ONLY_SECTION=""
 SKIP_FILTER=0
 DRY_RUN=0
+RESUME=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -93,9 +98,11 @@ while [[ $# -gt 0 ]]; do
       SKIP_FILTER=1; shift ;;
     --dry-run)
       DRY_RUN=1; shift ;;
+    --resume)
+      RESUME=1; shift ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: $0 [--section N] [--skip-filter] [--dry-run]" >&2
+      echo "Usage: $0 [--section N] [--skip-filter] [--dry-run] [--resume]" >&2
       exit 1 ;;
   esac
 done
@@ -169,6 +176,14 @@ _feature_select() {
   # to rank and the test set has enough positives for stable AP estimates.
   local out_dir="$1"
   local split="${2:-time}"
+
+  # --resume: skip if the existing feature_selection.json postdates the
+  # trained model (i.e. it was produced from the current model.joblib).
+  if [[ "$RESUME" -eq 1 && -f "$out_dir/feature_selection.json" && "$out_dir/feature_selection.json" -nt "$out_dir/model.joblib" ]]; then
+    echo ""
+    echo "--- $(date '+%H:%M:%S') | feature-select SKIP (up to date) out=$(basename "$out_dir") ---"
+    return 0
+  fi
 
   local cmd=(
     docker compose run --rm canary
