@@ -1,4 +1,4 @@
-FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS development
 
 WORKDIR /app
 
@@ -43,3 +43,14 @@ RUN addgroup --system appgroup \
 USER appuser
 
 CMD ["python", "-m", "canary.webapp"]
+
+# pip remains available in the development stage for lockfile generation and
+# other repository tooling, but is not needed by the shipped runtime. Its
+# vendored dependencies are independently indexed by container scanners and
+# can retain vulnerabilities even when application packages are securely
+# pinned.
+FROM development AS runtime
+
+USER root
+RUN python -m pip uninstall --yes pip
+USER appuser
