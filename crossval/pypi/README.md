@@ -68,29 +68,31 @@ This matches the Jenkins time-split evaluation design.
 
 ## Results
 
-Results from the July 2026 container run (top-8000 universe, pinned
-`requirements.txt` environment):
+Results from the July 31, 2026 container run (top-8000 universe, pinned
+`requirements.txt` environment), after the advisory zero-fill imputation
+correction (see `tools/README.md`):
 
-| Model | Ecosystem | AP | AUC | P@10 | P@25 |
+| Model | Ecosystem | AP | AUC | Row-level P@10 | Row-level P@25 |
 |---|---|---|---|---|---|
-| XGBoost | Jenkins | 0.0896 | 0.6717 | 0.300 | 0.240 |
-| XGBoost | PyPI | 0.2688 | 0.7707 | 1.000 | 0.880 |
-| LightGBM | Jenkins | 0.0882 | 0.6647 | 0.300 | 0.240 |
-| LightGBM | PyPI | 0.2605 | 0.7644 | 0.700 | 0.840 |
-| Random Forest | Jenkins | 0.0617 | 0.6830 | 0.200 | 0.160 |
-| Random Forest | PyPI | 0.2213 | 0.7046 | 0.600 | 0.800 |
-| Logistic | Jenkins | 0.0253 | 0.5034 | 0.000 | 0.000 |
-| Logistic | PyPI | 0.2288 | 0.7762 | 0.700 | 0.400 |
+| XGBoost | Jenkins | 0.0907 | 0.6744 | 0.300 | 0.240 |
+| XGBoost | PyPI | 0.2704 | 0.7743 | 1.000 | 0.840 |
+| LightGBM | Jenkins | 0.0915 | 0.6717 | 0.300 | 0.240 |
+| LightGBM | PyPI | 0.2622 | 0.7643 | 0.700 | 0.840 |
+| Random Forest | Jenkins | 0.0649 | 0.6648 | 0.200 | 0.160 |
+| Random Forest | PyPI | 0.2173 | 0.6994 | 0.900 | 0.840 |
+| Logistic | Jenkins | 0.0247 | 0.4978 | 0.000 | 0.000 |
+| Logistic | PyPI | 0.2244 | 0.7749 | 0.100 | 0.120 |
 
 PyPI test set: 709 positives / 42,318 total (base rate 1.68%)
 Jenkins test set: 77 positives / 4,106 total (base rate 1.88%)
 
-> **Version-sensitivity note:** relative to the initial June 2026 run,
-> XGBoost and LightGBM metrics reproduced exactly under refreshed library
-> pins, while Random Forest and Logistic Regression shifted noticeably
-> (e.g., RF AP 0.1597 → 0.2213). Top-k metrics for the low-capacity models
-> are sensitive to library version and score tie-breaking; the
-> gradient-boosted results are stable. Cite only container-run numbers.
+> **Version-sensitivity note:** top-k metrics for the low-capacity models
+> are sensitive to library version and score tie-breaking (an earlier
+> dependency refresh alone moved RF AP 0.1597 → 0.2213); the
+> gradient-boosted results are stable. Relative to the pre-correction July
+> run, the imputation correction moved AP only modestly in both ecosystems
+> (e.g., PyPI XGBoost 0.2688 → 0.2704; Jenkins row-level P@k unchanged).
+> Cite only container-run numbers.
 
 The directional finding replicates: advisory history predicts near-term
 vulnerability risk above base rate in both ecosystems.  PyPI shows stronger
@@ -106,15 +108,16 @@ several top-k rows. Deduplicating to each package's highest-scored test row
 
 | Model | Distinct pkgs in row top-10 | Dedup P@10 | Distinct in top-25 | Dedup P@25 |
 |---|---|---|---|---|
-| XGBoost | 2 | 0.700 | 5 | 0.640 |
-| LightGBM | 2 | 0.900 | 6 | 0.680 |
-| Random Forest | 5 | 0.900 | 9 | 0.720 |
-| Logistic | 4 | 0.500 | 7 | 0.480 |
+| XGBoost | 3 | 0.700 | 6 | 0.680 |
+| LightGBM | 2 | 0.700 | 5 | 0.640 |
+| Random Forest | 5 | 0.800 | 8 | 0.680 |
+| Logistic | 3 | 0.600 | 6 | 0.560 |
 
-The row-level XGBoost P@10 of 1.000 collapses to only two distinct packages;
+The row-level XGBoost P@10 of 1.000 collapses to only three distinct packages;
 under deduplication P@10 is 0.700 (~42x the 1.68% base rate). The
 deduplicated values are the ones to treat as primary when describing triage
-precision.
+precision, and they are what the praxis reports (Table 4-4, "component level
+P@k") — the row-level columns in the table above are not comparable to it.
 
 ## Scripts
 
