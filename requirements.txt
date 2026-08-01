@@ -8,13 +8,13 @@ beautifulsoup4==4.15.0 \
     --hash=sha256:288e3ca7d54b06f2ac191970bc275c1939cb46d450b255bf6718b04aa37ab4f7 \
     --hash=sha256:d6f88de62e1d4e38ecb1077eb9724cd0eff29d2a08ca16a401e9b9e93f117cf9
     # via canary (pyproject.toml)
-boto3==1.43.59 \
-    --hash=sha256:4e9b14f89adc1a533c89312e86d8e00455a6f15d398796d92f9191b06e56b401 \
-    --hash=sha256:58b9635deebf075c1c3d76df78df08eb2979c2a74283194676783a0bff3b4557
+boto3==1.43.62 \
+    --hash=sha256:0bb298e7ffd72b91615df44bf71c417df80a29d844971e5d665b8bd743a4bb35 \
+    --hash=sha256:0bf920e0739346e81c7310b685a3f783bf1fcc62ce7d5c7016508fa25c0d261f
     # via canary (pyproject.toml)
-botocore==1.43.59 \
-    --hash=sha256:21393c35d23b19d7ba95cc4156b59f4013f80696d667997e1abd9d4e29651708 \
-    --hash=sha256:8016da69ecc1d705249a8ef13548d3c95eec87ac1cd26133a8bdfa73ca175be0
+botocore==1.43.62 \
+    --hash=sha256:76de153de1ba3e242b2e6df6a13ab8a3fb35d17db562462969e661457b63166e \
+    --hash=sha256:94efc419c9f0f41dc2415e4b6b62f04ae21b3ce3930fac47214c4d3f361ea8b8
     # via
     #   boto3
     #   s3transfer
