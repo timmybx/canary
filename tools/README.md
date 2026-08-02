@@ -16,6 +16,7 @@ docker compose run --rm canary python tools/<script>.py
 | `h1_odds_ratio.py` | Does hypothesis H1's marginal claim (stale/small → ≥50% higher advisory odds) hold? |
 | `simpson_stratified.py` | Does the H1 reversal survive stratification by an attention proxy? |
 | `heuristic_baseline.py` | Does the ML model beat the trivial rule "flag anything with a prior advisory"? |
+| `brier_score.py` | Do the predicted probabilities carry information beyond the base rate (Brier / skill score)? |
 | `shap_single_model.py` | **Source of record for feature interpretation**: signed SHAP for one specified model, direction from feature values, binned dependence profiles. |
 | `shap_consistency.py` | Robustness check only: is a feature's importance stable across model configurations? |
 | `compare_model_metrics.py` | How much did a pipeline change move the metrics? (before/after retrain diff) |
@@ -208,6 +209,34 @@ finds **zero** true positives in the top 10, 25, and 50. Advisory history is
 a *feature*; it is a weak *policy*. The multivariate model is what converts
 signals into a useful ranking. The rule itself is model-independent, so only
 the CANARY columns change with the retrain.
+
+---
+
+## brier_score.py — preliminary probability calibration check
+
+Computes the Brier score (mean squared error between predicted probability
+and binary outcome) from a model's saved `test_predictions.csv`, alongside a
+base-rate reference (always predict the test-set base rate) and the Brier
+skill score, BSS = 1 − BS/BS_ref. At CANARY's ~1.9% base rate a raw Brier
+score is deceptively small, so only the skill score is meaningful: positive
+skill means the probabilities carry information beyond the base rate.
+
+```bash
+docker compose run --rm canary python tools/brier_score.py \
+    --json data/processed/results/brier_scores.json
+```
+
+### Results (container run, August 2026, post zero-fill retrain)
+
+| Model | n | Base rate | Brier | Base-rate ref | Skill |
+|---|---|---|---|---|---|
+| `xgb_6m_advisory_swh_time` (headline) | 4,106 | 0.0188 | 0.0141 | 0.0184 | **+0.236** |
+| `xgb_6m_full_cleaned_time` (deployed) | 4,106 | 0.0188 | 0.0135 | 0.0184 | **+0.268** |
+
+This is the preliminary check reported in praxis Section 4.7. It is
+necessary but not sufficient for interpreting scores as probabilities;
+formal calibration (reliability analysis, ECE, threshold justification)
+remains future work.
 
 ---
 
