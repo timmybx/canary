@@ -479,6 +479,48 @@ def test_train_baseline_runs_and_returns_metrics(tmp_path: Path):
     assert (tmp_path / "model" / "pr_curve.json").exists()
 
 
+@pytest.mark.parametrize(
+    ("include_window_features", "expected_window_features"),
+    [
+        (False, set()),
+        (True, {"window_index", "window_month", "window_year"}),
+    ],
+)
+def test_train_baseline_applies_and_records_window_feature_policy(
+    tmp_path: Path,
+    include_window_features: bool,
+    expected_window_features: set[str],
+) -> None:
+    in_path = tmp_path / "labeled.jsonl"
+    rows = _make_labeled_rows()
+    for index, row in enumerate(rows):
+        row["window_index"] = index
+        row["window_month"] = int(str(row["month"])[5:7])
+        row["window_year"] = int(str(row["month"])[:4])
+    _write_labeled_jsonl(in_path, rows)
+
+    out_dir = tmp_path / "model"
+    metrics = train_baseline(
+        in_path=in_path,
+        target_col="label_advisory_within_6m",
+        out_dir=out_dir,
+        test_start_month="2025-10",
+        include_window_features=include_window_features,
+    )
+
+    selected_features = set(metrics["feature_columns"])
+    assert selected_features & {"window_index", "window_month", "window_year"} == (
+        expected_window_features
+    )
+    assert {"feat_a", "feat_b"} <= selected_features
+    assert metrics["include_window_features"] is include_window_features
+
+    saved_metrics = json.loads((out_dir / "metrics.json").read_text(encoding="utf-8"))
+    saved_features = set(json.loads((out_dir / "feature_columns.json").read_text(encoding="utf-8")))
+    assert saved_metrics["include_window_features"] is include_window_features
+    assert saved_features == selected_features
+
+
 def test_train_baseline_persists_feature_family_imputation_policy(tmp_path: Path):
     in_path = tmp_path / "labeled.jsonl"
     rows = _make_labeled_rows()
