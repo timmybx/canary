@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.14] - 2026-08-02
+### Added
+- Analysis toolchain (`tools/`, all containerized, documented with results in `tools/README.md`):
+  - `tools/h1_odds_ratio.py`: direct marginal test of H1 from the labeled monthly dataset (2x2 tables, Woolf 95% CIs, Haldane-Anscombe correction, constant-memory streaming). Train-window odds ratios run 0.31-0.41 — the hypothesized risk factors are associated with *lower* advisory odds, a surveillance effect in advisory-labeled data; H1 is not supported as stated.
+  - `tools/simpson_stratified.py`: attention-stratified test of the H1 reversal (`gharchive_unique_actors` terciles). Monotone attenuation of the stale/fresh ratio (0.37 -> 0.63 -> 0.73) with no within-stratum sign flip: mechanism supported, textbook Simpson's paradox label withheld.
+  - `tools/heuristic_baseline.py`: trivial-rule comparison on the fully labeled 2025-05 snapshot. "Flag any plugin with a prior advisory" flags 629 plugins (30.6% of the ecosystem) at exactly 1.0x lift; CANARY at the same budget achieves 3.3x with full coverage; ranking by advisory count finds zero true positives in its top 50 (tie-dominated).
+  - `tools/shap_single_model.py`: source of record for feature interpretation. Exact TreeExplainer over the full test set for one specified configuration; direction reported as the Pearson correlation between feature values and per-row SHAP (answering "do high values raise or lower predicted risk"); adaptive binned dependence profiles; observed-only profiles for high-missingness features; version-drift self-check that reproduces the saved `test_predictions.csv` before explaining (max |diff| 0.00e+00 on both reported models).
+  - `tools/shap_consistency.py`: cross-configuration stability check only — explicitly not a source of record (mixed signed/unsigned importances and feature-set-size effects make magnitudes incomparable).
+  - `tools/compare_model_metrics.py`: before/after retrain diff over saved metrics artifacts (per-model AP/ROC-AUC deltas, largest movers).
+  - `tools/brier_score.py`: Brier score with base-rate reference and skill score from saved test predictions (headline model +0.236, deployed full model +0.268) — the preliminary calibration check reported in praxis Section 4.7.
+  - `tools/make_figures.py`: praxis/defense figure registry (`h1_forest`, `simpson`, `h3_retention`, `precision_coverage`, `calibration`, `shap_single`, `shap_profiles`, and others) rendered from saved artifacts in the family-colored diverging style.
+- `--resume` flag on `tools/run_monthly_ablation_experiments.sh`: skips any feature-selection run whose `feature_selection.json` is newer than the model's `model.joblib`, so a crashed driver (e.g. docker client "unexpected EOF" under WSL2 memory pressure) never repeats completed work.
+- `matplotlib` added to dev dependencies for figure rendering.
+
+### Changed
+- Full 64-model suite retrained under the corrected imputation pipeline in the pinned container. Headline advisory+SWH time-split AP 0.7725 -> 0.7886; full cleaned (deployed interpretation) model 0.7637 -> 0.7674; H3 configuration 0.5589 -> 0.5828 (top-15 subset retains 92.4%). Advisory-free logistic/LightGBM configurations moved exactly 0.0000, confirming data and splits unchanged; per-model deltas recorded in `data/processed/results/imputation_fix_deltas.json`.
+- Feature interpretation reworked around the single-model SHAP toolchain: staleness clocks (months since release tag/push, days since last commit) are protective at high values, activity-rate features are risk-raising, and governance signals are protective — consistent with the H1 surveillance mechanism. Cross-model SHAP aggregation demoted to a stability check.
+- `crossval/pypi/README.md`: results updated to the July 31 container run under the corrected pipeline (XGBoost AP 0.2704, package-level dedup P@10 0.70) with row-level vs component-level columns explicitly labeled.
+- Dockerfile: runtime stage now strips pip from the final image (attack-surface reduction); temp data directories ignored; metrics documentation and contributor docs formatting tidied.
+- CI workflow updates: `github/codeql-action` to v4.37.2-v4.37.4 (#210, #211, #230); `ossf/scorecard-action` to v2.4.4 (#217); `zizmorcore/zizmor-action` to v0.6.1 (#218) then v0.6.2 (#238); `docker/scout-action` to v1.24.0 (#231); `docker/login-action` digest refreshes (#214, #220, #225, #227); `gcr.io/oss-fuzz-base/base-builder-python` digest refreshes (#206, #222, #224).
+- Dependency pin refreshes: `pip` to v26.2 (#229); `pandas` to >=3.0.5 (#213); `ruff` to >=0.16.0 (#215) then >=0.16.1 (#234) with matching pre-commit hook bumps (#219, #235); `pre-commit` to v4.6.1 (#209); `mutmut` to v3.7.0 (#236); `google-cloud-bigquery` to >=3.42.3 (#233); `boto3` (#207, #208, #212, #216, #221, #223, #226, #228, #232).
+
+### Fixed
+- Advisory feature imputation: `advisory_*`/`advisories_*` features are now zero-filled instead of median-imputed (`canary/train/baseline.py` via ColumnTransformer with advisory columns ordered first; `feature_columns.json` matches transformer order; mirrored in `crossval/pypi/03_train.py` and `04_dedup_precision.py`). The advisory feed is complete by construction — a missing value means no advisory history — so median imputation was placing no-history plugins in the middle of the observed severity range and entangling them with genuine mid-severity history.
+- Serving-side imputation contract: `ml.py` now builds `X_raw` with `dtype=float` so all-None inputs enter the pipeline as float64 NaN and impute correctly; the coverage regression test was rewritten to enforce the float64/NaN contract.
+
 ## [0.1.13] - 2026-07-20
 ### Added
 - Component-level (deduplicated) precision-at-k as the primary operational ranking metric. Evaluation rankings are over plugin-month observations, so a single high-risk component could occupy several top-k rows; metrics are now also computed over distinct components (each component's highest-scored row). Jenkins headline results were robust to the correction (advisory+SWH time-split P@10 1.00 -> 0.90; full-feature model dedup P@10 1.00, P@25 0.92).
