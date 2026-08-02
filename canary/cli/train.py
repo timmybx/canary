@@ -26,6 +26,7 @@ def _cmd_train_baseline(args: argparse.Namespace) -> int:
         test_start_month=args.test_start_month,
         extra_exclude=extra_exclude,
         include_prefixes=include_prefixes,
+        include_window_features=args.include_window_features,
         model_name=args.model,
         split_strategy=args.split_strategy,
         group_col=args.group_col,
@@ -146,6 +147,17 @@ def register(subparsers: Any) -> None:
         "--test-start-month",
         default="2025-10",
         help="First month to include in test split (YYYY-MM)",
+    )
+    train_baseline_parser.add_argument(
+        "--include-window-features",
+        action="store_true",
+        help=(
+            "Include the temporal window features (window_index, window_month, "
+            "window_year) in the feature matrix. Excluded by default because "
+            "calendar position inflates pooled metrics via label maturity at the "
+            "train/test boundary; use only to reproduce historical window-bearing "
+            "configurations."
+        ),
     )
     train_baseline_parser.add_argument(
         "--exclude-cols",

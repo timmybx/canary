@@ -137,6 +137,12 @@ _train() {
   local out_dir="$4"
   shift 4
 
+  # NOTE: --include-window-features preserves the historical semantics of this
+  # suite. Training now excludes window_index/window_month/window_year by
+  # default (label-maturity optimism; see praxis 4.4.3); the ablation matrix
+  # documented in the praxis was trained WITH them, so the driver opts back in
+  # to keep those configurations reproducible. The *_no_time configurations are
+  # unaffected (their input files never contained the window columns).
   local cmd=(
     docker compose run --rm canary
     canary train baseline
@@ -147,6 +153,7 @@ _train() {
     --test-start-month "$TEST_START_MONTH"
     --split-strategy   "$split"
     --random-seed   "$RANDOM_SEED"
+    --include-window-features
   )
 
   # group and group_time splits need group-col and test-fraction

@@ -437,6 +437,7 @@ def test_cmd_train_baseline_returns_zero_and_prints(
             target_col="advisory_6m",
             out_dir=str(tmp_path / "models"),
             test_start_month="2024-01",
+            include_window_features=False,
             exclude_cols=None,
             include_prefixes=None,
             model="logistic",
@@ -473,6 +474,7 @@ def test_cmd_train_baseline_extra_exclude_and_prefixes(tmp_path: Path) -> None:
             target_col="t",
             out_dir=str(tmp_path / "models"),
             test_start_month=None,
+            include_window_features=True,
             exclude_cols="col_a, col_b",
             include_prefixes="gh_, swh_",
             model="random_forest",
@@ -486,6 +488,7 @@ def test_cmd_train_baseline_extra_exclude_and_prefixes(tmp_path: Path) -> None:
     call_kwargs = mock_train.call_args.kwargs
     assert call_kwargs["extra_exclude"] == {"col_a", "col_b"}
     assert call_kwargs["include_prefixes"] == ("gh_", "swh_")
+    assert call_kwargs["include_window_features"] is True
 
 
 # ---------------------------------------------------------------------------

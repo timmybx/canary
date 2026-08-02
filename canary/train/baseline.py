@@ -19,6 +19,17 @@ from sklearn.metrics import (  # pyright: ignore[reportMissingModuleSource]
 )
 from sklearn.pipeline import Pipeline  # pyright: ignore[reportMissingModuleSource]
 
+# Temporal window features encode the calendar position of an observation,
+# not plugin behavior. They are excluded from training by default: rolling
+# six-month label windows overlap the train/test boundary, so the labels of
+# the final training months share advisory events with the test window, and
+# calendar position lets tree models specialize to exactly those months
+# (label-maturity optimism; ~+0.21 pooled AP on the advisory+SWH headline
+# configuration with no change to within-month P@10, praxis Section 4.4.3).
+# Pass include_window_features=True (CLI: --include-window-features) to
+# reproduce the historical window-bearing configurations.
+WINDOW_FEATURE_COLUMNS = {"window_index", "window_month", "window_year"}
+
 DEFAULT_EXCLUDE_COLUMNS = {
     # Identifiers / bookkeeping
     "plugin_id",
@@ -104,9 +115,12 @@ def _select_feature_columns(
     target_col: str,
     extra_exclude: set[str] | None = None,
     include_prefixes: tuple[str, ...] | None = None,
+    include_window_features: bool = False,
 ) -> list[str]:
     exclude = set(DEFAULT_EXCLUDE_COLUMNS)
     exclude.add(target_col)
+    if not include_window_features:
+        exclude.update(WINDOW_FEATURE_COLUMNS)
     if extra_exclude:
         exclude.update(extra_exclude)
 
@@ -365,6 +379,7 @@ def train_model(
     test_start_month: str = "2025-10",
     extra_exclude: set[str] | None = None,
     include_prefixes: tuple[str, ...] | None = None,
+    include_window_features: bool = False,
     split_strategy: str = "time",
     group_col: str = "plugin_id",
     test_fraction: float = 0.2,
@@ -372,6 +387,9 @@ def train_model(
 ) -> dict[str, Any]:
     """
     Train *estimator* on monthly plugin rows using a time-based split.
+
+    Temporal window features (``WINDOW_FEATURE_COLUMNS``) are excluded from
+    the feature matrix unless *include_window_features* is True.
 
     The estimator must be sklearn-compatible (fit / predict_proba).
     Imputation of missing values is always applied before the estimator.
@@ -400,6 +418,7 @@ def train_model(
         target_col=target_col,
         extra_exclude=extra_exclude,
         include_prefixes=include_prefixes,
+        include_window_features=include_window_features,
     )
     if not feature_cols:
         raise ValueError("No usable numeric feature columns found.")
@@ -463,6 +482,7 @@ def train_model(
         "target_col": target_col,
         "test_start_month": test_start_month,
         "include_prefixes": list(include_prefixes) if include_prefixes else [],
+        "include_window_features": include_window_features,
         "train_row_count": int(len(train_rows)),
         "test_row_count": int(len(test_rows)),
         "train_start_month": (
@@ -673,6 +693,7 @@ def train_baseline(
     test_start_month: str = "2025-10",
     extra_exclude: set[str] | None = None,
     include_prefixes: tuple[str, ...] | None = None,
+    include_window_features: bool = False,
     model_name: str = "logistic",
     split_strategy: str = "time",
     group_col: str = "plugin_id",
@@ -696,6 +717,7 @@ def train_baseline(
         test_start_month=test_start_month,
         extra_exclude=extra_exclude,
         include_prefixes=include_prefixes,
+        include_window_features=include_window_features,
         split_strategy=split_strategy,
         group_col=group_col,
         test_fraction=test_fraction,
