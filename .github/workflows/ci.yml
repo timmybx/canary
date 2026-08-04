@@ -109,4 +109,7 @@ jobs:
           image: local://canary:ci
           only-severities: critical,high
           only-fixed: true
+          vex-location: ./.vex/cryptography-49.vex.json
+          vex-author: tebrennan@gwu.edu
+          only-vex-affected: true
           exit-code: true
