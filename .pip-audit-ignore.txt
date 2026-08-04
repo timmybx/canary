@@ -3,3 +3,8 @@
 #
 # Use this only for known issues with no available fix yet.
 # Remove entries as soon as an upstream patched release exists.
+
+# 2026-08-03: cryptography 49.0.0 is affected, but the fixed 50.0.0 release is not yet
+# available on PyPI and pyOpenSSL 26.3.0 requires cryptography>=49.0.0,<50. Remove this
+# exception as soon as compatible cryptography and pyOpenSSL releases are available.
+GHSA-g6cj-pr64-35w5
