@@ -12,6 +12,9 @@
   "pip_requirements": {
     "enabled": false
   },
+  "poetry": {
+    "enabled": false
+  },
   "pre-commit": {
     "enabled": true,
     "pinDigests": true
@@ -25,6 +28,12 @@
     },
     {
       "matchManagers": ["github-actions"],
+      "matchDepNames": ["python"],
+      "allowedVersions": "<3.13"
+    },
+    {
+      "description": "Keep requires-python in pyproject.toml on the 3.12 container",
+      "matchManagers": ["pip-compile"],
       "matchDepNames": ["python"],
       "allowedVersions": "<3.13"
     },
