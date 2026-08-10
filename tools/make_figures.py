@@ -341,16 +341,23 @@ def fig_shap_single(out: Path, src: str, top_n: int = 16) -> None:
     plt.close(fig)
 
 
-def fig_shap_profiles(out: Path, src: str, n_feats: int = 8) -> None:
-    """Small-multiples dependence profiles: mean SHAP per value quintile."""
+def fig_shap_profiles(out: Path, src: str, n_feats: int = 4) -> None:
+    """Small-multiples dependence profiles: mean SHAP per value quintile.
+
+    Panels are limited to the top recency ("staleness clock") features by
+    importance: these carry the liveness-cliff pattern the text discusses,
+    and a 2x2 grid stays readable at print size (advisor guidance, Aug 2026).
+    """
     j = json.loads(Path(src).read_text())
-    feats = [f for f in j["features"] if f.get("bin_profile")][:n_feats]
+    feats = [f for f in j["features"] if f.get("bin_profile") and "_since_" in f["feature"]][
+        :n_feats
+    ]
     if not feats:
         print("SKIP shap_profiles: no bin_profile data (rerun shap_single_model.py)")
         return
-    ncols = 4
+    ncols = 2  # advisor guidance (Aug 2026): max two panels across for print readability
     nrows = (len(feats) + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(11, 2.6 * nrows), squeeze=False)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7.0, 2.15 * nrows + 0.5), squeeze=False)
     for idx, f in enumerate(feats):
         ax = axes[idx // ncols][idx % ncols]
         prof = f["bin_profile"]
@@ -359,23 +366,26 @@ def fig_shap_profiles(out: Path, src: str, n_feats: int = 8) -> None:
         color = FAMILY_COLORS.get(f["family"], "#888780")
         ax.axhline(0, color="#B4B2A9", linewidth=0.8)
         ax.plot(xs, ys, "o-", color=color, linewidth=1.8, markersize=5)
-        ax.set_title(f["feature"], fontsize=8.5)
+        ax.set_title(f["feature"], fontsize=10)
         ax.set_xticks(xs)
-        ax.set_xticklabels([f"{b['value_lo']:g}\n-{b['value_hi']:g}" for b in prof], fontsize=6)
-        ax.tick_params(axis="y", labelsize=7)
+        ax.set_xticklabels([f"{b['value_lo']:g}\n-{b['value_hi']:g}" for b in prof], fontsize=8)
+        ax.tick_params(axis="y", labelsize=8)
         shape = f.get("bin_shape") or ""
+        # keep the annotation off the curve: top-left unless the profile starts high
+        starts_high = ys[0] > (min(ys) + max(ys)) / 2
+        xy, va = ((0.03, 0.06), "bottom") if starts_high else ((0.03, 0.94), "top")
         ax.annotate(
             f"r={f['value_shap_corr']:+.2f}  {shape}",
-            (0.02, 0.94),
+            xy,
             xycoords="axes fraction",
-            fontsize=7,
-            va="top",
+            fontsize=8.5,
+            va=va,
         )
     for idx in range(len(feats), nrows * ncols):
         axes[idx // ncols][idx % ncols].axis("off")
     fig.suptitle(f"SHAP dependence profiles by value quintile ({j['model']})", fontsize=12)
-    fig.supylabel("Mean SHAP in bin", fontsize=9)
-    fig.tight_layout(rect=(0.035, 0, 1, 0.95))
+    fig.supylabel("Mean SHAP in bin", fontsize=10)
+    fig.tight_layout(rect=(0.04, 0, 1, 0.965))
     fig.savefig(out / "shap_profiles.png")
     plt.close(fig)
 
