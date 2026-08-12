@@ -8,7 +8,7 @@ bandit>=1.9.4
 pip-audit>=2.10.1
 pip-tools>=7.6.1
 pyright>=1.1.411
-pre-commit>=4.6.1
+pre-commit>=4.6.2
 atheris>=3.1.0
 mutmut==3.7.0
 matplotlib>=3.11.1
