@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
+## [0.1.15] - 2026-08-16
+### Added
+- Parametrized regression test (`tests/test_train_baseline.py`) verifying that `train_baseline` correctly applies and records the `include_window_features` flag, checking both returned metrics and persisted artifacts.
+
+### Changed
+- **Window features excluded by default**: `window_index`/`window_month`/`window_year` are no longer used as training features unless explicitly requested, avoiding inflated metrics from label maturity across the train/test boundary. A new opt-in CLI/training flag restores the historical behavior, the choice is recorded in training metadata, and the monthly ablation driver opts back in so published experiment configurations remain reproducible.
+- `tools/make_figures.py` `shap_profiles` figure refined for print readability: profiles limited to the top recency/staleness (`_since_`) features, grid reduced to a 2x2 layout of 4 panels, font sizes increased, and annotation placement adjusted to avoid overlapping the curve (the Figure 4-2 redesign).
+- pip-compile and Renovate config hardened: Renovate's Poetry manager disabled, a pip-compile python version rule keeps `requires-python` aligned with the 3.12 container, and pip retries/timeouts added to both compose services and all `make reqs` pip-compile commands.
+- Temporary handling of cryptography advisory GHSA-g6cj-pr64-35w5 while awaiting a fix release: pip-audit ignore entry and a repository VEX document (`not_affected`; the vulnerable PKCS#7 decryption path is not used) with CI consuming the VEX file; all removed again after `cryptography` 50.0.0 (#245) and a compatible pyOpenSSL landed. Net effect: `cryptography` now pinned at >=50.0.0 with no suppressions.
+- pip-compile output refreshes (#261) with manual corrections (restored `build==1.5.1` after an unintended downgrade; restored missing pyinstaller hashes); lockfile NCCL package moved from `nvidia-nccl-cu12` to `nvidia-nccl-cu13` at the same version (2.30.7).
+- CI workflow updates: `github/codeql-action` to v4.37.5-v4.37.7 (#240, #243, #267); `gcr.io/oss-fuzz-base/base-builder-python` digest refresh (#239); `python:3.12-slim` digest refreshes (#246, #270).
+- Dependency pin refreshes: Python to >=3.12.13 (#253) then >=3.12.14 (#271); `xgboost` to >=3.4.0 (#244) then >=3.4.1 (#273); `numpy` to >=2.5.2 (#265); `pip` to v26.2.1 (#249); `pip-tools` to >=7.6.1 (#260); `ruff` to >=0.16.2 (#250) then >=0.16.3 (#266) with matching pre-commit hook bumps (#252, #268); `crate-ci/typos` pre-commit hook to v1.49.0 (#241); `setuptools` to v84 (#256); `wheel` to v0.48.0 (#263); `pre-commit` to v4.6.2 (#262); `pyinstaller` to v6.22.0 (#255) then v6.22.1 (#274); `google-cloud-bigquery` to >=3.43.0 (#254); `boto3` (#242, #247, #251, #258, #259, #264, #269, #272).
+
 ## [0.1.14] - 2026-08-02
 ### Added
 - Analysis toolchain (`tools/`, all containerized, documented with results in `tools/README.md`):
