@@ -13,6 +13,7 @@
 [![zizmor](https://github.com/timmybx/canary/actions/workflows/zizmor.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/zizmor.yml)
 [![CodeQL](https://img.shields.io/badge/CodeQL-enabled-brightgreen?logo=github)](https://github.com/timmybx/canary/security/code-scanning)
 [![Mutation Testing](https://github.com/timmybx/canary/actions/workflows/mutation.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/mutation.yml)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21970272.svg)](https://doi.org/10.5281/zenodo.21970272)
 
 # 🐤 CANARY — Component Analytics & Near-term Advisory Risk Yardstick
 
