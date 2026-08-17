@@ -48,7 +48,7 @@ The project includes a Docker-based CLI, a publicly deployed web console, collec
 - ✅ Labels monthly feature rows with future advisory horizons
 - ✅ Builds normalized advisory events for downstream analytics / ML
 - ✅ Trains baseline ML models on labeled monthly rows
-- ✅ Scores a plugin with an ML-backed advisory risk probability and interpretable SHAP-based feature drivers
+- ✅ Scores a plugin with an ML-backed advisory risk score and interpretable SHAP-based feature drivers
 - ✅ Provides AI-powered plain-English explanations of scores via Claude or ChatGPT
 - ✅ Validates predictions against confirmed Jenkins security advisories in the case study tab
 - ✅ Runs tests, linting, fuzzing, and security checks in a consistent Docker environment
@@ -349,7 +349,7 @@ canary-web
 ```
 
 The web console is publicly deployed at **[canary-score.com](https://canary-score.com)** and can also be run locally. It provides:
-- **Scoring tab** — score any Jenkins plugin with an ML advisory risk probability, SHAP-based feature drivers, supporting signals, and an AI-powered plain-English explanation
+- **Scoring tab** — score any Jenkins plugin with an ML advisory risk score, SHAP-based feature drivers, supporting signals, and an AI-powered plain-English explanation
 - **Machine learning tab** — explore 64 pre-trained model configurations across four algorithms, eight feature sets, and two evaluation strategies — the complete 4×8×2 experiment matrix; includes operational precision@k analysis and feature selection (H3) results
 - **Case study tab** — see top-ranked predictions validated against confirmed Jenkins security advisories with CVE details, severity, and lead time
 - **About tab** — quick-start guide and background on the CANARY methodology
@@ -518,7 +518,7 @@ docker compose run --rm canary canary score-ml cucumber-reports --model-dir data
 ```
 
 Output includes:
-- predicted advisory risk probability
+- predicted advisory risk score
 - risk category
 - top contributing features
 - feature vector aligned to the trained model contract
@@ -682,7 +682,7 @@ CANARY aims to be reproducible and supply-chain aware:
 
 ## 🧠 How Scoring Works
 
-The primary CANARY score is an ML-backed advisory risk probability — the estimated likelihood that a plugin will appear in a Jenkins security advisory within the next 180 days. The score is produced by gradient-boosted tree models (XGBoost, LightGBM) trained on six years of monthly plugin observations.
+The primary CANARY score is an ML-backed advisory risk score estimating relative near-term risk: whether a plugin is more or less likely than its peers to appear in a Jenkins security advisory within the next 180 days. The score is produced by gradient-boosted tree models (XGBoost, LightGBM) trained on six years of monthly plugin observations. Scores are model probability outputs in [0, 1] but are not formally calibrated; the validated use is ranking, and risk tiers are a presentation convenience rather than probability thresholds.
 
 **Key input signals:**
 
@@ -693,24 +693,30 @@ The primary CANARY score is an ML-backed advisory risk probability — the estim
 
 **Model output:**
 
-- Advisory risk probability (0.0–1.0) with Low / Medium / High risk category
+- Advisory risk score (0.0–1.0) with Low / Medium / High risk category
 - Top contributing features with SHAP-based direction and value
 - Supporting signals including dependency risk and governance indicators
 - AI-powered plain-English explanation (via Claude or ChatGPT)
 
-The `canary score-ml` CLI path loads a trained model from `data/processed/models/<run>/`, builds a current feature vector from collected raw data, and returns an advisory-risk probability, category, top drivers, and the aligned feature vector.
+The `canary score-ml` CLI path loads a trained model from `data/processed/models/<run>/`, builds a current feature vector from collected raw data, and returns an advisory-risk score, category, top drivers, and the aligned feature vector.
 
 ---
 
 ## 🔬 Research Status
 
-CANARY is being developed as a Doctor of Engineering praxis at The George Washington University. Key empirical results from the current research phase:
+CANARY is being developed as a Doctor of Engineering praxis at The George Washington University.
 
-- **XGBoost (Advisory + Software Heritage features, time split):** ROC-AUC 0.960, Average Precision 0.773 — the best of 64 model configurations
-- **Precision@K:** top-10 plugins = 100% precision (53× lift), top-25 = 96% precision (51× lift)
-- **Feature selection (H3):** a compact 15-feature subset retains 93.9% of full-model average precision
-- **Case study validation:** 23 of 25 top-ranked predictions confirmed by Jenkins security advisories published within the 180-day window, with lead times exceeding 60 days in several cases
-- **Training data:** approximately 180,664 plugin-month observations spanning January 2018 – April 2025, with a held-out test window of May – November 2025
+**Primary reported result (leakage-controlled):**
+
+- **XGBoost, Advisory + Software Heritage features, strict time split, calendar/window features excluded:** Average Precision 0.583, ROC-AUC 0.930 (held-out test window May–June 2025: 4,106 plugin-month rows, 77 positives)
+- **Operational ranking (component-level, deduplicated):** top-10 = 100% precision, top-25 = 76%
+- **Feature selection (H3):** a compact 15-feature subset retains 92.4% of full-model average precision
+- **Training data:** approximately 180,664 plugin-month observations spanning January 2018 – April 2025
+
+**Historical model suite:**
+
+- The full 64-model suite is retained for reproducibility. Earlier headline configurations included calendar/window features and scored higher (AP up to ~0.79), but those features encode label maturity across the train/test boundary, so they are no longer the primary reported result; window features are excluded by default as of v0.1.15.
+- **Case study validation (historical configuration):** 23 of 25 top-ranked predictions confirmed by Jenkins security advisories published within the 180-day window (May – November 2025 case window), with lead times exceeding 60 days in several cases
 
 ---
 
