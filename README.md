@@ -261,6 +261,35 @@ Processed:
 
 ---
 
+## 🗃️ Published Dataset & Model Artifacts (Zenodo)
+
+The datasets and trained models behind the reported results are archived on Zenodo:
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21970272.svg)](https://doi.org/10.5281/zenodo.21970272)
+
+The record contains all labeled monthly plugin datasets (the master dataset plus the
+per-feature-family variants used in ablation experiments), the full saved model suite
+(per-configuration `model.joblib`, metrics, and test predictions), the analysis result
+JSONs behind the reported figures and tables, and a sha256 manifest. See the record's
+`DATASET_README.md` for the full file inventory.
+
+To reproduce reported results without re-running data collection:
+
+1. Clone this repo at the tag matching the record version (e.g. `v0.1.15`).
+2. Download the record, gunzip the feature files into `data/processed/features/`,
+   and extract `models.tar.gz` / `results.tar.gz` into `data/processed/`.
+3. Build the pinned container (`make build`) and run the version-drift self-check,
+   which re-scores a saved model against its saved predictions:
+
+   ```bash
+   docker compose run --rm canary python tools/shap_single_model.py
+   ```
+
+   Expected: `max |diff| = 0.00e+00`.
+
+The bundle is produced by `tools/make_zenodo_bundle.sh`. All data derives from public
+sources (Jenkins registry and advisories, GitHub Archive, Software Heritage, plugin
+health scores) and is licensed CC-BY-4.0.
+
 ## ✅ Prerequisites
 
 CANARY can run from a plain Python 3.12 virtual environment. Docker Compose remains supported for reproducible CI-like runs and local demos.

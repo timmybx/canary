@@ -9,6 +9,12 @@ CANARY separates data into three buckets:
 Most files under `data/` are generated and should usually be ignored by Git. The
 folder structure is preserved with `.gitkeep` where needed.
 
+> **Don't want to re-collect everything?** A published snapshot of
+> `data/processed/` (labeled datasets, trained models, analysis results) is
+> archived on Zenodo: [10.5281/zenodo.21970272](https://doi.org/10.5281/zenodo.21970272).
+> See "Published Dataset & Model Artifacts" in the top-level README for restore
+> and verification steps.
+
 ## Registry spine
 
 Everything starts from the Jenkins plugin registry:
