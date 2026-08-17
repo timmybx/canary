@@ -74,86 +74,69 @@ That means CANARY now has a cleaner separation between present-day scoring/repor
 
 ---
 
-## 🧭 CANARY Component Flow
+## 🧜‍♀️ How CANARY Works
 
 ```mermaid
-flowchart LR
-    %% Styling
-    classDef source fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:black;
-    classDef collect fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,color:black;
-    classDef raw fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:black;
-    classDef feature fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:black;
-    classDef usage fill:#ffe0b2,stroke:#ef6c00,stroke-width:2px,color:black;
+flowchart TB
 
-    subgraph S[Sources]
-        direction TB
-        A1[Plugin Registry]:::source
-        A2[GitHub API]:::source
-        A3[Jenkins Advisories]:::source
-        A4[GHArchive]:::source
-        A5[Health Score]:::source
-        A6[Software Heritage]:::source
+    %% ---- Styles ----
+    classDef source fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000;
+    classDef collect fill:#fff9c4,stroke:#f9a825,stroke-width:2px,color:#000;
+    classDef feature fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000;
+    classDef model fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#000;
+    classDef output fill:#ffe0b2,stroke:#ef6c00,stroke-width:2px,color:#000;
+
+    %% ---- Public sources ----
+    subgraph SOURCES["Public Data Sources"]
+        direction LR
+        JENKINS["Jenkins<br/>Registry & Advisories"]:::source
+        GH["GitHub Archive"]:::source
+        SWH["Software Heritage"]:::source
+        META["Plugin / Repository<br/>Metadata"]:::source
     end
 
-    subgraph C[Collection]
-        direction TB
-        B1[Snapshot Collector]:::collect
-        B2[GitHub Collector]:::collect
-        B3[Advisory Collector]:::collect
-        B4[GHArchive Collector]:::collect
-        B5[Healthscore Collector]:::collect
-        B6[SWH Collector]:::collect
+    %% ---- Collection ----
+    COLLECT["CANARY Data Collection<br/>& Normalization"]:::collect
+
+    %% ---- Two feature paths ----
+    subgraph FEATURES["Feature Engineering"]
+        direction LR
+
+        CURRENT["Current-Point Features<br/><small>Live plugin scoring</small>"]:::feature
+
+        MONTHLY["Monthly Time-Bounded Features<br/><small>Historical modeling</small>"]:::feature
     end
 
-    subgraph R[Raw Data Storage]
-        direction TB
-        C1[(registry)]:::raw
-        C2[(plugins)]:::raw
-        C3[(github)]:::raw
-        C4[(advisories)]:::raw
-        C5[(gharchive)]:::raw
-        C6[(healthscore)]:::raw
-        C7[(software_heritage)]:::raw
+    %% ---- Research / model path ----
+    TRAIN["Train & Evaluate Models<br/>XGBoost · LightGBM · Random Forest · Logistic Regression"]:::model
+
+    %% ---- Scoring path ----
+    SCORE["Near-Term Advisory<br/>Risk Score"]:::model
+
+    %% ---- Outputs ----
+    subgraph OUTPUTS["Analyst / Research Outputs"]
+        direction LR
+        SHAP["SHAP<br/>Feature Drivers"]:::output
+        RANK["Ranked Plugin<br/>Triage List"]:::output
+        WEB["Web Console / CLI"]:::output
+        RESEARCH["Metrics · Ablations<br/>Case-Study Validation"]:::output
     end
 
-    subgraph FTOP[Static Current Point Feature Engineering]
-        direction TB
-        D1[[build features]]:::feature
-        E1[/plugins.features.jsonl/]:::feature
-    end
+    %% ---- Main flow ----
+    SOURCES --> COLLECT
+    COLLECT --> CURRENT
+    COLLECT --> MONTHLY
 
-    subgraph FBOT[Monthly Time Bounded Feature Engineering]
-        direction TB
-        D2[[build monthly-features]]:::feature
-        E2[/plugins.monthly.features.jsonl/]:::feature
-        D3[[build monthly-labels]]:::feature
-        E3[/plugins.monthly.labeled.jsonl/]:::feature
-    end
+    MONTHLY --> TRAIN
+    TRAIN --> SCORE
 
-    subgraph U[Usage]
-        direction TB
-        FCLI[CLI / Scoring]:::usage
-        FGUI[GUI / Reporting]:::usage
-        FML[Model Training]:::usage
-        FMLScore[ML Scoring]:::usage
-    end
+    CURRENT --> SCORE
 
-    %% Connections
-    A1 --> B1 --> C2
-    A1 --> C1
-    A2 --> B2 --> C3
-    A3 --> B3 --> C4
-    A4 --> B4 --> C5
-    A5 --> B5 --> C6
-    A6 --> B6 --> C7
+    SCORE --> SHAP
+    SCORE --> RANK
+    SCORE --> WEB
 
-    C1 & C2 & C3 & C4 & C6 & C7 --> D1 --> E1
-    C1 & C4 & C5 & C7 --> D2 --> E2 --> D3 --> E3
-
-    E1 --> FCLI
-    E1 --> FGUI
-    E3 --> FML --> FMLScore
-    E1 --> FMLScore
+    TRAIN --> RESEARCH
 ```
 
 ---
