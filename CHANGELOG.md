@@ -7,6 +7,7 @@ This project follows a lightweight adaptation of “Keep a Changelog”.
 
 ## [0.1.15] - 2026-08-16
 ### Added
+- Reproducibility snapshot published on Zenodo (DOI [10.5281/zenodo.21970272](https://doi.org/10.5281/zenodo.21970272)): all labeled monthly datasets, the full saved model suite, and analysis result files, with sha256 manifest and reproduction steps; built by the new `tools/make_zenodo_bundle.sh`.
 - Parametrized regression test (`tests/test_train_baseline.py`) verifying that `train_baseline` correctly applies and records the `include_window_features` flag, checking both returned metrics and persisted artifacts.
 
 ### Changed
