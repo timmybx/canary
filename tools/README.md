@@ -20,6 +20,7 @@ docker compose run --rm canary python tools/<script>.py
 | `shap_single_model.py` | **Source of record for feature interpretation**: signed SHAP for one specified model, direction from feature values, binned dependence profiles. |
 | `shap_consistency.py` | Robustness check only: is a feature's importance stable across model configurations? |
 | `compare_model_metrics.py` | How much did a pipeline change move the metrics? (before/after retrain diff) |
+| `embargo_backtest.py` | Does the time-split headline survive when training labels are restricted to those matured before the prediction date? |
 | `make_figures.py` | Renders praxis/defense figures from the saved artifacts above. |
 
 ---
@@ -331,6 +332,80 @@ docker compose run --rm canary python tools/compare_model_metrics.py \
 
 Reports AP/ROC-AUC per model with deltas, the largest movers, and the max
 absolute change across the suite.
+
+---
+
+## embargo_backtest.py — label-embargo backtest of the time-split protocol
+
+Six-month labels look forward, so the labels of the final training months
+(2024-12 through 2025-04) are determined by advisory events that also fall in
+the test outcome window. A model standing at the test prediction date could
+not have used those labels — they had not yet matured. This tool measures how
+much of the reported time-split performance depends on that overlap.
+
+No relabeling is required: labels derive from advisory publication dates, so
+for any observation month whose window closed before the embargo date, the
+truncated feed and the full feed produce identical labels. The embargo
+therefore reduces to a training-month cutoff over the existing labeled
+dataset. The tool retrains the official configuration (feature columns taken
+verbatim from `xgb_6m_advisory_swh_no_window_time/feature_columns.json`,
+same registry estimator, same imputation) at each cutoff and evaluates on
+the identical 4,106 test rows, sanity-checking them against the saved
+official predictions. Nothing under `data/processed/models/` is touched;
+outputs go to `data/processed/results/embargo_backtest/`, with per-run
+`test_predictions.csv` files compatible with `dedup_precision.py`.
+
+```bash
+docker compose run --rm canary python tools/embargo_backtest.py
+
+# earlier-era control (repeat the protocol around a 2024 test window)
+docker compose run --rm canary python tools/embargo_backtest.py \
+    --test-start 2024-05 --test-end 2024-06 --cutoffs 2023-11 2023-05
+```
+
+### Results (container run, August 2026)
+
+Test rows: observation months 2025-05/06 (4,106 rows, 77 positives, base
+rate 1.88%). `cutoff_2024-11` removes only the training rows whose label
+windows overlap the test outcome window; `cutoff_2024-05` additionally
+requires every training label to have matured by 2024-11-30.
+
+| Run | Train through | Rows | AP | ROC-AUC | P@25 (rows) | P@25 (dedup) | P@50 (dedup) |
+|---|---|---|---|---|---|---|---|
+| full (= official) | 2025-04 | 180,664 | 0.5831 | 0.9302 | 92% | 76% | 46% |
+| cutoff_2024-11 | 2024-11 | 170,399 | 0.0193 | 0.4776 | 4% | 4% | 2% |
+| cutoff_2024-05 | 2024-05 | 158,081 | 0.0220 | 0.4920 | 8% | 4% | 2% |
+
+### Interpretation
+
+Removing the overlapping training rows — 6% of the data — collapses the
+time-split configuration to base-rate performance (AP ≈ 0.02 against a
+1.88% base rate; ROC ≈ 0.5). The embargoed result converges with the
+group-time split for the same feature family (`xgb_6m_advisory_swh_gt`,
+AP 0.0233): two independent controls, one severing plugin identity and one
+severing label maturity, arrive at the same number.
+
+The mechanism is visible in the test positives. Of the 41 distinct plugins
+with a positive test label, 29 had no advisory history before 2025; they
+were hit by batch advisory publications (2025-07-09 covers 20 of them,
+2025-10-29 another 12). The overlapping training rows of those same plugins
+carry positive labels, and the SWH features are close to a per-plugin
+fingerprint, so the full model can learn *which specific plugins* are in an
+ongoing advisory wave from supervision that postdates the prediction date.
+The embargoed models fall back to genuine forward signal — they rank
+long-history plugins such as `workflow-cps` and `script-security` highest —
+but the 2025 batches swept first-time plugins, so that signal does not
+transfer to this test window.
+
+Read with the ablation-suite results: the time-split headline (AP 0.5831)
+measures within-window entity continuity, not prospective forecasting skill.
+The deployment-honest estimate for this task is the embargoed/group-time
+level. The window-feature exclusion documented in
+`canary/train/baseline.py` removed the calendar-position channel of the same
+optimism (~+0.21 AP); this backtest measures the entity-level channel that
+remains. The earlier-era control (`--test-start 2024-05`) tests whether the
+collapse is specific to the 2025 batch composition or structural; it has not
+been run yet.
 
 ---
 

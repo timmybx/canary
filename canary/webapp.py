@@ -859,7 +859,7 @@ def _handle_cs_explain(
                 n_total = len(confirmed) + len(unconfirmed)
                 n_confirmed = len(confirmed)
                 n_pos = metrics.get("test_positive_count", 0)
-                n_test = metrics.get("test_unique_plugin_count") or metrics.get("test_row_count", 1)
+                n_test = metrics.get("test_row_count") or metrics.get("test_unique_plugin_count", 1)
                 base_rate = n_pos / n_test if n_test > 0 else 0.0
                 lift = (n_confirmed / n_total) / base_rate if n_total > 0 and base_rate > 0 else 0.0
                 prompt = _build_cs_explain_prompt(

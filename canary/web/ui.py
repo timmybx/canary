@@ -3456,10 +3456,11 @@ def _render_case_study_tab(
     eco_parts: list[str] = []
     if n_test_plugins:
         eco_parts.append(f"<strong>Plugins scored:</strong> {n_test_plugins:,}")
-    if n_pos and n_test_plugins:
+    n_test_rows = (metrics or {}).get("test_row_count", 0)
+    if n_pos and n_test_rows:
         eco_parts.append(
-            f"<strong>Advisories in window:</strong> {n_pos:,} "
-            f"({n_pos / n_test_plugins * 100:.1f}% of scored plugins)"
+            f"<strong>Advisory-positive observations:</strong> {n_pos:,} "
+            f"of {n_test_rows:,} plugin-months"
         )
     eco_line = (
         '<div style="margin-bottom:.5rem;padding:.5rem .9rem;'

@@ -6,12 +6,20 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_ROOT_USER_ACTION=ignore \
-    XDG_CACHE_HOME=/tmp/.cache
+    XDG_CACHE_HOME=/tmp/.cache \
+    PYTHONNOUSERSITE=1
+
+# PYTHONNOUSERSITE=1: /app is bind-mounted from the repo in compose, so a
+# stray `pip install --user` from inside a container lands in the repo's
+# .local/ and silently shadows the image's hash-pinned packages across
+# rebuilds (this happened with pip itself). Disabling user site-packages
+# makes the image's pinned environment authoritative.
 
 # Install pinned build tooling (hash-locked).
 # Include pip/setuptools/wheel in requirements-build.txt by generating it with:
 #   pip-compile --allow-unsafe --generate-hashes -o requirements-build.txt requirements-build.in
 COPY requirements-build.txt /app/
+RUN python -m pip install --upgrade pip==26.2.1
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install --require-hashes -r requirements-build.txt
 
