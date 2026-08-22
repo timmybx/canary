@@ -38,6 +38,20 @@ embargo adds the stricter maturity requirement plus six fewer months of
 data. Nothing in data/processed/models/ is touched; outputs go to
 data/processed/results/embargo_backtest/.
 
+A fourth, deployment-realistic run is available with --as-of YYYY-MM: keep
+every training observation, but rebuild its label as it was knowable at
+that date — 1 if an advisory fell in the observation's six-month window
+AND was published in a month strictly before --as-of; 0 otherwise. A
+recent observation whose window has not fully elapsed is labeled with what
+is known so far (a censored "no advisory yet" counts as 0), which is
+exactly what a deployed system retraining on that date would have. For the
+official test set the natural choice is --as-of 2025-06: labels as known
+on June 1, 2025, the prediction date of the first test month. Advisories
+published during the test outcome window never enter training labels.
+Labels are rebuilt positionally from advisory_count_this_month (the same
+mechanism as canary.build.monthly_labels), and rows whose windows closed
+before the as-of date are verified to reproduce their stored labels.
+
 Uses the exact feature columns of the saved official model
 (xgb_6m_advisory_swh_no_window_time/feature_columns.json), the same
 registry estimator (xgboost), and the same imputation scheme as
@@ -51,6 +65,9 @@ Usage
     # Custom cutoffs (last training month, inclusive), model dir, or paths
     python tools/embargo_backtest.py --cutoffs 2024-05 2024-11 \
         --model-dir data/processed/models/xgb_6m_advisory_swh_no_window_time
+
+    # Deployment-realistic run: all training rows, labels as knowable June 1 2025
+    python tools/embargo_backtest.py --skip-full --cutoffs --as-of 2025-06
 
 Output
 ------
@@ -98,6 +115,65 @@ TARGET_COL = "label_advisory_within_6m"
 TEST_START = "2025-05"
 K_VALUES = (10, 25, 50, 100)
 HORIZON_MONTHS = 6
+
+
+def _advisory_this_month(row: dict[str, Any]) -> bool:
+    """Same indicator resolution as canary.build.monthly_labels."""
+    for key in ("had_advisory_this_month", "has_advisory_this_month", "advisory_this_month"):
+        if key in row:
+            return bool(row[key])
+    if "advisory_count_this_month" in row:
+        try:
+            return int(row["advisory_count_this_month"]) > 0
+        except (TypeError, ValueError):
+            return False
+    raise KeyError("Row is missing an advisory-this-month indicator; cannot relabel as-of.")
+
+
+def _relabel_as_of(
+    all_rows: list[dict[str, Any]],
+    train_rows: list[dict[str, Any]],
+    as_of: str,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Rebuild each training row's label as it was knowable at *as_of*.
+
+    Label = 1 if any of the observation's next-six calendar months both
+    (a) contains an advisory and (b) is strictly before *as_of*; else 0
+    (a censored not-yet-positive window counts as 0, as it would in
+    deployment). Positional over the dense monthly grid, mirroring
+    canary.build.monthly_labels. Returns relabeled copies of train_rows
+    plus stats, and verifies that fully-matured windows reproduce their
+    stored labels.
+    """
+    as_of_key = _month_to_sortable(as_of)
+    by_plugin: dict[str, list[dict[str, Any]]] = {}
+    for r in all_rows:
+        by_plugin.setdefault(str(r.get("plugin_id") or ""), []).append(r)
+
+    advisory_months: dict[str, set[tuple[int, int]]] = {}
+    for pid, rows in by_plugin.items():
+        advisory_months[pid] = {
+            _month_to_sortable(_parse_month_value(r)) for r in rows if _advisory_this_month(r)
+        }
+
+    stats = {"flipped_1_to_0": 0, "matured_mismatch": 0, "relabeled_positive": 0}
+    out: list[dict[str, Any]] = []
+    for r in train_rows:
+        pid = str(r.get("plugin_id") or "")
+        window = [_month_to_sortable(_add_months(_parse_month_value(r), i)) for i in range(1, 7)]
+        knowable = [w for w in window if w < as_of_key]
+        label = int(any(w in advisory_months.get(pid, set()) for w in knowable))
+        stored = r.get(TARGET_COL)
+        if len(knowable) == 6 and stored is not None and int(stored) != label:
+            stats["matured_mismatch"] += 1
+        if stored is not None and int(stored) == 1 and label == 0:
+            stats["flipped_1_to_0"] += 1
+        if label == 1:
+            stats["relabeled_positive"] += 1
+        nr = dict(r)
+        nr[TARGET_COL] = label
+        out.append(nr)
+    return out, stats
 
 
 def _add_months(month: str, n: int) -> str:
@@ -240,10 +316,19 @@ def main() -> int:
     )
     parser.add_argument(
         "--cutoffs",
-        nargs="+",
+        nargs="*",
         default=["2024-11", "2024-05"],
         metavar="YYYY-MM",
-        help="last training month (inclusive) for each embargoed run",
+        help="last training month (inclusive) for each embargoed run; pass with no values "
+        "to skip the cutoff runs",
+    )
+    parser.add_argument(
+        "--as-of",
+        default=None,
+        metavar="YYYY-MM",
+        help="deployment-realistic run: keep ALL training observations, relabel each with "
+        "what was knowable at this date (advisories in months strictly before it). "
+        "For the official test set, 2025-06 = labels as known June 1, 2025.",
     )
     parser.add_argument(
         "--skip-full",
@@ -330,6 +415,18 @@ def main() -> int:
                 [r for r in all_train if _month_to_sortable(_parse_month_value(r)) <= cutoff_key],
             )
         )
+    if args.as_of:
+        relabeled, stats = _relabel_as_of(rows, all_train, args.as_of)
+        print(
+            f"\nAs-of {args.as_of} relabel: {stats['relabeled_positive']:,} positives "
+            f"({stats['flipped_1_to_0']:,} stored positives not yet knowable, now 0)"
+        )
+        if stats["matured_mismatch"]:
+            print(
+                f"WARNING: {stats['matured_mismatch']} fully-matured rows disagree with "
+                "stored labels — investigate before trusting this run."
+            )
+        runs.append((f"asof_{args.as_of}", relabeled))
 
     for label, train_rows in runs:
         if not train_rows:

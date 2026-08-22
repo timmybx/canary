@@ -355,8 +355,17 @@ official predictions. Nothing under `data/processed/models/` is touched;
 outputs go to `data/processed/results/embargo_backtest/`, with per-run
 `test_predictions.csv` files compatible with `dedup_precision.py`.
 
+A deployment-realistic variant (`--as-of YYYY-MM`) keeps every training
+observation and instead rebuilds each label as it was knowable at that
+date: 1 if an advisory fell in the observation's window and was published
+in a month strictly before the as-of date, 0 otherwise (a censored
+"no advisory yet" counts as 0, as it would in deployment). This is the
+most generous honest protocol — everything a system retraining on
+prediction day could legally have known. `--as-of 2025-06` = labels as
+known June 1, 2025.
+
 ```bash
-docker compose run --rm canary python tools/embargo_backtest.py
+docker compose run --rm canary python tools/embargo_backtest.py --as-of 2025-06
 
 # earlier-era control (repeat the protocol around a 2024 test window)
 docker compose run --rm canary python tools/embargo_backtest.py \
@@ -375,6 +384,7 @@ requires every training label to have matured by 2024-11-30.
 | full (= official) | 2025-04 | 180,664 | 0.5831 | 0.9302 | 92% | 76% | 46% |
 | cutoff_2024-11 | 2024-11 | 170,399 | 0.0193 | 0.4776 | 4% | 4% | 2% |
 | cutoff_2024-05 | 2024-05 | 158,081 | 0.0220 | 0.4920 | 8% | 4% | 2% |
+| asof_2025-06 | 2025-04 | 180,664 | 0.0193 | 0.4816 | 8% | 4% | 2% |
 
 ### Interpretation
 
@@ -384,6 +394,15 @@ time-split configuration to base-rate performance (AP ≈ 0.02 against a
 group-time split for the same feature family (`xgb_6m_advisory_swh_gt`,
 AP 0.0233): two independent controls, one severing plugin identity and one
 severing label maturity, arrive at the same number.
+
+The as-of run makes the attribution exact. It kept all 180,664 training
+rows and 5,187 of the 5,292 stored positives — withholding only the 105
+positive labels that depended on advisories published during the test
+outcome window — and collapsed identically (AP 0.0193). The entire gap
+between AP 0.583 and base-rate performance therefore rests on 105 label
+bits about the test outcome window, 0.06% of the training data. Partial
+label maturity carries essentially no forward signal for this window, and
+the most generous honest protocol fails the same way as the strictest one.
 
 The mechanism is visible in the test positives. Of the 41 distinct plugins
 with a positive test label, 29 had no advisory history before 2025; they
@@ -403,9 +422,26 @@ The deployment-honest estimate for this task is the embargoed/group-time
 level. The window-feature exclusion documented in
 `canary/train/baseline.py` removed the calendar-position channel of the same
 optimism (~+0.21 AP); this backtest measures the entity-level channel that
-remains. The earlier-era control (`--test-start 2024-05`) tests whether the
-collapse is specific to the 2025 batch composition or structural; it has not
-been run yet.
+remains.
+
+### Era control (container run, August 2026)
+
+The earlier-era control repeats the protocol around a 2024 test window
+(observation months 2024-05/06: 4,106 rows, 23 positives, base rate 0.56%)
+with the analogous cutoffs:
+
+| Run | Train through | Rows | AP | AP ÷ base rate | ROC-AUC | P@25 (dedup) |
+|---|---|---|---|---|---|---|
+| cutoff_2023-11 | 2023-11 | 145,763 | 0.0122 | 2.2× | 0.5427 | 0% |
+| cutoff_2023-05 | 2023-05 | 133,445 | 0.0090 | 1.6× | 0.6048 | 0% |
+
+The collapse reproduces in an independent era: embargoed performance sits at
+1–2× base rate in both 2024 and 2025 (the lower absolute AP in 2024 reflects
+its lower base rate, not worse behavior), versus ~31× base rate under the
+standard protocol. The structural reading stands — this is how the task
+behaves, not a quirk of the 2025 batch composition. With only 23 positives
+the 2024 estimates are noisy; the defensible statement is "at or near base
+rate in every honest configuration, in both eras tested."
 
 ---
 
