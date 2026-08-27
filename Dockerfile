@@ -19,7 +19,7 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 # Include pip/setuptools/wheel in requirements-build.txt by generating it with:
 #   pip-compile --allow-unsafe --generate-hashes -o requirements-build.txt requirements-build.in
 COPY requirements-build.txt /app/
-RUN python -m pip install --upgrade pip==26.2.1
+# pip is hash-pinned in requirements-build.txt; it will be installed by the lockfile step below.
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install --require-hashes -r requirements-build.txt
 
