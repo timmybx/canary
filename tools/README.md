@@ -21,6 +21,7 @@ docker compose run --rm canary python tools/<script>.py
 | `shap_consistency.py` | Robustness check only: is a feature's importance stable across model configurations? |
 | `compare_model_metrics.py` | How much did a pipeline change move the metrics? (before/after retrain diff) |
 | `embargo_backtest.py` | Does the time-split headline survive when training labels are restricted to those matured before the prediction date? |
+| `rolling_backtest.py` | How stable is the honest (embargoed) result across many test windows, not just 2025-05/06? |
 | `make_figures.py` | Renders praxis/defense figures from the saved artifacts above. |
 
 ---
@@ -56,6 +57,24 @@ Sections can be run individually; `--skip-filter` reuses existing per-family
 feature files (they are dataset-level and unaffected by pipeline changes);
 `--dry-run` prints commands. Full suite is roughly 5.5 hours.
 `summarize_ablation_metrics.py` tabulates the resulting metrics.
+
+`--embargo` reruns the identical matrix under the label embargo (see
+`embargo_backtest.py` below): every `canary train baseline` call gets
+`--embargo`, i.e. training labels rebuilt as-of the month after
+`TEST_START_MONTH` (labels as known June 1, 2025 for the official test
+window), and every output directory gets an `_embargo` suffix. The
+pre-embargo directories are never touched — they are the
+historical/diagnostic layer — and both suites sit in the same models root,
+so the web console's model picker shows them side by side. Feature-selection
+runs inherit the embargo automatically (`canary train feature-select` reads
+`label_as_of_month` from the model's `metrics.json`). Section 9 adds the
+official no-window reporting configuration
+(`xgb_6m_advisory_swh_no_window_time`, historically trained by hand) and its
+advisory-only counterpart so the embargoed suite contains them too:
+
+```bash
+bash tools/run_monthly_ablation_experiments.sh --embargo --skip-filter
+```
 
 ---
 
@@ -442,6 +461,70 @@ standard protocol. The structural reading stands — this is how the task
 behaves, not a quirk of the 2025 batch composition. With only 23 positives
 the 2024 estimates are noisy; the defensible statement is "at or near base
 rate in every honest configuration, in both eras tested."
+
+### The embargo in the core training path
+
+The `--as-of` relabeling above now lives in `canary.train.baseline` as
+`relabel_as_of()` and is exposed on `train_model()` / `train_baseline()` as
+`label_as_of_month`, on the CLI as `--label-as-of-month YYYY-MM` or the
+shorthand `--embargo` (= the month after `--test-start-month`, the
+deployment-realistic choice), and on the ablation driver as `--embargo`.
+The standalone script remains as the documented proof of concept; the core
+path is what the suite-wide rerun uses.
+
+Semantics, once more: observation month T is scored on the first day of
+T+1, when advisories published through T are known and T's label window
+(T+1 .. T+6) has not yet begun. So `--embargo` with test start 2025-05
+means labels as-of 2025-06 — every training row keeps its features, and a
+row is positive only if an advisory fell inside its six-month window AND
+was published before June 2025. Rows whose windows fully matured before
+the as-of month reproduce their stored labels exactly (the code raises if
+they do not — a guard against a mismatched `--target-col` or a non-dense
+grid); only rows overlapping the unseen future can flip 1 -> 0. Test labels
+are never modified. An as-of month more than one month after the test start
+is rejected, because training labels would then see advisories inside a
+test label window. `metrics.json` records `label_as_of_month`,
+`label_horizon_months` and `label_as_of_stats` (stored vs as-of positives,
+rows flipped, matured mismatches — always 0).
+
+Regression check on the official dataset: `relabel_as_of` over the 180,664
+training rows with as-of 2025-06 reports 5,292 stored positives, 105
+flipped to 0, 0 matured mismatches — the same 105 label bits as the
+standalone tool.
+
+`train_model()` also gained `test_end_month` (inclusive; rows after it are
+dropped, so a fold scores a fixed-width window) and `rows=` (pre-loaded
+dataset, for callers that train many models on one file).
+
+---
+
+## rolling_backtest.py — rolling-origin backtest under the embargo
+
+The official evaluation scores one two-month window (4,106 rows, 77
+positives). Any honest number measured there has a wide interval, and
+iterating features or hyperparameters against it invites overfitting to
+those 77 positives. `rolling_backtest.py` re-runs the same protocol at many
+cutoffs: for each fold test start t it calls `train_model` with
+`test_start_month=t`, `test_end_month=t+test_months-1` and
+`label_as_of_month=t+1` (the deployment-realistic embargo), then slides t
+forward by `--step`. Training sets nest (expanding window), so per-fold
+numbers are not independent and the across-fold 95% interval is
+descriptive. When test windows do not overlap (`--step >= --test-months`)
+the tool also pools every fold's test predictions and reports pooled AP /
+ROC-AUC, the single most defensible summary number. `--no-embargo` runs the
+same folds on the stored labels for a leaky-vs-honest curve.
+
+```bash
+docker compose run --rm canary python tools/rolling_backtest.py \
+    --in-path data/processed/features/plugins.monthly.labeled.advisory_only.jsonl \
+    --model xgboost --start 2023-05 --end 2025-05 --step 2 --test-months 2 \
+    --out-dir data/processed/results/rolling_backtest/advisory_only_xgb
+```
+
+Writes `<out-dir>/fold_<YYYY-MM>/` (the usual `train_model` artifacts) and
+`<out-dir>/rolling_backtest.json` (per-fold metrics, summary, pooled
+metrics). Each fold retrains from scratch, so a 13-fold XGBoost run costs
+roughly 13x one training run; the dataset is loaded once.
 
 ---
 

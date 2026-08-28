@@ -221,6 +221,8 @@ def run_feature_selection(
     group_col: str = "plugin_id",
     test_fraction: float = 0.2,
     random_seed: int = 42,
+    test_end_month: str | None = None,
+    label_as_of_month: str | None = None,
 ) -> dict[str, Any]:
     """
     Run the principled feature selection study for a trained CANARY model.
@@ -247,6 +249,12 @@ def run_feature_selection(
         The full feature set is always added automatically.
     group_col, test_fraction, random_seed:
         Match to the original training run.
+    test_end_month, label_as_of_month:
+        Match to the original training run. When None, each is read from the
+        model's saved metrics.json (so an embargoed model is re-evaluated
+        under the same embargo without re-specifying it); older metrics files
+        without these keys fall back to the historical behavior (no bound, no
+        embargo).
 
     Returns
     -------
@@ -276,6 +284,12 @@ def run_feature_selection(
         orig_metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
         model_name = str(orig_metrics.get("model_name") or "unknown")
         full_ap = orig_metrics.get("average_precision")
+        if test_end_month is None:
+            test_end_month = orig_metrics.get("test_end_month")
+        if label_as_of_month is None:
+            label_as_of_month = orig_metrics.get("label_as_of_month")
+    if label_as_of_month is not None:
+        LOGGER.info("Label embargo active: training labels as-of %s", label_as_of_month)
 
     LOGGER.info(
         "Loaded model '%s' with %d features from %s",
@@ -301,6 +315,7 @@ def run_feature_selection(
         group_col=group_col,
         test_fraction=test_fraction,
         random_seed=random_seed,
+        test_end_month=test_end_month,
     )
 
     X_test_full = _rows_to_matrix(test_rows, full_feature_cols)
@@ -393,6 +408,9 @@ def run_feature_selection(
                 group_col=group_col,
                 test_fraction=test_fraction,
                 random_seed=random_seed,
+                test_end_month=test_end_month,
+                label_as_of_month=label_as_of_month,
+                rows=rows,
             )
 
             ap = subset_metrics.get("average_precision")
@@ -476,6 +494,8 @@ def run_feature_selection(
             "target_col": target_col,
             "split_strategy": split_strategy,
             "test_start_month": test_start_month,
+            "test_end_month": test_end_month,
+            "label_as_of_month": label_as_of_month,
             "h3_threshold": 0.90,
             "h3_satisfied": h3_result is not None,
             "h3_smallest_qualifying_subset": (
@@ -505,6 +525,8 @@ def run_feature_selection(
             "target_col": target_col,
             "split_strategy": split_strategy,
             "test_start_month": test_start_month,
+            "test_end_month": test_end_month,
+            "label_as_of_month": label_as_of_month,
             "h3_threshold": 0.90,
             "h3_satisfied": False,
             "h3_smallest_qualifying_subset": None,

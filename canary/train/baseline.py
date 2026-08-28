@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -18,6 +19,8 @@ from sklearn.metrics import (  # pyright: ignore[reportMissingModuleSource]
     roc_auc_score,
 )
 from sklearn.pipeline import Pipeline  # pyright: ignore[reportMissingModuleSource]
+
+from canary.build.monthly_labels import _row_has_advisory_this_month
 
 # Temporal window features encode the calendar position of an observation,
 # not plugin behavior. They are excluded from training by default: rolling
@@ -87,6 +90,148 @@ def _parse_month_value(row: dict[str, Any]) -> str:
 def _month_to_sortable(month_str: str) -> tuple[int, int]:
     year_s, month_s = month_str.split("-", 1)
     return int(year_s), int(month_s)
+
+
+def _validate_month(month_str: str, *, name: str) -> tuple[int, int]:
+    """Parse a ``YYYY-MM`` string, raising a clear ValueError if malformed."""
+    try:
+        year, month = _month_to_sortable(str(month_str))
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(f"{name} must be YYYY-MM, got {month_str!r}") from exc
+    if not (1 <= month <= 12) or year < 1900:
+        raise ValueError(f"{name} must be YYYY-MM, got {month_str!r}")
+    return year, month
+
+
+def _add_months(key: tuple[int, int], n: int) -> tuple[int, int]:
+    """Return the (year, month) tuple *n* calendar months after *key*."""
+    year, month = key
+    total = year * 12 + (month - 1) + n
+    return total // 12, total % 12 + 1
+
+
+_HORIZON_PATTERN = re.compile(r"within_(\d+)m$")
+
+
+def horizon_months_from_target(target_col: str) -> int | None:
+    """
+    Infer the label horizon (in months) from a target column name such as
+    ``label_advisory_within_6m``. Returns None if the name carries no horizon.
+    """
+    match = _HORIZON_PATTERN.search(target_col)
+    return int(match.group(1)) if match else None
+
+
+def deployment_as_of_month(test_start_month: str) -> str:
+    """
+    The deployment-realistic label as-of month for a test window starting at
+    *test_start_month*: the month after it. Observation month T is scored on
+    the first day of T+1, when advisories published through T are known and
+    T's own label window (T+1 .. T+H) has not yet begun.
+    """
+    year, month = _add_months(_validate_month(test_start_month, name="test_start_month"), 1)
+    return f"{year:04d}-{month:02d}"
+
+
+# ---------------------------------------------------------------------------
+# Label embargo ("as-of" relabeling)
+# ---------------------------------------------------------------------------
+#
+# The stored label for plugin P in observation month M is 1 if an advisory for
+# P was published in any of months M+1 .. M+H. Building that label uses the
+# full advisory feed, so the last H-1 training months "know" about advisories
+# published inside the test window. A model trained on those labels can learn
+# entity-level label overlap (the same plugin is positive in adjacent training
+# and test months) and report performance no deployment could reproduce.
+#
+# relabel_as_of() rebuilds each training row's label using only advisories
+# published strictly before the as-of month — exactly the label a model
+# trained on that date could have used. Windows that had already fully
+# matured before the as-of month reproduce their stored label bit-for-bit;
+# only rows whose windows overlap the unseen future can change (1 -> 0).
+# See tools/README.md ("embargo_backtest.py") for the motivating results.
+
+
+def relabel_as_of(
+    all_rows: list[dict[str, Any]],
+    train_rows: list[dict[str, Any]],
+    *,
+    target_col: str,
+    as_of_month: str,
+    horizon_months: int | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """
+    Return copies of *train_rows* with *target_col* rebuilt as knowable at
+    *as_of_month*, plus relabeling statistics.
+
+    Label = 1 if any of the observation's next *horizon_months* calendar months
+    both (a) contains an advisory and (b) is strictly before *as_of_month*;
+    else 0. A window that has not finished maturing counts as "not positive
+    so far", as it would in deployment.
+
+    *all_rows* must contain every row of the dataset (including rows whose
+    stored label is null) so each plugin's advisory months are complete. The
+    horizon defaults to the number encoded in *target_col*
+    (``..._within_6m`` -> 6) and must be given explicitly otherwise.
+
+    Raises ValueError if any fully matured window disagrees with its stored
+    label — that means the dataset's label semantics differ from the
+    positional next-H-months definition this function mirrors.
+    """
+    as_of_key = _validate_month(as_of_month, name="as_of_month")
+    if horizon_months is None:
+        horizon_months = horizon_months_from_target(target_col)
+    if horizon_months is None or horizon_months < 1:
+        raise ValueError(
+            f"Cannot infer label horizon from target_col {target_col!r}; "
+            "pass horizon_months explicitly."
+        )
+
+    advisory_months: dict[str, set[tuple[int, int]]] = {}
+    for row in all_rows:
+        if _row_has_advisory_this_month(row):
+            pid = str(row.get("plugin_id") or "")
+            advisory_months.setdefault(pid, set()).add(_month_to_sortable(_parse_month_value(row)))
+
+    stats = {
+        "train_rows": len(train_rows),
+        "positives_stored": 0,
+        "positives_as_of": 0,
+        "flipped_1_to_0": 0,
+        "matured_mismatch": 0,
+    }
+    relabeled: list[dict[str, Any]] = []
+    for row in train_rows:
+        pid = str(row.get("plugin_id") or "")
+        month_key = _month_to_sortable(_parse_month_value(row))
+        window = [_add_months(month_key, i) for i in range(1, horizon_months + 1)]
+        knowable = [m for m in window if m < as_of_key]
+        plugin_advisories = advisory_months.get(pid, set())
+        label = int(any(m in plugin_advisories for m in knowable))
+
+        stored = row.get(target_col)
+        stored_int = int(stored) if stored is not None else None
+        if stored_int == 1:
+            stats["positives_stored"] += 1
+        if label == 1:
+            stats["positives_as_of"] += 1
+        if stored_int == 1 and label == 0:
+            stats["flipped_1_to_0"] += 1
+        if len(knowable) == horizon_months and stored_int is not None and stored_int != label:
+            stats["matured_mismatch"] += 1
+
+        new_row = dict(row)
+        new_row[target_col] = label
+        relabeled.append(new_row)
+
+    if stats["matured_mismatch"]:
+        raise ValueError(
+            f"{stats['matured_mismatch']} fully matured training windows disagree with "
+            f"their stored {target_col!r} labels under as-of relabeling. The dataset's "
+            f"labels do not follow the positional next-{horizon_months}-months definition "
+            "(check --target-col / the monthly grid is dense)."
+        )
+    return relabeled, stats
 
 
 def _is_numeric_like(value: Any) -> bool:
@@ -317,7 +462,21 @@ def _split_rows(
     group_col: str,
     test_fraction: float,
     random_seed: int,
+    test_end_month: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[str]]:
+    if test_end_month is not None:
+        end_key = _validate_month(test_end_month, name="test_end_month")
+        if end_key < _month_to_sortable(test_start_month):
+            raise ValueError(
+                f"test_end_month {test_end_month!r} precedes test_start_month {test_start_month!r}."
+            )
+        # Rows after the test window are dropped entirely: they can never be
+        # training rows (those precede test_start_month) and they are not in
+        # the evaluated window. This is what makes a rolling-origin backtest
+        # score each fold on a fixed-width window rather than "everything
+        # after the cutoff".
+        rows = [row for row in rows if _month_to_sortable(_parse_month_value(row)) <= end_key]
+
     if split_strategy == "time":
         train_rows = [
             row
@@ -384,12 +543,29 @@ def train_model(
     group_col: str = "plugin_id",
     test_fraction: float = 0.2,
     random_seed: int = 42,
+    test_end_month: str | None = None,
+    label_as_of_month: str | None = None,
+    rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Train *estimator* on monthly plugin rows using a time-based split.
 
     Temporal window features (``WINDOW_FEATURE_COLUMNS``) are excluded from
     the feature matrix unless *include_window_features* is True.
+
+    *test_end_month* (inclusive, ``YYYY-MM``) bounds the evaluated window;
+    rows after it are dropped. Leave None to test on every month at or after
+    *test_start_month* (historical behavior).
+
+    *label_as_of_month* (``YYYY-MM``) applies the label embargo: training
+    labels are rebuilt using only advisories published strictly before that
+    month (see :func:`relabel_as_of`). For deployment-realistic evaluation
+    pass the test start month. Leave None to train on the stored labels
+    (historical behavior). Test labels are never modified.
+
+    *rows* lets a caller that trains many models on one dataset (rolling
+    backtests, feature selection) pass pre-loaded rows instead of re-reading
+    *in_path*; the rows are not mutated.
 
     The estimator must be sklearn-compatible (fit / predict_proba).
     Imputation of missing values is always applied before the estimator.
@@ -399,7 +575,26 @@ def train_model(
     Returns a metrics dict and writes metrics.json, test_predictions.csv,
     and pr_curve.json to *out_dir*.
     """
-    rows = _load_jsonl(in_path)
+    test_start_key = _validate_month(test_start_month, name="test_start_month")
+    if label_as_of_month is not None:
+        as_of_key = _validate_month(label_as_of_month, name="label_as_of_month")
+        # Observation month T is scored on the first day of T+1 (its features
+        # are complete at month end), and its label window starts at T+1. So
+        # advisories published through month T are legitimately known on the
+        # prediction date and never enter any test label; the latest honest
+        # as-of month is therefore test_start_month + 1 (advisories strictly
+        # before it). Anything later lets training labels see advisories that
+        # fall inside a test label window.
+        if split_strategy in ("time", "group_time") and as_of_key > _add_months(test_start_key, 1):
+            raise ValueError(
+                f"label_as_of_month {label_as_of_month!r} is more than one month after "
+                f"test_start_month {test_start_month!r}: training labels would use "
+                "advisories published inside the test label window. Use "
+                f"{deployment_as_of_month(test_start_month)} (deployment-realistic) or earlier."
+            )
+
+    if rows is None:
+        rows = _load_jsonl(in_path)
 
     usable_rows = [row for row in rows if row.get(target_col) is not None]
     if not usable_rows:
@@ -430,12 +625,26 @@ def train_model(
         group_col=group_col,
         test_fraction=test_fraction,
         random_seed=random_seed,
+        test_end_month=test_end_month,
     )
 
     if not train_rows:
         raise ValueError("No training rows found. Adjust test_start_month.")
     if not test_rows:
-        raise ValueError("No test rows found. Adjust test_start_month.")
+        raise ValueError("No test rows found. Adjust test_start_month / test_end_month.")
+
+    # Label embargo: rebuild training labels as they were knowable on the
+    # as-of date. Applied after the split so test labels stay untouched, and
+    # computed from *rows* (not usable_rows) so every plugin's advisory months
+    # are complete even where the stored label is null.
+    label_as_of_stats: dict[str, int] | None = None
+    if label_as_of_month is not None:
+        train_rows, label_as_of_stats = relabel_as_of(
+            rows,
+            train_rows,
+            target_col=target_col,
+            as_of_month=label_as_of_month,
+        )
 
     # Advisory-family features derive from the Jenkins security advisory feed,
     # which is complete by construction: a missing value means the plugin has
@@ -481,6 +690,10 @@ def train_model(
         "input_path": str(in_path),
         "target_col": target_col,
         "test_start_month": test_start_month,
+        "test_end_month": test_end_month,
+        "label_as_of_month": label_as_of_month,
+        "label_horizon_months": horizon_months_from_target(target_col),
+        "label_as_of_stats": label_as_of_stats,
         "include_prefixes": list(include_prefixes) if include_prefixes else [],
         "include_window_features": include_window_features,
         "train_row_count": int(len(train_rows)),
@@ -699,11 +912,15 @@ def train_baseline(
     group_col: str = "plugin_id",
     test_fraction: float = 0.2,
     random_seed: int = 42,
+    test_end_month: str | None = None,
+    label_as_of_month: str | None = None,
+    rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Train a model by name using the CANARY model registry.
 
     Defaults to logistic regression for backwards compatibility.
+    See :func:`train_model` for *test_end_month*, *label_as_of_month*, *rows*.
     """
     from canary.train.registry import get_model
 
@@ -722,4 +939,7 @@ def train_baseline(
         group_col=group_col,
         test_fraction=test_fraction,
         random_seed=random_seed,
+        test_end_month=test_end_month,
+        label_as_of_month=label_as_of_month,
+        rows=rows,
     )

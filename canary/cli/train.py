@@ -5,7 +5,59 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from canary.train.baseline import train_baseline
+from canary.train.baseline import deployment_as_of_month, train_baseline
+
+
+def _resolve_label_as_of(args: argparse.Namespace) -> str | None:
+    """
+    Resolve the label-embargo month from ``--label-as-of-month`` / ``--embargo``.
+
+    ``--embargo`` is shorthand for the deployment-realistic as-of month: the
+    month after ``--test-start-month`` (labels as known on the first day of
+    the first test month's scoring date). Passing both with different months
+    is an error.
+    """
+    explicit = getattr(args, "label_as_of_month", None) or None
+    shorthand = bool(getattr(args, "embargo", False))
+    if not shorthand:
+        return explicit
+    default_as_of = deployment_as_of_month(str(args.test_start_month))
+    if explicit and explicit != default_as_of:
+        raise SystemExit(
+            f"--embargo means --label-as-of-month {default_as_of}; "
+            f"got --label-as-of-month {explicit} as well. Pass only one."
+        )
+    return default_as_of
+
+
+def _add_embargo_arguments(parser: argparse.ArgumentParser) -> None:
+    """Shared ``--test-end-month`` / ``--label-as-of-month`` / ``--embargo`` flags."""
+    parser.add_argument(
+        "--test-end-month",
+        default=None,
+        help=(
+            "Last month (inclusive, YYYY-MM) of the test window; rows after it are "
+            "dropped. Default: test on every month at or after --test-start-month."
+        ),
+    )
+    parser.add_argument(
+        "--label-as-of-month",
+        default=None,
+        help=(
+            "Label embargo: rebuild training labels using only advisories published "
+            "strictly before this month (YYYY-MM), so no training label depends on "
+            "advisories inside the test window. Test labels are never modified."
+        ),
+    )
+    parser.add_argument(
+        "--embargo",
+        action="store_true",
+        help=(
+            "Shorthand for the deployment-realistic embargo: --label-as-of-month set to the "
+            "month after --test-start-month (e.g. test start 2025-05 -> labels as known "
+            "June 1, 2025)."
+        ),
+    )
 
 
 def _cmd_train_baseline(args: argparse.Namespace) -> int:
@@ -32,10 +84,20 @@ def _cmd_train_baseline(args: argparse.Namespace) -> int:
         group_col=args.group_col,
         test_fraction=args.test_fraction,
         random_seed=args.random_seed,
+        test_end_month=getattr(args, "test_end_month", None),
+        label_as_of_month=_resolve_label_as_of(args),
     )
 
     print(f"Trained baseline for target {metrics['target_col']}")
     print(f"Model:      {metrics['model_name']}")
+    if metrics.get("label_as_of_month"):
+        stats = metrics.get("label_as_of_stats") or {}
+        print(
+            f"Embargo:    labels as-of {metrics['label_as_of_month']} "
+            f"({stats.get('flipped_1_to_0', 0)} training positives withheld)"
+        )
+    if metrics.get("test_end_month"):
+        print(f"Test window: {metrics['test_start_month']} .. {metrics['test_end_month']}")
     print(f"Train rows: {metrics['train_row_count']}  positives: {metrics['train_positive_count']}")
     print(f"Test rows:  {metrics['test_row_count']}  positives: {metrics['test_positive_count']}")
     print(f"Features:   {metrics['feature_count']}")
@@ -78,6 +140,8 @@ def _cmd_train_feature_select(args: argparse.Namespace) -> int:
         group_col=args.group_col,
         test_fraction=args.test_fraction,
         random_seed=args.random_seed,
+        test_end_month=getattr(args, "test_end_month", None),
+        label_as_of_month=_resolve_label_as_of(args),
     )
 
     # Print summary
@@ -186,6 +250,7 @@ def register(subparsers: Any) -> None:
     train_baseline_parser.add_argument("--group-col", default="plugin_id")
     train_baseline_parser.add_argument("--test-fraction", type=float, default=0.2)
     train_baseline_parser.add_argument("--random-seed", type=int, default=42)
+    _add_embargo_arguments(train_baseline_parser)
 
     train_baseline_parser.set_defaults(func=_cmd_train_baseline)
 
@@ -235,4 +300,5 @@ def register(subparsers: Any) -> None:
     fs_parser.add_argument("--group-col", default="plugin_id")
     fs_parser.add_argument("--test-fraction", type=float, default=0.2)
     fs_parser.add_argument("--random-seed", type=int, default=42)
+    _add_embargo_arguments(fs_parser)
     fs_parser.set_defaults(func=_cmd_train_feature_select)

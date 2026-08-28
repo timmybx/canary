@@ -43,6 +43,9 @@
 #  # Run only feature-select for multi-family models (requires section 7 first):
 #  bash tools/run_monthly_ablation_experiments.sh --section 8
 #
+#  # Run only the official no-window reporting configuration:
+#  bash tools/run_monthly_ablation_experiments.sh --section 9 --skip-filter
+#
 #   # Skip rebuilding filtered files if they already exist:
 #   bash tools/run_monthly_ablation_experiments.sh --skip-filter
 #
@@ -52,6 +55,15 @@
 #   # Resume: skip feature-selects whose feature_selection.json is already
 #   # newer than the model's model.joblib (crash recovery):
 #   bash tools/run_monthly_ablation_experiments.sh --section 8 --skip-filter --resume
+#
+#   # Label-embargo suite: rerun the identical matrix with training labels
+#   # rebuilt as-of the month after TEST_START_MONTH — what a model trained on
+#   # the first test month's scoring date could have known (no training label
+#   # depends on advisories published inside a test label window). Every output directory gets an
+#   # "_embargo" suffix, so the pre-embargo (historical/diagnostic) models are
+#   # never overwritten and the two suites sit side by side in the same
+#   # models root for the web console's model picker:
+#   bash tools/run_monthly_ablation_experiments.sh --embargo --skip-filter
 #
 # Estimated wall time (Docker, single machine)
 # --------------------------------------------
@@ -89,6 +101,8 @@ ONLY_SECTION=""
 SKIP_FILTER=0
 DRY_RUN=0
 RESUME=0
+EMBARGO=0
+MODEL_SUFFIX=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -100,9 +114,11 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN=1; shift ;;
     --resume)
       RESUME=1; shift ;;
+    --embargo)
+      EMBARGO=1; MODEL_SUFFIX="_embargo"; shift ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: $0 [--section N] [--skip-filter] [--dry-run] [--resume]" >&2
+      echo "Usage: $0 [--section N] [--skip-filter] [--dry-run] [--resume] [--embargo]" >&2
       exit 1 ;;
   esac
 done
@@ -126,15 +142,40 @@ _section_active() {
   [[ -z "$ONLY_SECTION" || "$ONLY_SECTION" == "$section" ]]
 }
 
+_model_dir() {
+  # _model_dir <base_out_dir>
+  #
+  # Applies the suite-wide output-directory suffix (e.g. "_embargo") so the
+  # embargoed rerun never overwrites the historical suite. Feature-selection
+  # directories resolve through the same helper so they follow the model.
+  printf '%s%s' "$1" "$MODEL_SUFFIX"
+}
+
 _train() {
   # _train <model> <split_strategy> <in_path> <out_dir> [extra args...]
   #
   # Wraps `docker compose run --rm canary canary train baseline` with the
   # shared settings, and appends any extra arguments passed after the first four.
+  # Historical suite semantics: window features INCLUDED (see NOTE below).
+  _train_impl 1 "$@"
+}
+
+_train_no_window() {
+  # _train_no_window <model> <split_strategy> <in_path> <out_dir> [extra args...]
+  #
+  # Same as _train but with the training default (window features excluded).
+  # Used for the official reporting configuration (section 9).
+  _train_impl 0 "$@"
+}
+
+_train_impl() {
+  local include_window="$1"
+  shift
   local model="$1"
   local split="$2"
   local in_path="$3"
-  local out_dir="$4"
+  local out_dir
+  out_dir="$(_model_dir "$4")"
   shift 4
 
   # NOTE: --include-window-features preserves the historical semantics of this
@@ -153,8 +194,10 @@ _train() {
     --test-start-month "$TEST_START_MONTH"
     --split-strategy   "$split"
     --random-seed   "$RANDOM_SEED"
-    --include-window-features
   )
+  if [[ "$include_window" -eq 1 ]]; then
+    cmd+=(--include-window-features)
+  fi
 
   # group and group_time splits need group-col and test-fraction
   if [[ "$split" == "group" || "$split" == "group_time" ]]; then
@@ -162,6 +205,15 @@ _train() {
       --group-col       "$GROUP_COL"
       --test-fraction   "$PLUGIN_TEST_FRACTION"
     )
+  fi
+
+  # --embargo: training labels rebuilt as-of the month after TEST_START_MONTH
+  # (the deployment-realistic label embargo; see `canary train baseline --help`).
+  # The feature matrix, split, seed and window-feature handling are identical
+  # to the historical suite, so the only difference between <dir> and
+  # <dir>_embargo is what the model was allowed to know about the future.
+  if [[ "$EMBARGO" -eq 1 ]]; then
+    cmd+=(--embargo)
   fi
 
   # Any extra arguments passed by the caller (e.g. --exclude-cols, --include-prefixes)
@@ -181,7 +233,8 @@ _feature_select() {
   #
   # Only run after full-feature models where the feature set is large enough
   # to rank and the test set has enough positives for stable AP estimates.
-  local out_dir="$1"
+  local out_dir
+  out_dir="$(_model_dir "$1")"
   local split="${2:-time}"
 
   # --resume: skip if the existing feature_selection.json postdates the
@@ -209,6 +262,10 @@ _feature_select() {
       --test-fraction "$PLUGIN_TEST_FRACTION"
     )
   fi
+
+  # NOTE: no --embargo here on purpose. `canary train feature-select` reads
+  # label_as_of_month from the model's own metrics.json, so subset retrains
+  # inherit exactly the embargo the full model was trained under.
 
   echo ""
   echo "--- $(date '+%H:%M:%S') | feature-select out=$(basename "$out_dir") ---"
@@ -255,6 +312,14 @@ if _section_active 0 && [[ "$SKIP_FILTER" -eq 0 ]]; then
     --drop-time-fields
 else
   [[ "$SKIP_FILTER" -eq 1 ]] && echo "" && echo "Skipping section 0 (--skip-filter)."
+fi
+
+if [[ "$EMBARGO" -eq 1 ]]; then
+  echo ""
+  echo "======================================================================="
+  echo "LABEL EMBARGO ACTIVE: training labels as-of the month after $TEST_START_MONTH"
+  echo "Output directories carry the '$MODEL_SUFFIX' suffix; historical models untouched."
+  echo "======================================================================="
 fi
 
 # Convenience aliases for the filtered paths used throughout
@@ -569,6 +634,30 @@ if _section_active 8; then
   _feature_select "$MODEL_BASE/rf_6m_full_no_time_time"          time
   _feature_select "$MODEL_BASE/rf_6m_full_no_time_gt"            group_time
   _feature_select "$MODEL_BASE/rf_6m_full_cleaned_gt"            group_time
+fi
+
+# =============================================================================
+# Section 9 — Official reporting configuration (no window features)
+# =============================================================================
+# The praxis reporting basis is XGBoost, Advisory+SWH, time split, window
+# features EXCLUDED (the training default since v0.1.15). It was historically
+# trained by hand rather than by this driver; it is included here so the
+# embargoed suite (--embargo) produces xgb_6m_advisory_swh_no_window_time_embargo
+# next to the pre-embargo official model, and so a plain rerun reproduces the
+# official directory. Also emits the advisory-only no-window counterpart, the
+# family predicted to retain its signal under embargo.
+# =============================================================================
+
+if _section_active 9; then
+  echo ""
+  echo "======================================================================="
+  echo "Section 9 — Official reporting configuration | window features excluded"
+  echo "======================================================================="
+
+  _train_no_window xgboost time "$ADV_SWH"       "$MODEL_BASE/xgb_6m_advisory_swh_no_window_time"
+  _train_no_window xgboost time "$ADVISORY_ONLY" "$MODEL_BASE/xgb_6m_advisory_only_no_window_time"
+  _train_no_window xgboost group_time "$ADV_SWH"       "$MODEL_BASE/xgb_6m_advisory_swh_no_window_gt"
+  _train_no_window xgboost group_time "$ADVISORY_ONLY" "$MODEL_BASE/xgb_6m_advisory_only_no_window_gt"
 fi
 
 echo ""
