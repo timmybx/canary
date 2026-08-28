@@ -725,6 +725,23 @@ _SHAP_LINEAR_VEC: dict[str, float | None] = {
 }
 
 
+# Module-level fixtures for the SHAP driver tests below. Defined outside the
+# classes because a class-scoped fixture written as an instance method is
+# deprecated (PytestRemovedIn10Warning): the fixture runs once per class but
+# each test gets a fresh instance, so the pattern is misleading even when it
+# works. scope="module" keeps the fit-once behavior.
+
+
+@pytest.fixture(scope="module")
+def tree_pipeline():
+    return _make_shap_tree_pipeline()
+
+
+@pytest.fixture(scope="module")
+def linear_pipeline():
+    return _make_shap_linear_pipeline()
+
+
 class TestExtractDriversSHAPTree:
     """_extract_drivers tree path via shap.TreeExplainer.
 
@@ -733,10 +750,6 @@ class TestExtractDriversSHAPTree:
     Pins: shap_out index selection, top_n enforcement, rank sequencing,
     direction mapping, and window-feature exclusion.
     """
-
-    @pytest.fixture(scope="class")
-    def tree_pipeline(self):
-        return _make_shap_tree_pipeline()
 
     def test_returns_list_of_feature_drivers(self, tree_pipeline) -> None:
         drivers = _extract_drivers(tree_pipeline, _SHAP_TREE_COLS, _SHAP_TREE_VEC, top_n=4)
@@ -813,10 +826,6 @@ class TestExtractDriversSHAPLinear:
     Pins: LinearExplainer code path, background construction, top_n
     enforcement, rank sequencing, and direction mapping.
     """
-
-    @pytest.fixture(scope="class")
-    def linear_pipeline(self):
-        return _make_shap_linear_pipeline()
 
     def test_returns_list_of_feature_drivers(self, linear_pipeline) -> None:
         drivers = _extract_drivers(linear_pipeline, _SHAP_LINEAR_COLS, _SHAP_LINEAR_VEC, top_n=3)
