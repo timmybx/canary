@@ -68,3 +68,4 @@ registry_translation.jsonl
 coverage.json
 .github/instructions/mermaid.instructions.md
 .github/copilot-instructions.md
+*.log

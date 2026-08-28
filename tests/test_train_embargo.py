@@ -211,6 +211,57 @@ def test_relabel_as_of_requires_horizon() -> None:
     assert relabeled == [] and stats["train_rows"] == 0
 
 
+def test_relabel_as_of_reconstructs_advisories_from_within_1m_label() -> None:
+    """Family-filtered files (e.g. gharchive_only) drop the advisory indicator
+    but keep the label columns; the calendar must reconstruct from
+    label_advisory_within_1m and produce identical relabeling."""
+    rows: list[dict] = []
+    for p_idx in range(PLUGIN_COUNT):
+        advisories = _advisory_months_for(p_idx)
+        plugin_rows = [
+            {
+                "plugin_id": f"plugin-{p_idx:02d}",
+                "month": _month_str(_add_months(FIRST_MONTH, i)),
+                "advisory_count_this_month": (
+                    1 if _month_str(_add_months(FIRST_MONTH, i)) in advisories else 0
+                ),
+                "feat_a": float(i),
+            }
+            for i in range(MONTH_COUNT)
+        ]
+        rows.extend(_build_labels_for_plugin_rows(plugin_rows, horizons=(1, 6)))
+
+    # Simulate the family filter: keep labels, drop the advisory indicator.
+    filtered = [{k: v for k, v in r.items() if k != "advisory_count_this_month"} for r in rows]
+
+    train_full = _train_rows_before(rows, "2024-12")
+    train_filtered = _train_rows_before(filtered, "2024-12")
+    relabeled_full, stats_full = relabel_as_of(
+        rows, train_full, target_col=TARGET, as_of_month="2024-12"
+    )
+    relabeled_filtered, stats_filtered = relabel_as_of(
+        filtered, train_filtered, target_col=TARGET, as_of_month="2024-12"
+    )
+
+    assert stats_filtered == stats_full
+    assert stats_filtered["flipped_1_to_0"] > 0
+    assert [r[TARGET] for r in relabeled_filtered] == [r[TARGET] for r in relabeled_full]
+
+
+def test_relabel_as_of_rejects_rows_with_no_advisory_source(grid: list[dict]) -> None:
+    stripped = [
+        {
+            k: v
+            for k, v in r.items()
+            if k not in {"advisory_count_this_month", "label_advisory_within_1m"}
+        }
+        for r in grid
+    ]
+    train_rows = _train_rows_before(stripped, "2024-12")
+    with pytest.raises(ValueError, match="neither an advisory-this-month indicator"):
+        relabel_as_of(stripped, train_rows, target_col=TARGET, as_of_month="2024-12")
+
+
 def test_relabel_as_of_rejects_bad_month() -> None:
     with pytest.raises(ValueError, match="as_of_month must be YYYY-MM"):
         relabel_as_of([], [], target_col=TARGET, as_of_month="2025/01")

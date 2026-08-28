@@ -152,6 +152,49 @@ def deployment_as_of_month(test_start_month: str) -> str:
 # See tools/README.md ("embargo_backtest.py") for the motivating results.
 
 
+_ADVISORY_INDICATOR_KEYS = (
+    "had_advisory_this_month",
+    "has_advisory_this_month",
+    "advisory_this_month",
+    "advisory_count_this_month",
+)
+
+
+def _collect_advisory_months(all_rows: list[dict[str, Any]]) -> dict[str, set[tuple[int, int]]]:
+    """
+    Map plugin_id -> set of advisory months, from the advisory-this-month
+    indicator when the dataset carries one, else reconstructed from
+    ``label_advisory_within_1m`` (advisory in M+1 <=> label 1 at M on the
+    dense grid). See relabel_as_of's docstring for why the fallback is exact
+    for relabeling purposes.
+    """
+    if not all_rows:
+        return {}
+    sample = all_rows[0]
+    advisory_months: dict[str, set[tuple[int, int]]] = {}
+    if any(key in sample for key in _ADVISORY_INDICATOR_KEYS):
+        for row in all_rows:
+            if _row_has_advisory_this_month(row):
+                pid = str(row.get("plugin_id") or "")
+                advisory_months.setdefault(pid, set()).add(
+                    _month_to_sortable(_parse_month_value(row))
+                )
+        return advisory_months
+    if "label_advisory_within_1m" in sample:
+        for row in all_rows:
+            if row.get("label_advisory_within_1m") == 1:
+                pid = str(row.get("plugin_id") or "")
+                advisory_months.setdefault(pid, set()).add(
+                    _add_months(_month_to_sortable(_parse_month_value(row)), 1)
+                )
+        return advisory_months
+    raise ValueError(
+        "Cannot determine advisory months for as-of relabeling: rows carry neither an "
+        "advisory-this-month indicator (advisory_count_this_month / had_advisory_this_month / "
+        "has_advisory_this_month / advisory_this_month) nor label_advisory_within_1m."
+    )
+
+
 def relabel_as_of(
     all_rows: list[dict[str, Any]],
     train_rows: list[dict[str, Any]],
@@ -174,9 +217,21 @@ def relabel_as_of(
     horizon defaults to the number encoded in *target_col*
     (``..._within_6m`` -> 6) and must be given explicitly otherwise.
 
+    Advisory months are read from the per-row advisory indicator
+    (``advisory_count_this_month`` and friends) when present. Family-filtered
+    datasets without advisory features (gharchive_only, swh_only,
+    gharchive_swh) carry no indicator, so for those the calendar is
+    reconstructed from ``label_advisory_within_1m``: on the dense grid that
+    label is 1 at month M exactly when an advisory falls in M+1. (An advisory
+    in a plugin's first grid month is invisible to the reconstruction, but it
+    also cannot fall inside any row's future window, so relabeling is
+    unaffected.) The matured-window check below validates either source
+    against the stored labels.
+
     Raises ValueError if any fully matured window disagrees with its stored
     label — that means the dataset's label semantics differ from the
-    positional next-H-months definition this function mirrors.
+    positional next-H-months definition this function mirrors, or neither
+    advisory source is present.
     """
     as_of_key = _validate_month(as_of_month, name="as_of_month")
     if horizon_months is None:
@@ -187,11 +242,7 @@ def relabel_as_of(
             "pass horizon_months explicitly."
         )
 
-    advisory_months: dict[str, set[tuple[int, int]]] = {}
-    for row in all_rows:
-        if _row_has_advisory_this_month(row):
-            pid = str(row.get("plugin_id") or "")
-            advisory_months.setdefault(pid, set()).add(_month_to_sortable(_parse_month_value(row)))
+    advisory_months = _collect_advisory_months(all_rows)
 
     stats = {
         "train_rows": len(train_rows),
