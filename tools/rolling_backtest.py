@@ -266,6 +266,7 @@ def run_rolling_backtest(
         "step_months": step,
         "test_months": test_months,
         "include_window_features": include_window_features,
+        "include_prefixes": list(include_prefixes) if include_prefixes else None,
         "folds": fold_results,
         "summary": summarize(fold_results),
         "test_windows_overlap": windows_overlap,
@@ -300,7 +301,12 @@ def _print_summary(result: dict[str, Any]) -> None:
     s = result["summary"]
     label = "embargoed" if result["embargo"] else "stored (leaky) labels"
     print()
-    print(f"Rolling backtest — {result['model_name']} — {label} — {s['fold_count']} folds")
+    prefixes = result.get("include_prefixes")
+    prefix_note = f" — features: {','.join(prefixes)}" if prefixes else ""
+    print(
+        f"Rolling backtest — {result['model_name']} — {label} — "
+        f"{s['fold_count']} folds{prefix_note}"
+    )
     print(f"  total test rows {s['total_test_rows']:,}, positives {s['total_test_positives']:,}")
     for key, name in (
         ("roc_auc", "ROC-AUC"),

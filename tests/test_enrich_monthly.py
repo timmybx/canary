@@ -264,6 +264,39 @@ def test_enrich_cli_end_to_end(
     assert summary["row_count"] == len(advisory_grid)
 
 
+def test_enrich_cli_failure_leaves_no_partial_output(
+    tmp_path: Path, advisory_grid: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An interrupted or failed run must never leave a file at --out-path:
+    a partial dataset that parses cleanly is worse than a crash (a truncated
+    output was silently trained on before this guarantee existed)."""
+    in_path = tmp_path / "labeled.jsonl"
+    out_path = tmp_path / "enriched.jsonl"
+    with in_path.open("w", encoding="utf-8") as f:
+        for row in advisory_grid:
+            f.write(json.dumps(row) + "\n")
+
+    tool = _load_tool("enrich_monthly_features")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "x",
+            "--in-path",
+            str(in_path),
+            "--out-path",
+            str(out_path),
+            "--events-dir",
+            str(tmp_path / "missing-events"),
+        ],
+    )
+    with pytest.raises(FileNotFoundError):
+        tool.main()
+    assert not out_path.exists()
+    assert not out_path.with_name(out_path.name + ".tmp").exists()
+    assert not Path(str(out_path) + ".summary.json").exists()
+
+
 def test_enrich_cli_refuses_inplace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     in_path = tmp_path / "labeled.jsonl"
     in_path.write_text("{}\n", encoding="utf-8")
