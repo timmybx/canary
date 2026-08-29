@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/github/license/timmybx/canary)](https://github.com/timmybx/canary/blob/main/LICENSE)
 [![Last Commit](https://img.shields.io/github/last-commit/timmybx/canary)](https://github.com/timmybx/canary/commits/main)
 ![Ruff](https://img.shields.io/badge/lint-ruff-2ea44f?logo=ruff)
-[![Dependabot](https://img.shields.io/badge/dependabot-enabled-2ea44f?logo=dependabot)](https://github.com/timmybx/canary/network/updates)
+[![Renovate](https://img.shields.io/badge/renovate-enabled-1a1f6c?logo=renovate)](https://docs.renovatebot.com/)
 ![Python](https://img.shields.io/badge/python-3.12-blue?logo=python)
 [![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://microsoft.github.io/pyright/)
 [![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)

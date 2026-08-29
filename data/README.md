@@ -48,6 +48,33 @@ analysis, scoring, and later ML-oriented workflows.
 - `data/processed/features/plugins.features.csv` — CSV companion for the feature bundle (`build features`)
 - `data/processed/features/plugins.features.summary.json` — summary counts for joined sources (`build features`)
 
+## ML-ready monthly datasets
+
+The plugin-level bundle is expanded into the time-sliced datasets that the
+models train on:
+
+- `data/processed/features/plugins.monthly.features.jsonl` — dense per-plugin
+  per-month feature grid (`build monthly-features`)
+- `data/processed/features/plugins.monthly.labeled.jsonl` (+ `.csv`,
+  `.summary.json`) — the grid with forward-looking advisory labels attached
+  (`build monthly-labels`); the primary training input
+- `data/processed/features/plugins.monthly.labeled.<family>.jsonl` — family-
+  filtered variants (advisory_only, gharchive_only, swh_only, and the pairwise
+  and full combinations) produced by `tools/filter_monthly_labeled_features.py`
+  for the ablation suite (`tools/run_monthly_ablation_experiments.sh`)
+- `data/processed/features/plugins.monthly.labeled.enriched.jsonl`
+  (+ `.summary.json`) — the labeled dataset with the tier-1 enrichment
+  families attached by `tools/enrich_monthly_features.py`: `advhist_*`
+  (advisory recurrence; documented in `data/raw/advisories/README.md`) and
+  `ghclock_*` (day-resolution recency clocks; documented in
+  `data/raw/gharchive/README.md`). Both are as-of the observation month and
+  emit no missing values.
+
+Column-level documentation lives beside each source: advisory features in
+`data/raw/advisories/README.md`, GH Archive features in
+`data/raw/gharchive/README.md`, Software Heritage features in
+`data/raw/software_heritage_athena/README.md`.
+
 ## Current integrated workflow
 
 A typical end-to-end flow now looks like this:
@@ -67,6 +94,8 @@ canary build features \
   --data-raw-dir data/raw \
   --registry data/raw/registry/plugins.jsonl
 canary build monthly-features --start 2024-01 --end 2025-12
+canary build monthly-labels
+python tools/enrich_monthly_features.py   # attach advhist_* / ghclock_*
 ```
 
 ## Notes on GH Archive collection

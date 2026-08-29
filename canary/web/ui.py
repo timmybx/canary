@@ -1065,6 +1065,50 @@ _FEATURE_TIPS: dict[str, str] = {
         "Included to measure how long a plugin has had an ongoing security disclosure history; "
         "a longer span may indicate sustained vulnerability introduction over time."
     ),
+    # ── Advisory recurrence (advhist_, enrichment layer) ────────────────────
+    "advhist_has_history": (
+        "Binary indicator: does this plugin have any in-panel advisory history as of the observation month? "
+        "Included as the explicit companion flag for the capped advhist_ recency values, "
+        "so a no-history plugin is never confused with a recently affected one."
+    ),
+    "advhist_months_since_last": (
+        "Months since the plugin's most recent in-panel advisory, capped at 120 when there is no history. "
+        "Included because prior vulnerability exposure is among the strongest predictors of future advisories "
+        "(Ozment & Schechter, 2006), and recency sharpens the recurrence signal."
+    ),
+    "advhist_months_since_first": (
+        "Months since the plugin's earliest in-panel advisory, capped at 120 when there is no history. "
+        "Included as a measure of how long the plugin has had a known security history."
+    ),
+    "advhist_advisory_months_to_date": (
+        "Number of distinct months in which this plugin received at least one advisory, up to the observation month. "
+        "Included to distinguish recurring exposure across time from a single multi-advisory incident."
+    ),
+    "advhist_advisory_count_to_date": (
+        "Total advisories to date from the panel's advisory calendar; a multi-advisory month counts each advisory. "
+        "Included as the panel-consistent counterpart of advisory_count_to_date."
+    ),
+    "advhist_months_with_advisory_last_12m": (
+        "Number of months with at least one advisory in the trailing 12 months. "
+        "Included to capture recent recurrence, the sharpest form of the recurrence signal."
+    ),
+    "advhist_months_with_advisory_last_24m": (
+        "Number of months with at least one advisory in the trailing 24 months. "
+        "Included alongside the 12-month window to distinguish sustained recurrence from a recent one-off."
+    ),
+    "advhist_mean_gap_months": (
+        "Mean gap in months between consecutive advisory months, capped at 120 when fewer than two exist. "
+        "Included because short gaps indicate a steady drumbeat of disclosures rather than isolated incidents."
+    ),
+    "advhist_latest_batch_size": (
+        "Number of plugins ecosystem-wide that received an advisory in the same month as this plugin's latest advisory "
+        "(0 when there is no history). Included because Jenkins advisories often cover many plugins at once; "
+        "being last hit as part of a large sweep may carry a different risk profile than an individual report."
+    ),
+    "advhist_recency_decay": (
+        "Exponential decay of the recurrence clock, exp(-months_since_last / 6), in [0, 1] with 0 meaning no history. "
+        "Included as a bounded transform of advisory recency that behaves well in linear models."
+    ),
     # ── GH Archive: activity volume ─────────────────────────────────────────
     "gharchive_events_total": (
         "Total GitHub event count for this repository in the current observation month, derived from GH Archive. "
@@ -1106,6 +1150,45 @@ _FEATURE_TIPS: dict[str, str] = {
         "Included to characterise how much of a project's activity is automated vs. human-driven."
     ),
     # ── GH Archive: staleness / recency ─────────────────────────────────────
+    "ghclock_days_since_human_push": (
+        "Days since the last push by a non-bot actor, measured at the end of the observation month "
+        "(3650 = never observed; see ghclock_has_events). "
+        "Included as the purest staleness clock — a repository where only bots push may be effectively "
+        "abandoned by human maintainers."
+    ),
+    "ghclock_days_since_any_push": (
+        "Days since any push event, bots included, at the end of the observation month (3650 = never observed). "
+        "Included alongside the human-push clock to separate automation-only activity from human maintenance."
+    ),
+    "ghclock_days_since_release": (
+        "Days since the last GitHub release publication, at the end of the observation month (3650 = never observed). "
+        "Included because code that is committed but never released does not deliver fixes to users."
+    ),
+    "ghclock_days_since_pr_opened": (
+        "Days since a pull request was last opened, at the end of the observation month (3650 = never observed). "
+        "Included as a measure of inbound contribution recency."
+    ),
+    "ghclock_days_since_pr_merged": (
+        "Days since a pull request was last merged, at the end of the observation month (3650 = never observed). "
+        "Included to capture how recently proposed work actually landed in the codebase."
+    ),
+    "ghclock_days_since_pr_review": (
+        "Days since the last pull request review event, at the end of the observation month (3650 = never observed). "
+        "Included as a recency measure of code scrutiny, complementing the review-volume features."
+    ),
+    "ghclock_days_since_issue_opened": (
+        "Days since an issue was last opened, at the end of the observation month (3650 = never observed). "
+        "Included to capture how recently user-reported problems reached the tracker."
+    ),
+    "ghclock_days_since_tag_create": (
+        "Days since the last Git tag creation, at the end of the observation month (3650 = never observed). "
+        "Included as a release-discipline signal for projects that tag without publishing GitHub releases."
+    ),
+    "ghclock_has_events": (
+        "Binary indicator: has any qualifying GitHub event ever been observed for this plugin as of this month? "
+        "Included as the explicit companion flag for the capped ghclock_ values, so a never-active plugin "
+        "is never confused with a recently active one."
+    ),
     "gharchive_days_active": (
         "Number of distinct days with any GitHub activity in the current observation month. "
         "Included as a regularity signal — evenly distributed activity may indicate consistent maintenance."

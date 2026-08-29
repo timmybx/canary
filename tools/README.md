@@ -22,6 +22,7 @@ docker compose run --rm canary python tools/<script>.py
 | `compare_model_metrics.py` | How much did a pipeline change move the metrics? (before/after retrain diff) |
 | `embargo_backtest.py` | Does the time-split headline survive when training labels are restricted to those matured before the prediction date? |
 | `rolling_backtest.py` | How stable is the honest (embargoed) result across many test windows, not just 2025-05/06? |
+| `enrich_monthly_features.py` | Tier-1 feature families (`advhist_*`, `ghclock_*`) added to the labeled dataset from data already on disk. |
 | `make_figures.py` | Renders praxis/defense figures from the saved artifacts above. |
 
 ---
@@ -525,6 +526,40 @@ Writes `<out-dir>/fold_<YYYY-MM>/` (the usual `train_model` artifacts) and
 `<out-dir>/rolling_backtest.json` (per-fold metrics, summary, pooled
 metrics). Each fold retrains from scratch, so a 13-fold XGBoost run costs
 roughly 13x one training run; the dataset is loaded once.
+
+---
+
+## enrich_monthly_features.py — tier-1 feature enrichment
+
+Attaches `advhist_*` (advisory recurrence from the rows' own advisory
+calendar) and `ghclock_*` (event-timestamp recency clocks from the
+normalized GH Archive files) to the labeled dataset — no new collection.
+`ghclock_*` refines the existing month-granularity `gharchive_months_since_*`
+signals: day precision at month end, human/bot push split, PR opened /
+merged / reviewed as separate clocks, and capped-not-None "never" encoding
+(the existing signals leave None to median imputation). Field-level docs:
+`data/raw/advisories/README.md` and `data/raw/gharchive/README.md`.
+All values are as-of the observation month; "never" is an explicit cap plus
+a has-history flag, never zero (imputation-semantics discipline). Output:
+`plugins.monthly.labeled.enriched.jsonl` (+ `.summary.json`). Measure with
+the rolling backtest via `--include-prefixes` on the enriched file — no new
+family files needed:
+
+```bash
+docker compose run --rm canary python tools/enrich_monthly_features.py
+docker compose run --rm canary python tools/rolling_backtest.py \
+    --in-path data/processed/features/plugins.monthly.labeled.enriched.jsonl \
+    --model xgboost --start 2023-05 --end 2025-05 --step 2 --test-months 2 \
+    --include-prefixes advisory_,advisories_,advhist_ \
+    --out-dir data/processed/results/rolling_backtest/advhist_xgb
+```
+
+Related fix: `filter_monthly_labeled_features.py` previously derived columns
+from the first row only, silently dropping the sparse advisory recency/
+severity columns from every family file — the advisory-family suites were
+trained without them. Fixed to union columns across all rows; the driver's
+advisory family is now `advisory_,advisories_`. Old family files reproduce
+the frozen suites; regenerate (section 0) to get the full columns.
 
 ---
 

@@ -209,6 +209,36 @@ These capture how long it has been since each activity type was last observed.
 
 ---
 
+### Day-resolution recency clocks (`ghclock_` — enrichment layer)
+
+These are added to the labeled monthly dataset by
+`tools/enrich_monthly_features.py` (see `tools/README.md`), computed directly
+from the normalized event files in this folder — no BigQuery cost. They refine
+the month-granularity `gharchive_months_since_*` staleness signals above in
+three ways: **day precision** (days since the event, measured at the last day
+of the observation month, from exact event timestamps), **finer event kinds**
+(human vs. any push using the bot-actor list; PR opened, merged, and reviewed
+as separate clocks; tag creation distinct from releases), and a **no-missing
+encoding** — where `gharchive_months_since_*` preserve `None` for
+never-observed activity (leaving imputation to fill a value), the `ghclock_`
+clocks encode "never observed" as an explicit cap (3650 days) with the
+`ghclock_has_events` flag, so an imputed value can never make an inactive
+plugin look recently active.
+
+| Field | Predictive rationale |
+|-------|----------------------|
+| `ghclock_days_since_human_push` | Days since the last push by a non-bot actor. The purest staleness clock: a repo where only bots push may be effectively abandoned by human maintainers. |
+| `ghclock_days_since_any_push` | Days since any push, bots included. Together with the human clock, separates automation-only activity from human maintenance. |
+| `ghclock_days_since_release` | Days since the last GitHub release publication. Code that is committed but never released does not deliver fixes to users (Alexopoulos et al., 2022). |
+| `ghclock_days_since_pr_opened` | Days since a pull request was last opened — inbound contribution recency. |
+| `ghclock_days_since_pr_merged` | Days since a pull request was last merged — how recently proposed work actually landed. |
+| `ghclock_days_since_pr_review` | Days since the last review event — recency of code scrutiny (Thompson, 2017). |
+| `ghclock_days_since_issue_opened` | Days since an issue was last opened — recency of user-reported problems reaching the tracker. |
+| `ghclock_days_since_tag_create` | Days since the last Git tag creation — release discipline, for projects that tag without GitHub releases. |
+| `ghclock_has_events` | Whether any qualifying event has ever been observed for this plugin as of this month; the explicit companion flag for the capped values above. |
+
+---
+
 ### Delta signals
 
 These capture month-over-month changes in activity, useful for detecting sudden

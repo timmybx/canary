@@ -17,16 +17,31 @@ KEEP_ALWAYS = {
 
 
 def _wanted_keys(
-    row: dict[str, object],
+    rows: list[dict[str, object]],
     *,
     prefixes: list[str],
     keep_time_fields: bool,
 ) -> list[str]:
+    """
+    Column set for the filtered output, from the UNION of keys across all
+    *rows*. Deriving this from the first row alone silently dropped every
+    sparse column: the advisory builder only emits its rich history keys
+    (advisory_days_since_latest_to_date, advisory_mean_cvss_to_date, ...) on
+    rows whose plugin has advisory data, so family files built before this
+    fix carried only the dense advisory columns. Regenerated family files
+    therefore have MORE columns than the frozen pre-/post-embargo suites
+    were trained on — an intended difference; keep the old files for
+    reproducing those suites.
+    """
     keep = set(KEEP_ALWAYS)
     if not keep_time_fields:
         keep -= {"window_year", "window_month", "window_index"}
 
-    for key in row:
+    all_keys: set[str] = set()
+    for row in rows:
+        all_keys.update(row)
+
+    for key in all_keys:
         if key in keep:
             continue
         if key.startswith("label_"):
@@ -84,7 +99,7 @@ def main() -> int:
     if not rows:
         raise SystemExit(f"No rows found in {in_path}")
 
-    keys = _wanted_keys(rows[0], prefixes=prefixes, keep_time_fields=keep_time_fields)
+    keys = _wanted_keys(rows, prefixes=prefixes, keep_time_fields=keep_time_fields)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:

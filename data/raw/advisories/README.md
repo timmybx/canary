@@ -76,6 +76,44 @@ without introducing data leakage.
 | `advisory_span_days_to_date` | float \| None | Days between the first and most recent prior advisory. A longer span indicates recurring vulnerabilities over time rather than a single incident, which is a stronger signal of ongoing security risk than a cluster of advisories in a short period. |
 | `advisory_cve_count_to_date` | int | Number of distinct CVE identifiers associated with prior advisories. Some Jenkins advisories cover multiple CVEs; this field captures the total CVE exposure count rather than just the advisory count. Higher values indicate broader or more diverse vulnerability exposure. |
 
+### Advisory-recurrence features (`advhist_` — enrichment layer)
+
+These features are added to the labeled monthly dataset by
+`tools/enrich_monthly_features.py` (see `tools/README.md`), which computes them
+from the dataset's own dense advisory calendar (`advisory_count_this_month`)
+rather than from the raw advisory records. Like the `_to_date` features they are
+strictly as-of the observation month, so they are safe under the label-embargo
+training protocol.
+
+Their defining property is the **no-missing encoding**: where the `_to_date`
+features preserve `None` for plugins with no advisory history (leaving the
+model's imputation layer to fill a value), the `advhist_` features never emit a
+missing value. "No history yet" is encoded as an explicit cap (120 months)
+together with the `advhist_has_history` flag, so an imputed value can never
+place a no-history plugin next to a recently-hit one. Counts default to 0,
+which for this feed-complete source genuinely means zero.
+
+| Field | Type | Predictive rationale |
+|-------|------|----------------------|
+| `advhist_has_history` | bool | Whether the plugin has any in-panel advisory history as of this month. The explicit companion flag for every capped recency value below. |
+| `advhist_months_since_last` | int | Months since the most recent in-panel advisory (capped at 120 = no history). The month-granularity recurrence clock: prior vulnerability exposure is among the most informative predictors of future vulnerabilities (Walden et al., 2014), and recency sharpens it. |
+| `advhist_months_since_first` | int | Months since the earliest in-panel advisory (capped at 120). How long the plugin has had a known security history. |
+| `advhist_advisory_months_to_date` | int | Number of distinct months with at least one advisory. Distinguishes recurring exposure from a single multi-advisory incident. |
+| `advhist_advisory_count_to_date` | int | Total advisories to date from the panel calendar (a multi-advisory month counts each). |
+| `advhist_months_with_advisory_last_12m` | int | Advisory months in the trailing 12 months. Recent recurrence, the sharpest form of the recurrence signal. |
+| `advhist_months_with_advisory_last_24m` | int | Advisory months in the trailing 24 months. |
+| `advhist_mean_gap_months` | float | Mean gap in months between consecutive advisory months (capped at 120 when fewer than two). Short gaps indicate a steady drumbeat of disclosures rather than isolated incidents. |
+| `advhist_latest_batch_size` | int | How many plugins ecosystem-wide received an advisory in the same month as this plugin's latest advisory (0 = no history). Jenkins advisories frequently cover many plugins at once (see *Multi-plugin advisories* below); a plugin last hit as part of a large researcher sweep may have a different risk profile than one individually reported. |
+| `advhist_recency_decay` | float | `exp(-months_since_last / 6)`, in [0, 1] (0 = no history). A bounded transform of the recurrence clock that behaves well in linear models. |
+
+**Panel-start boundary:** advisories published before the first panel month
+(2018-01) are invisible to the panel calendar, so a plugin whose only
+advisories predate the panel reads as no-history until its first in-panel
+advisory. On the current dataset this affects 3,105 of 197,088 rows (1.6%),
+all in the early panel years; the `advisory_days_since_latest_to_date` column
+above carries pre-panel recency, so models trained with both see the full
+picture.
+
 ### Full-history features (current-state scoring only — not for ML modeling)
 
 These features use the complete advisory history at collection time and should

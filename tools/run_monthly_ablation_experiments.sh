@@ -286,12 +286,18 @@ if _section_active 0 && [[ "$SKIP_FILTER" -eq 0 ]]; then
   echo "Section 0 — Creating filtered monthly labeled files"
   echo "======================================================================="
 
+  # NOTE: the advisory family is "advisory_,advisories_" — advisories_present_any
+  # and advisories_last_365d are advisory-family features (training's imputation
+  # layer already treats both prefixes as one family) but the bare "advisory_"
+  # prefix missed them. Together with the filter tool's first-row column-scan
+  # fix, regenerated family files gain the advisory recency/severity columns
+  # the frozen suites never saw; keep the old files to reproduce those suites.
   for spec in \
-    "advisory_:$OUT_BASE/plugins.monthly.labeled.advisory_only.jsonl" \
+    "advisory_,advisories_:$OUT_BASE/plugins.monthly.labeled.advisory_only.jsonl" \
     "gharchive_:$OUT_BASE/plugins.monthly.labeled.gharchive_only.jsonl" \
     "swh_:$OUT_BASE/plugins.monthly.labeled.swh_only.jsonl" \
-    "advisory_,gharchive_:$OUT_BASE/plugins.monthly.labeled.advisory_gharchive.jsonl" \
-    "advisory_,swh_:$OUT_BASE/plugins.monthly.labeled.advisory_swh.jsonl" \
+    "advisory_,advisories_,gharchive_:$OUT_BASE/plugins.monthly.labeled.advisory_gharchive.jsonl" \
+    "advisory_,advisories_,swh_:$OUT_BASE/plugins.monthly.labeled.advisory_swh.jsonl" \
     "gharchive_,swh_:$OUT_BASE/plugins.monthly.labeled.gharchive_swh.jsonl"
   do
     families="${spec%%:*}"
@@ -308,7 +314,7 @@ if _section_active 0 && [[ "$SKIP_FILTER" -eq 0 ]]; then
   _run python tools/filter_monthly_labeled_features.py \
     --in-path  "$IN_PATH" \
     --out-path "$OUT_BASE/plugins.monthly.labeled.full_no_time.jsonl" \
-    --families "advisory_,gharchive_,swh_" \
+    --families "advisory_,advisories_,gharchive_,swh_" \
     --drop-time-fields
 else
   [[ "$SKIP_FILTER" -eq 1 ]] && echo "" && echo "Skipping section 0 (--skip-filter)."
