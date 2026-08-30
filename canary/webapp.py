@@ -62,6 +62,7 @@ from canary.web.ui import (
     _render_feature_columns_panel,  # noqa: F401
     _render_feature_item,  # noqa: F401
     _render_feature_selection_panel,  # noqa: F401
+    _render_honest_tab,  # noqa: F401
     _render_ml_explain_card,  # noqa: F401
     _render_ml_metrics,  # noqa: F401
     _render_ml_score_panel,  # noqa: F401
@@ -80,9 +81,10 @@ from canary.web.ui import (
 DEFAULT_REGISTRY_PATH = "data/raw/registry/plugins.jsonl"
 DEFAULT_MODEL_DIR = "data/processed/models/baseline_6m"
 MODEL_OUTPUTS_ROOT = Path("data/processed/models").resolve()
+ROLLING_RESULTS_ROOT = Path("data/processed/results/rolling_backtest").resolve()
 ADVISORY_DATA_ROOT = Path("data/raw/advisories").resolve()
 MODEL_OUTPUTS_ROOT_PARTS = Path("data/processed/models").parts
-VALID_TABS = frozenset({"score", "ml", "about", "casestudy"})
+VALID_TABS = frozenset({"score", "ml", "about", "casestudy", "honest"})
 MODEL_OUTPUT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 DEFAULTS: dict[str, Any] = {
@@ -585,6 +587,47 @@ def _load_cs_prediction_rows(
     return obs_date, window_end, confirmed_rows, unconfirmed_rows
 
 
+def _load_rolling_backtests() -> list[dict[str, Any]]:
+    """
+    Load every rolling-backtest result under ROLLING_RESULTS_ROOT for the
+    Honest-evaluation tab.
+
+    Each run directory produced by tools/rolling_backtest.py contains a
+    rolling_backtest.json with per-fold metrics, an across-fold summary, and
+    (when the fold test windows do not overlap) pooled metrics over every
+    fold's test predictions. Directories with "INVALID" in the name are
+    skipped (quarantined runs). Embargoed runs sort before stored-label
+    (leaky) runs; within each group, best pooled ROC-AUC first.
+    """
+    runs: list[dict[str, Any]] = []
+    root = ROLLING_RESULTS_ROOT
+    if not root.exists():
+        return runs
+    for run_dir in sorted(root.iterdir()):
+        if not run_dir.is_dir() or "INVALID" in run_dir.name.upper():
+            continue
+        payload_path = run_dir / "rolling_backtest.json"
+        if not payload_path.exists():
+            continue
+        try:
+            payload = json.loads(payload_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            logger.warning("Skipping unreadable rolling backtest result: %s", payload_path)
+            continue
+        if not isinstance(payload, dict) or not isinstance(payload.get("summary"), dict):
+            continue
+        payload["run_name"] = run_dir.name
+        runs.append(payload)
+
+    def _sort_key(run: dict[str, Any]) -> tuple[bool, float]:
+        pooled = run.get("pooled") or {}
+        roc = pooled.get("roc_auc")
+        return (not bool(run.get("embargo")), -(float(roc) if roc is not None else -1.0))
+
+    runs.sort(key=_sort_key)
+    return runs
+
+
 def _load_case_study_view(values: dict[str, Any]) -> dict[str, Any] | None:
     """
     Assemble everything the case-study tab renders: model metrics, the
@@ -649,6 +692,7 @@ def render_page(
     tabs = [
         ("score", "Scoring", "Plugin score and rationale"),
         ("ml", "Machine learning", "Model results and metrics"),
+        ("honest", "Honest evaluation", "Embargoed rolling backtests"),
         ("about", "About", "What is CANARY and how to use it"),
         ("casestudy", "Case study", "Validated predictions vs. confirmed advisories"),
     ]
@@ -670,6 +714,8 @@ def render_page(
         )
     elif active_tab == "about":
         active_panel_html = _render_about_tab()
+    elif active_tab == "honest":
+        active_panel_html = _render_honest_tab(_load_rolling_backtests())
     elif active_tab == "casestudy":
         active_panel_html = _render_case_study_tab(
             values,

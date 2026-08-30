@@ -1189,6 +1189,154 @@ _FEATURE_TIPS: dict[str, str] = {
         "Included as the explicit companion flag for the capped ghclock_ values, so a never-active plugin "
         "is never confused with a recently active one."
     ),
+    # ── GH Archive: security-vocabulary text signals ────────────────────────
+    "ghtext_days_since_security_mention": (
+        "Days since a GitHub event's text (PR/issue/commit text) last matched the security vocabulary "
+        "(CVE/CWE ids, 'vulnerability', 'XSS', 'injection', …), at the end of the observation month "
+        "(3650 = never; see ghtext_has_security_mentions). "
+        "Included as the most direct probe of security attention arriving at a project."
+    ),
+    "ghtext_security_mentions_90d": (
+        "GitHub events whose text matched the security vocabulary in the trailing 90 days. "
+        "Included to capture short bursts of security-related discussion."
+    ),
+    "ghtext_security_mentions_365d": (
+        "GitHub events whose text matched the security vocabulary in the trailing 365 days. "
+        "Included as the longer-window companion to the 90-day count."
+    ),
+    "ghtext_days_since_cve_mention": (
+        "Days since an event's text last contained an explicit CVE identifier, at the end of the "
+        "observation month (3650 = never). "
+        "Included because a named CVE is the sharpest form of security attention a repository receives."
+    ),
+    "ghtext_cve_mentions_365d": (
+        "GitHub events whose text contained a CVE identifier in the trailing 365 days."
+    ),
+    "ghtext_has_security_mentions": (
+        "Binary indicator: has any event text ever matched the security vocabulary as of this month? "
+        "Companion flag for the capped ghtext_ recency values."
+    ),
+    "ghtext_has_cve_mentions": (
+        "Binary indicator: has any event text ever contained a CVE identifier as of this month?"
+    ),
+    # ── Shared-maintainer contagion graph ───────────────────────────────────
+    "contagion_active_maintainers": (
+        "Human actors who pushed, merged a pull request, or cut a release on this plugin within the "
+        "trailing 24 months. The maintainer graph is rebuilt as-of each observation month from event "
+        "actors, so no future maintainer knowledge leaks into early rows."
+    ),
+    "contagion_shared_maintainers": (
+        "How many of this plugin's active maintainers are also active maintainers of at least one "
+        "other plugin. Included because shared maintainership is the edge along which risk exposure "
+        "could plausibly travel."
+    ),
+    "contagion_neighbor_count": (
+        "Plugins sharing at least one active maintainer with this one, as-of the observation month. "
+        "Included as the size of the plugin's maintainer-graph neighborhood."
+    ),
+    "contagion_neighbors_hit_12m": (
+        "Neighboring plugins (shared active maintainer) that received a security advisory in the "
+        "trailing 12 months. Included to test whether advisories cluster along the maintainer graph."
+    ),
+    "contagion_neighbors_hit_24m": (
+        "Neighboring plugins that received a security advisory in the trailing 24 months. "
+        "Longer-window companion to the 12-month count."
+    ),
+    "contagion_months_since_neighbor_advisory": (
+        "Months since any neighboring plugin's most recent advisory, as-of the observation month "
+        "(120 = never; see contagion_has_neighbor_advisory)."
+    ),
+    "contagion_has_neighbors": (
+        "Binary indicator: does this plugin share an active maintainer with any other plugin this month?"
+    ),
+    "contagion_has_neighbor_advisory": (
+        "Binary indicator: has any current neighbor ever received an in-panel advisory as of this month? "
+        "Companion flag for the capped neighbor-advisory recency."
+    ),
+    # ── Contributor dynamics (turnover / churn / concentration) ─────────────
+    "ghdyn_active_actors_3m": (
+        "Distinct human (non-bot) actors with any GitHub event on this plugin in the trailing 3 months."
+    ),
+    "ghdyn_active_actors_12m": (
+        "Distinct human actors with any GitHub event on this plugin in the trailing 12 months. "
+        "Included as the size of the currently engaged contributor pool."
+    ),
+    "ghdyn_new_actors_12m": (
+        "Actors in the trailing 12 months whose first-ever observed activity on this plugin also falls "
+        "within that window. Included because onboarding of unfamiliar contributors changes review dynamics."
+    ),
+    "ghdyn_departed_actors_12m": (
+        "Actors active in the year before last (months 13-24 back) who show no activity in the trailing "
+        "12 months. Included as a contributor-loss signal."
+    ),
+    "ghdyn_turnover_rate_12m": (
+        "Fraction of the prior year's contributors who departed (departed / prior-year actors; 0 when "
+        "there were none). Included as the normalized churn rate — knowledge loss is a documented "
+        "software-quality risk."
+    ),
+    "ghdyn_events_12m": (
+        "Total human-attributed GitHub events on this plugin in the trailing 12 months."
+    ),
+    "ghdyn_top_actor_share_12m": (
+        "Share of the trailing 12 months' human events contributed by the single most active actor "
+        "(0 when there were no events). Included as a bus-factor / concentration measure."
+    ),
+    "ghdyn_single_actor_12m": (
+        "Binary indicator: exactly one human actor was active in the trailing 12 months — "
+        "the classic single-maintainer situation."
+    ),
+    "ghdyn_has_actors": (
+        "Binary indicator: has any human actor ever been observed on this plugin as of this month? "
+        "Companion flag for the ghdyn_ counts."
+    ),
+    # ── Software Heritage: visit-to-visit deltas ────────────────────────────
+    "swhdelta_visits_to_date": (
+        "Software Heritage archive visits recorded for this plugin up to the end of the observation month."
+    ),
+    "swhdelta_days_since_last_visit": (
+        "Days since the most recent Software Heritage visit, at the end of the observation month "
+        "(3650 = never visited; see swhdelta_has_visits). Included as a measurement-staleness clock: "
+        "SWH-derived snapshot features age between visits."
+    ),
+    "swhdelta_days_between_last_visits": (
+        "Days between the two most recent visits as-of this month (3650 = fewer than two visits). "
+        "The denominator for the delta rates."
+    ),
+    "swhdelta_commits_delta": (
+        "Change in total commit count between the two most recent visits (0 when unknown). "
+        "Included as observed development volume between archive snapshots."
+    ),
+    "swhdelta_commit_rate_per_month": (
+        "Commit delta normalized to a 30-day rate over the inter-visit interval. "
+        "Included so plugins with different visit spacing remain comparable."
+    ),
+    "swhdelta_security_fix_commits_delta": (
+        "Change in the count of security-fix-labeled commits between the two most recent visits. "
+        "Included as a direct, if sparse, remediation-activity signal."
+    ),
+    "swhdelta_governance_adds": (
+        "Governance or tooling files adopted between the two most recent visits (SECURITY.md, "
+        "Dependabot config, GitHub Actions, tests directory, …: a False-to-True flip of a has_* flag)."
+    ),
+    "swhdelta_governance_drops": (
+        "Governance or tooling files removed between the two most recent visits (True-to-False flips)."
+    ),
+    "swhdelta_days_since_governance_add": (
+        "Days since the most recent visit at which any governance file flipped on, at the end of the "
+        "observation month (3650 = never observed; see swhdelta_has_governance_add). "
+        "Included because governance adoption often follows — or invites — security attention."
+    ),
+    "swhdelta_has_visits": (
+        "Binary indicator: at least one Software Heritage visit exists as of this month. "
+        "Companion flag for the capped swhdelta_ recency values."
+    ),
+    "swhdelta_has_prior_visit": (
+        "Binary indicator: at least two visits exist as of this month, so the delta features are "
+        "actual deltas rather than defaults."
+    ),
+    "swhdelta_has_governance_add": (
+        "Binary indicator: any governance-file adoption has ever been observed between visits as of this month."
+    ),
     "gharchive_days_active": (
         "Number of distinct days with any GitHub activity in the current observation month. "
         "Included as a regularity signal — evenly distributed activity may indicate consistent maintenance."
@@ -2592,6 +2740,183 @@ def _render_cs_explain_card(
         + tip
         + "</section>"
     )
+
+
+def _fmt_metric(value: Any, digits: int = 4) -> str:
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _honest_run_label(run: dict[str, Any]) -> str:
+    prefixes = run.get("include_prefixes")
+    if prefixes:
+        return ", ".join(str(p).rstrip("_") for p in prefixes)
+    return "all features in dataset"
+
+
+def _render_honest_fold_table(run: dict[str, Any]) -> str:
+    rows = []
+    for fold in run.get("folds") or []:
+        rows.append(
+            "<tr>"
+            f"<td style='padding:.35rem .6rem'>{_escape(fold.get('test_start_month'))}"
+            f" – {_escape(fold.get('test_end_month'))}</td>"
+            f"<td style='padding:.35rem .6rem'>{_escape(fold.get('label_as_of_month') or '—')}</td>"
+            f"<td style='padding:.35rem .6rem;text-align:right'>{_escape(fold.get('test_positive_count'))}"
+            f" / {_escape(fold.get('test_row_count'))}</td>"
+            f"<td style='padding:.35rem .6rem;text-align:right'>{_fmt_metric(fold.get('roc_auc'), 3)}</td>"
+            f"<td style='padding:.35rem .6rem;text-align:right'>{_fmt_metric(fold.get('average_precision'))}</td>"
+            f"<td style='padding:.35rem .6rem;text-align:right'>{_fmt_metric(fold.get('ap_lift_over_base_rate'), 2)}×</td>"
+            "</tr>"
+        )
+    if not rows:
+        return ""
+    return (
+        "<details style='margin:.4rem 0 .8rem'>"
+        f"<summary style='cursor:pointer;color:var(--muted);font-size:.9rem'>"
+        f"Per-fold detail ({len(run.get('folds') or [])} folds)</summary>"
+        "<table style='width:100%;border-collapse:collapse;font-size:.88rem;margin-top:.5rem'>"
+        "<thead><tr>"
+        "<th style='text-align:left;padding:.35rem .6rem'>Test window</th>"
+        "<th style='text-align:left;padding:.35rem .6rem'>Labels as-of</th>"
+        "<th style='text-align:right;padding:.35rem .6rem'>Positives / rows</th>"
+        "<th style='text-align:right;padding:.35rem .6rem'>ROC-AUC</th>"
+        "<th style='text-align:right;padding:.35rem .6rem'>Avg precision</th>"
+        "<th style='text-align:right;padding:.35rem .6rem'>AP lift</th>"
+        "</tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table></details>"
+    )
+
+
+def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
+    """
+    Render the Honest-evaluation tab: rolling-origin backtest results with
+    the label embargo applied at every fold — the deployment-honest numbers,
+    as opposed to the historical/diagnostic metrics on the ML tab.
+    """
+    intro = (
+        "<div class='card' style='margin-bottom:1rem'>"
+        "<h2 style='margin-top:0'>Honest evaluation — embargoed rolling backtests</h2>"
+        "<p style='color:var(--muted)'>The metrics on the Machine-learning tab are "
+        "<strong>historical / diagnostic</strong>: they use the standard chronological protocol, "
+        "which lets training labels share advisory events with the test window and inflates "
+        "apparent performance. The numbers below are <strong>deployment-honest</strong>: the same "
+        "evaluation is repeated at many points in time (an expanding-window rolling backtest), and "
+        "at every fold the training labels are rebuilt using only advisories published before that "
+        "fold's scoring date (the label embargo). No training label ever depends on an advisory "
+        "the model is later tested on. Pooled metrics combine every fold's test predictions — "
+        "hundreds of advisory outcomes across 2023–2025 rather than one two-month window.</p>"
+        "<p style='color:var(--muted);font-size:.9rem'>Runs marked <em>stored labels</em> use the "
+        "historical (leaky) labels on the same folds, shown for contrast. Produced by "
+        "<code>tools/rolling_backtest.py</code>.</p>"
+        "</div>"
+    )
+
+    if not runs:
+        return intro + (
+            "<div class='card'><p style='color:var(--muted)'>No rolling backtest results found. "
+            "Run <code>tools/rolling_backtest.py</code> and refresh this page.</p></div>"
+        )
+
+    champion = next(
+        (r for r in runs if r.get("embargo") and (r.get("pooled") or {}).get("roc_auc")), None
+    )
+    champion_html = ""
+    if champion:
+        pooled = champion.get("pooled") or {}
+        summary = champion.get("summary") or {}
+        roc = summary.get("roc_auc") or {}
+        champ_rows_str = f"{summary.get('total_test_rows') or 0:,}"
+        champ_pos_str = f"{summary.get('total_test_positives') or 0:,}"
+        champion_html = (
+            "<div class='card' style='margin-bottom:1rem'>"
+            "<p class='eyebrow'>Best embargoed result</p>"
+            f"<h3 style='margin:.1rem 0 .5rem'>{_escape(_honest_run_label(champion))} "
+            f"<span style='color:var(--muted);font-weight:normal'>({_escape(champion.get('model_name') or '?')})</span></h3>"
+            "<div class='metrics-row'>"
+            f"<div class='metric'><span class='metric__label'>Pooled ROC-AUC</span>"
+            f"<span class='metric__value'>{_fmt_metric(pooled.get('roc_auc'), 3)}</span></div>"
+            f"<div class='metric'><span class='metric__label'>Pooled avg precision</span>"
+            f"<span class='metric__value'>{_fmt_metric(pooled.get('average_precision'))}</span></div>"
+            f"<div class='metric'><span class='metric__label'>Lift over base rate</span>"
+            f"<span class='metric__value'>{_fmt_metric(pooled.get('ap_lift_over_base_rate'), 2)}×</span></div>"
+            f"<div class='metric'><span class='metric__label'>Fold ROC range</span>"
+            f"<span class='metric__value'>{_fmt_metric(roc.get('min'), 3)} – {_fmt_metric(roc.get('max'), 3)}</span></div>"
+            "</div>"
+            f"<p style='color:var(--muted);font-size:.9rem;margin-bottom:0'>"
+            f"{_escape(summary.get('fold_count'))} folds, "
+            f"{_escape(champ_rows_str)} test rows, "
+            f"{_escape(champ_pos_str)} advisory outcomes.</p>"
+            "</div>"
+        )
+
+    body_rows = []
+    for run in runs:
+        pooled = run.get("pooled") or {}
+        summary = run.get("summary") or {}
+        roc = summary.get("roc_auc") or {}
+        embargoed = bool(run.get("embargo"))
+        positives_str = f"{summary.get('total_test_positives') or 0:,}"
+        protocol = (
+            "<span class='pill pill--muted'>embargoed</span>"
+            if embargoed
+            else "<span class='pill pill--warn'>stored labels</span>"
+        )
+        body_rows.append(
+            "<tr>"
+            f"<td style='padding:.45rem .6rem'><strong>{_escape(_honest_run_label(run))}</strong>"
+            f"<br><span style='color:var(--muted);font-size:.82rem'>{_escape(run.get('run_name'))}</span></td>"
+            f"<td style='padding:.45rem .6rem'>{_escape(run.get('model_name') or '?')}</td>"
+            f"<td style='padding:.45rem .6rem'>{protocol}</td>"
+            f"<td style='padding:.45rem .6rem;text-align:right'>{_escape(summary.get('fold_count'))}</td>"
+            f"<td style='padding:.45rem .6rem;text-align:right'>{_escape(positives_str)}</td>"
+            f"<td style='padding:.45rem .6rem;text-align:right'><strong>{_fmt_metric(pooled.get('roc_auc'), 3)}</strong></td>"
+            f"<td style='padding:.45rem .6rem;text-align:right'>{_fmt_metric(pooled.get('average_precision'))}</td>"
+            f"<td style='padding:.45rem .6rem;text-align:right'>{_fmt_metric(pooled.get('ap_lift_over_base_rate'), 2)}×</td>"
+            f"<td style='padding:.45rem .6rem;text-align:right'>{_fmt_metric(roc.get('mean'), 3)} "
+            f"<span style='color:var(--muted);font-size:.82rem'>({_fmt_metric(roc.get('min'), 3)}–{_fmt_metric(roc.get('max'), 3)})</span></td>"
+            "</tr>"
+            f"<tr><td colspan='9' style='padding:0 .6rem'>{_render_honest_fold_table(run)}</td></tr>"
+        )
+
+    table = (
+        "<div class='card' style='margin-bottom:1rem'>"
+        "<h3 style='margin-top:0'>All rolling backtest runs</h3>"
+        "<table style='width:100%;border-collapse:collapse;font-size:.92rem'>"
+        "<thead><tr>"
+        "<th style='text-align:left;padding:.45rem .6rem'>Feature set</th>"
+        "<th style='text-align:left;padding:.45rem .6rem'>Model</th>"
+        "<th style='text-align:left;padding:.45rem .6rem'>Protocol</th>"
+        "<th style='text-align:right;padding:.45rem .6rem'>Folds</th>"
+        "<th style='text-align:right;padding:.45rem .6rem'>Positives</th>"
+        "<th style='text-align:right;padding:.45rem .6rem'>Pooled ROC-AUC</th>"
+        "<th style='text-align:right;padding:.45rem .6rem'>Pooled AP</th>"
+        "<th style='text-align:right;padding:.45rem .6rem'>AP lift</th>"
+        "<th style='text-align:right;padding:.45rem .6rem'>Fold ROC mean (range)</th>"
+        "</tr></thead>"
+        f"<tbody>{''.join(body_rows)}</tbody></table></div>"
+    )
+
+    caveats = (
+        "<div class='card'>"
+        "<h3 style='margin-top:0'>How to read these numbers</h3>"
+        "<p style='color:var(--muted);font-size:.92rem'>ROC-AUC measures how well the model "
+        "separates advisory-bound plugins from the rest across all thresholds; 0.5 is chance. "
+        "Average-precision lift compares ranking concentration against random selection at the "
+        "~1.4% pooled base rate. Under the honest protocol the separation signal is real and "
+        "consistent across model families, while top-of-list concentration remains modest — "
+        "CANARY is a triage signal, not proof that a component is vulnerable. Feature sets whose "
+        "pooled ROC-AUC sits at or below 0.5 (for example advisory-recurrence features) are shown "
+        "deliberately: measuring which signals do <em>not</em> survive an honest evaluation is "
+        "part of the research contribution.</p>"
+        "</div>"
+    )
+
+    return intro + champion_html + table + caveats
 
 
 def _render_about_tab() -> str:

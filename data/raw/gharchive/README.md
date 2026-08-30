@@ -239,6 +239,80 @@ plugin look recently active.
 
 ---
 
+### Security-vocabulary text signals (`ghtext_` — enrichment layer)
+
+Also added by `tools/enrich_monthly_features.py`, from the `text_blob` field
+of the normalized events (PR/issue titles and bodies, commit messages, where
+BigQuery retained them — roughly half of events carry text). An event counts
+as a *security mention* when its text matches a deliberately narrow
+vocabulary (CVE/CWE identifiers, "vulnerability", "exploit", "XSS", "CSRF",
+"injection", "sanitize", "disclosure", "advisory", …) — generic words like
+"fix" or "bug" are excluded so ordinary maintenance does not swamp the
+signal. Recency values use the cap-plus-flag encoding (3650 = never; see the
+`ghtext_has_*` flags). This family is the most direct probe of the
+surveillance/attention channel (praxis H1): security attention arriving at a
+repository, in the contributors' own words, before any advisory exists.
+
+| Field | Predictive rationale |
+|-------|----------------------|
+| `ghtext_days_since_security_mention` | Days since an event's text last matched the security vocabulary, at the end of the observation month. Goldman & Landsman (2024) showed security keywords in project activity lead formal CVE assignment. |
+| `ghtext_security_mentions_90d` | Security-matching events in the trailing 90 days — short bursts of security discussion. |
+| `ghtext_security_mentions_365d` | Security-matching events in the trailing 365 days — the longer-window companion. |
+| `ghtext_days_since_cve_mention` | Days since an event's text last contained an explicit CVE identifier — the sharpest form of security attention a repository receives. |
+| `ghtext_cve_mentions_365d` | Events containing a CVE identifier in the trailing 365 days. |
+| `ghtext_has_security_mentions` | Whether any event text has ever matched the vocabulary as of this month; companion flag for the capped recencies. |
+| `ghtext_has_cve_mentions` | Whether any event text has ever contained a CVE identifier as of this month. |
+
+---
+
+### Shared-maintainer contagion graph (`contagion_` — enrichment layer)
+
+Also added by `tools/enrich_monthly_features.py`. A plugin's *active
+maintainers* at month T are the human (non-bot) actors who pushed, merged a
+pull request, or cut a release on it within the trailing 24 months of
+events; two plugins are *neighbors* when they share at least one active
+maintainer. The graph is rebuilt as-of every observation month from the
+event stream — deliberately **not** from the static contributor snapshots
+in `data/raw/github/`, which were collected years after the early panel
+months and would leak future maintainer knowledge into early rows. The
+advisory side uses the same in-panel advisory calendar as `advhist_*`, so no
+value depends on advisories published after the observation month.
+
+| Field | Predictive rationale |
+|-------|----------------------|
+| `contagion_active_maintainers` | Size of the plugin's current active-maintainer set. |
+| `contagion_shared_maintainers` | How many of those maintainers are also active on other plugins — the plugin's attachment to the wider graph. |
+| `contagion_neighbor_count` | Plugins sharing an active maintainer. A larger neighborhood means more paths for correlated risk exposure (shared practices, shared attention, shared code idioms). |
+| `contagion_neighbors_hit_12m` | Neighbors with a security advisory in the trailing 12 months — does risk cluster along the maintainer graph? |
+| `contagion_neighbors_hit_24m` | The 24-month companion window. |
+| `contagion_months_since_neighbor_advisory` | Months since any current neighbor's most recent advisory (120 = never; see `contagion_has_neighbor_advisory`). |
+| `contagion_has_neighbors` | Whether the plugin shares an active maintainer with any other plugin this month. |
+| `contagion_has_neighbor_advisory` | Whether any current neighbor has ever had an in-panel advisory as of this month; companion flag for the capped recency. |
+
+---
+
+### Contributor dynamics (`ghdyn_` — enrichment layer)
+
+Also added by `tools/enrich_monthly_features.py`, from human (non-bot) event
+actors. Where the `gharchive_*_actors_*` features above count heads in fixed
+windows, these measure *change* in the contributor pool — turnover,
+newcomers, departures, and concentration — which the software-engineering
+literature ties to knowledge loss and review-quality risk.
+
+| Field | Predictive rationale |
+|-------|----------------------|
+| `ghdyn_active_actors_3m` | Distinct human actors in the trailing 3 months. |
+| `ghdyn_active_actors_12m` | Distinct human actors in the trailing 12 months — the engaged pool. |
+| `ghdyn_new_actors_12m` | Actors whose first-ever observed activity on this plugin falls within the trailing 12 months. Onboarding of unfamiliar contributors changes review dynamics. |
+| `ghdyn_departed_actors_12m` | Actors active in months 13–24 back with no activity in the trailing 12 months — contributor loss. |
+| `ghdyn_turnover_rate_12m` | Departed / prior-year actors (0 when none). Normalized churn — a proxy for maintainer knowledge loss. |
+| `ghdyn_events_12m` | Total human-attributed events in the trailing 12 months. |
+| `ghdyn_top_actor_share_12m` | Share of those events from the single most active actor — a bus-factor / concentration measure. |
+| `ghdyn_single_actor_12m` | Exactly one human actor active in the trailing 12 months — the classic single-maintainer situation. |
+| `ghdyn_has_actors` | Whether any human actor has ever been observed as of this month; companion flag for the counts. |
+
+---
+
 ### Delta signals
 
 These capture month-over-month changes in activity, useful for detecting sudden

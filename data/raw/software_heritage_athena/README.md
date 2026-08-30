@@ -414,6 +414,38 @@ the repository. Preserving this distinction avoids the methodological error of t
 
 ---
 
+### Visit-to-visit deltas (`swhdelta_` — enrichment layer)
+
+Added to the labeled monthly dataset by `tools/enrich_monthly_features.py`
+(see `tools/README.md`), computed from the per-plugin
+`<plugin>.swh_athena_visits.jsonl` files in this folder — no new collection.
+Where the `swh_*` features above are point-in-time levels at the latest
+visit, these measure *change between consecutive visits*: development volume,
+security-fix activity, and governance/tooling adoption events (a `has_*`
+flag such as `has_security_md` flipping from `False` to `True`; a flip
+involving an unknown value on either side never counts). Everything is
+as-of the last day of the observation month — only visits dated on or
+before it are used — and the family emits no missing values: recencies use
+the cap-plus-flag encoding (3650 days = never; see the `swhdelta_has_*`
+flags) and deltas default to 0 when fewer than two visits exist.
+
+| Field | Predictive rationale |
+|-------|----------------------|
+| `swhdelta_visits_to_date` | Visits recorded up to the observation month — archival coverage depth. |
+| `swhdelta_days_since_last_visit` | Days since the most recent visit. A measurement-staleness clock: SWH-derived snapshot features age between visits, and this says by how much. |
+| `swhdelta_days_between_last_visits` | Days between the two most recent visits — the denominator for the delta rates (3650 = fewer than two visits). |
+| `swhdelta_commits_delta` | Change in total commit count between the two most recent visits — observed development volume between snapshots. |
+| `swhdelta_commit_rate_per_month` | The commit delta normalized to a 30-day rate, so plugins with different visit spacing remain comparable. |
+| `swhdelta_security_fix_commits_delta` | Change in the count of security-fix-labeled commits between visits — a direct, if sparse, remediation-activity signal. |
+| `swhdelta_governance_adds` | Governance or tooling files adopted between the two most recent visits (SECURITY.md, Dependabot config, GitHub Actions, tests directory, …). |
+| `swhdelta_governance_drops` | Governance or tooling files removed between the two most recent visits. |
+| `swhdelta_days_since_governance_add` | Days since the most recent visit at which any governance file flipped on. Governance adoption often follows — or invites — security attention. |
+| `swhdelta_has_visits` | Whether at least one visit exists as of this month; companion flag for the capped recencies. |
+| `swhdelta_has_prior_visit` | Whether at least two visits exist, so the delta fields are actual deltas rather than defaults. |
+| `swhdelta_has_governance_add` | Whether any governance adoption has ever been observed between visits as of this month. |
+
+---
+
 ## Data limitations
 
 **Coverage:** Not all Jenkins plugins have SWH archival data for every year in the

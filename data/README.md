@@ -63,12 +63,17 @@ models train on:
   and full combinations) produced by `tools/filter_monthly_labeled_features.py`
   for the ablation suite (`tools/run_monthly_ablation_experiments.sh`)
 - `data/processed/features/plugins.monthly.labeled.enriched.jsonl`
-  (+ `.summary.json`) — the labeled dataset with the tier-1 enrichment
-  families attached by `tools/enrich_monthly_features.py`: `advhist_*`
-  (advisory recurrence; documented in `data/raw/advisories/README.md`) and
-  `ghclock_*` (day-resolution recency clocks; documented in
-  `data/raw/gharchive/README.md`). Both are as-of the observation month and
-  emit no missing values.
+  (+ `.summary.json`) — the labeled dataset with the post-hoc enrichment
+  families attached by `tools/enrich_monthly_features.py` (select with
+  `--families`): `advhist_*` (advisory recurrence; documented in
+  `data/raw/advisories/README.md`); `ghclock_*` (day-resolution recency
+  clocks), `ghtext_*` (security-vocabulary text signals), `contagion_*`
+  (shared-maintainer graph, rebuilt as-of each month), and `ghdyn_*`
+  (contributor turnover/churn/concentration), all documented in
+  `data/raw/gharchive/README.md`; and `swhdelta_*` (visit-to-visit deltas
+  and governance-adoption events; documented in
+  `data/raw/software_heritage_athena/README.md`). Every family is as-of the
+  observation month and emits no missing values.
 
 Column-level documentation lives beside each source: advisory features in
 `data/raw/advisories/README.md`, GH Archive features in
@@ -95,7 +100,7 @@ canary build features \
   --registry data/raw/registry/plugins.jsonl
 canary build monthly-features --start 2024-01 --end 2025-12
 canary build monthly-labels
-python tools/enrich_monthly_features.py   # attach advhist_* / ghclock_*
+python tools/enrich_monthly_features.py   # attach the enrichment families (--families to subset)
 ```
 
 ## Notes on GH Archive collection

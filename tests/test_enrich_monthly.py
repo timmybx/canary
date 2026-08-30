@@ -211,9 +211,12 @@ def test_enrich_rows_preserves_originals_and_adds_families(
         assert any(k.startswith("advhist_") for k in new)
         assert any(k.startswith("ghclock_") for k in new)
     assert summary["row_count"] == len(advisory_grid)
-    assert summary["added_column_count"] == len(summary["advhist_columns"]) + len(
-        summary["ghclock_columns"]
+    # Default families: advhist + every event family (no swhdelta without swh_dir).
+    assert summary["added_column_count"] == sum(
+        len(summary[f"{family}_columns"])
+        for family in ("advhist", "ghclock", "ghtext", "contagion", "ghdyn", "swhdelta")
     )
+    assert summary["swhdelta_columns"] == []
 
 
 def test_enrich_rows_skip_ghclock(advisory_grid: list[dict]) -> None:
@@ -253,6 +256,8 @@ def test_enrich_cli_end_to_end(
             str(out_path),
             "--events-dir",
             str(events_dir),
+            "--families",
+            "advhist,ghclock",
         ],
     )
     assert tool.main() == 0

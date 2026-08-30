@@ -1,21 +1,26 @@
 """
 tools/enrich_monthly_features.py
 ================================
-Attach the ``advhist_*`` and ``ghclock_*`` feature families to an existing
-labeled monthly dataset, without re-running the monthly build.
+Attach the post-hoc feature families (advhist_/ghclock_/ghtext_/contagion_/
+ghdyn_/swhdelta_) to an existing labeled monthly dataset, without re-running
+the monthly build.
 
 Why
 ---
-Tier 1 of the honest-signal plan: features computable from data already on
-disk. ``advhist_*`` (advisory recurrence: months since last advisory,
-trailing counts, mean gap, latest batch size) comes straight from the
-labeled rows' advisory calendar. ``ghclock_*`` (days since last human push /
-release / PR merge / issue / tag, at month end) comes from the normalized
-GH Archive events, replacing the Software Heritage visit-based staleness
-clocks with exact timestamps. Neither family emits missing values: "never"
-is encoded as an explicit cap plus a has-history flag, so the imputation
-layer never turns "no history" into "just happened" (see the encoding note
-in canary/build/enrich_monthly.py).
+Features computable from data already on disk — no new collection. Six
+families (see canary/build/enrich_monthly.py for definitions and the
+no-missing-values encoding):
+
+    advhist_    advisory recurrence (from the labeled rows themselves)
+    ghclock_    days-since-last-<event kind> clocks (GH Archive events)
+    ghtext_     security/CVE-vocabulary recency and counts (event text)
+    contagion_  shared-maintainer graph, rebuilt as-of each month
+    ghdyn_      contributor turnover / churn / concentration
+    swhdelta_   Software Heritage visit-to-visit deltas + governance adoption
+
+All four event families share a single pass over the events directory. No
+family emits missing values: "never" is an explicit cap plus a has-* flag,
+so the imputation layer never turns "no history" into "just happened".
 
 Everything is as-of the observation month — no value depends on advisories
 or events after it — so the enriched file is safe for the embargoed
@@ -23,7 +28,12 @@ training path and the rolling backtest.
 
 Usage
 -----
+    # everything (default: all six families):
     docker compose run --rm canary python tools/enrich_monthly_features.py
+
+    # a subset:
+    docker compose run --rm canary python tools/enrich_monthly_features.py \\
+        --families contagion,ghtext,ghdyn,swhdelta
 
     # advhist only (fast — skips the 3GB event scan):
     docker compose run --rm canary python tools/enrich_monthly_features.py --skip-ghclock
@@ -34,8 +44,8 @@ enriched output with include-prefixes, e.g.:
     python tools/rolling_backtest.py \\
         --in-path data/processed/features/plugins.monthly.labeled.enriched.jsonl \\
         --model xgboost --start 2023-05 --end 2025-05 --step 2 --test-months 2 \\
-        --include-prefixes advisory_,advisories_,advhist_ \\
-        --out-dir data/processed/results/rolling_backtest/advhist_xgb
+        --include-prefixes contagion_ \\
+        --out-dir data/processed/results/rolling_backtest/contagion_xgb
 
 Output
 ------
@@ -57,9 +67,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from canary.build.enrich_monthly import (  # noqa: E402
-    build_advhist_features,
-    build_ghclock_features,
-    collect_event_dates,
+    ALL_FAMILIES,
+    EVENT_FAMILIES,
+    build_family_features,
 )
 from canary.build.monthly_labels import (  # noqa: E402
     _get_month_value,
@@ -69,6 +79,7 @@ from canary.build.monthly_labels import (  # noqa: E402
 DEFAULT_IN_PATH = "data/processed/features/plugins.monthly.labeled.jsonl"
 DEFAULT_OUT_PATH = "data/processed/features/plugins.monthly.labeled.enriched.jsonl"
 DEFAULT_EVENTS_DIR = "data/raw/gharchive/normalized-events"
+DEFAULT_SWH_DIR = "data/raw/software_heritage_athena"
 
 
 def _stream_jsonl(path: Path):
@@ -112,12 +123,22 @@ def main() -> int:
     parser.add_argument(
         "--events-dir",
         default=DEFAULT_EVENTS_DIR,
-        help="directory of normalized GH Archive event jsonl files (for ghclock_*)",
+        help="directory of normalized GH Archive event jsonl files (event families)",
+    )
+    parser.add_argument(
+        "--swh-dir",
+        default=DEFAULT_SWH_DIR,
+        help="directory of <plugin>.swh_athena_visits.jsonl files (for swhdelta_*)",
+    )
+    parser.add_argument(
+        "--families",
+        default=",".join(ALL_FAMILIES),
+        help=f"comma-separated subset of: {','.join(ALL_FAMILIES)} (default: all)",
     )
     parser.add_argument(
         "--skip-ghclock",
         action="store_true",
-        help="only add advhist_* (no event scan; much faster)",
+        help="drop every event-based family (no event scan; much faster)",
     )
     args = parser.parse_args()
 
@@ -126,16 +147,29 @@ def main() -> int:
     if out_path.resolve() == in_path.resolve():
         raise SystemExit("Refusing to overwrite the input file; pick a different --out-path.")
 
+    families = tuple(f.strip() for f in args.families.split(",") if f.strip())
+    unknown = set(families) - set(ALL_FAMILIES)
+    if unknown:
+        raise SystemExit(
+            f"Unknown families: {', '.join(sorted(unknown))} (valid: {', '.join(ALL_FAMILIES)})"
+        )
+    if args.skip_ghclock:
+        families = tuple(f for f in families if f not in EVENT_FAMILIES)
+
     t0 = time.time()
     print(f"Pass 1: scanning {in_path} for the advisory calendar …")
     minimal = _collect_minimal_rows(in_path)
     print(f"  {len(minimal):,} rows ({time.time() - t0:.0f}s)")
 
-    advhist = build_advhist_features(minimal)
-    ghclock: dict = {}
-    if not args.skip_ghclock:
-        print(f"Scanning events under {args.events_dir} … (this reads every monthly file)")
-        ghclock = build_ghclock_features(minimal, collect_event_dates(args.events_dir))
+    needs_events = any(f in EVENT_FAMILIES for f in families)
+    if needs_events:
+        print(f"Scanning events under {args.events_dir} … (one pass serves all event families)")
+    by_family = build_family_features(
+        minimal,
+        families=families,
+        events_dir=args.events_dir if needs_events else None,
+        swh_dir=args.swh_dir if "swhdelta" in families else None,
+    )
 
     # Second streaming pass: merge and write row by row. The output goes to a
     # temp file that is renamed into place only on success, so an interrupted
@@ -149,9 +183,10 @@ def main() -> int:
         with tmp_path.open("w", encoding="utf-8") as f:
             for row in _stream_jsonl(in_path):
                 key = (str(row.get("plugin_id") or ""), _get_month_value(row))
-                row.update(advhist.get(key, {}))
-                if ghclock:
-                    row.update(ghclock.get(key, {}))
+                for family in ALL_FAMILIES:
+                    feats = by_family.get(family)
+                    if feats:
+                        row.update(feats.get(key, {}))
                 f.write(json.dumps(row, sort_keys=True) + "\n")
                 written += 1
         if written != len(minimal):
@@ -163,25 +198,28 @@ def main() -> int:
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    advhist_cols = sorted({k for feats in advhist.values() for k in feats})
-    ghclock_cols = sorted({k for feats in ghclock.values() for k in feats})
+    columns = {
+        f"{family}_columns": sorted({k for feats in by_family[family].values() for k in feats})
+        if family in by_family
+        else []
+        for family in ALL_FAMILIES
+    }
     summary = {
         "row_count": written,
         "plugin_count": len({str(r.get("plugin_id") or "") for r in minimal}),
-        "advhist_columns": advhist_cols,
-        "ghclock_columns": ghclock_cols,
-        "added_column_count": len(advhist_cols) + len(ghclock_cols),
+        **columns,
+        "added_column_count": sum(len(cols) for cols in columns.values()),
+        "families": list(families),
         "input_path": str(in_path),
         "output_path": str(out_path),
-        "skip_ghclock": bool(args.skip_ghclock),
     }
     summary_path = Path(str(out_path) + ".summary.json")
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
 
+    per_family = ", ".join(f"{len(columns[f'{family}_columns'])} {family}_" for family in by_family)
     print(
         f"Done in {time.time() - t0:.0f}s: {written:,} rows, "
-        f"+{summary['added_column_count']} columns "
-        f"({len(advhist_cols)} advhist_, {len(ghclock_cols)} ghclock_)."
+        f"+{summary['added_column_count']} columns ({per_family})."
     )
     print(f"Summary: {summary_path}")
     print(
