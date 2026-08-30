@@ -1337,6 +1337,47 @@ _FEATURE_TIPS: dict[str, str] = {
     "swhdelta_has_governance_add": (
         "Binary indicator: any governance-file adoption has ever been observed between visits as of this month."
     ),
+    # ── Jenkins install statistics (stats.jenkins.io monthly history) ───────
+    "installs_count": (
+        "Reported Jenkins installations of this plugin at the most recent stats month available "
+        "at scoring time (month T uses stats through T-1, since a month's figures publish after it ends). "
+        "Included as the demand-side exposure measure: install base draws both attackers and security researchers."
+    ),
+    "installs_log10_count": (
+        "log10(installations + 1) — the same scale measure on the log scale, "
+        "for models that benefit from compressed dynamic range."
+    ),
+    "installs_pct": (
+        "Share of reporting Jenkins instances with this plugin installed (percent), from the same stats month. "
+        "Normalizes the raw count by the ecosystem's own reporting population."
+    ),
+    "installs_rank_pct": (
+        "Percentile of this plugin's install count among all plugins with stats that month (0-1). "
+        "Included as a growth-invariant popularity measure — ranks stay comparable across years."
+    ),
+    "installs_growth_3m": (
+        "Relative change in install count vs. three months earlier (capped at +1000%; 0 when unknown). "
+        "Short-horizon adoption momentum."
+    ),
+    "installs_growth_12m": (
+        "Relative change in install count vs. twelve months earlier (capped at +1000%; 0 when unknown). "
+        "A shrinking install base is an abandonment-adjacent signal the activity clocks cannot see."
+    ),
+    "installs_peak_ratio": (
+        "Current install count divided by the plugin's historical peak (0-1]. "
+        "Low values on a still-large base mark the legacy-decay archetype: widely deployed, fading attention."
+    ),
+    "installs_rank_delta_12m": (
+        "Change in install-count percentile vs. twelve months earlier. "
+        "Falling rank means the ecosystem is moving away from this plugin even if raw installs are stable."
+    ),
+    "installs_months_of_data": (
+        "Number of monthly install-stats observations available for this plugin as of this month."
+    ),
+    "installs_has_data": (
+        "Binary indicator: stats.jenkins.io has at least one install-stats month for this plugin "
+        "as of scoring time; companion flag for the zero-filled installs_ values."
+    ),
     "gharchive_days_active": (
         "Number of distinct days with any GitHub activity in the current observation month. "
         "Included as a regularity signal — evenly distributed activity may indicate consistent maintenance."

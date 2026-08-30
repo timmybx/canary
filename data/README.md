@@ -35,6 +35,7 @@ From the registry, CANARY fans out into source-specific collections:
 - `data/raw/advisories/<plugin_id>.advisories.real.jsonl` — plugin advisories (`collect advisories --real`)
 - `data/raw/github/<plugin_id>.*.json` — raw GitHub API payloads (`collect github` / `collect enrich --only github`)
 - `data/raw/healthscore/plugins/<plugin_id>.healthscore.json` — per-plugin health score records (`collect healthscore` / `collect enrich --only healthscore`)
+- `data/raw/jenkins_stats/<plugin_id>.stats.json` — monthly installation trends from stats.jenkins.io, true history to 2008 (`collect installstats`)
 - `data/raw/gharchive/windows/<start>_<end>.gharchive.jsonl` — historical GH Archive window outputs (`collect gharchive`)
 - `data/raw/gharchive/plugins/<plugin_id>.gharchive.jsonl` — per-plugin historical GH Archive timelines (`collect gharchive`)
 
@@ -72,7 +73,10 @@ models train on:
   (contributor turnover/churn/concentration), all documented in
   `data/raw/gharchive/README.md`; and `swhdelta_*` (visit-to-visit deltas
   and governance-adoption events; documented in
-  `data/raw/software_heritage_athena/README.md`). Every family is as-of the
+  `data/raw/software_heritage_athena/README.md`); and `installs_*`
+  (install-base scale/trend/rank from stats.jenkins.io monthly history,
+  collected by `canary collect installstats`; documented in
+  `data/raw/jenkins_stats/README.md`). Every family is as-of the
   observation month and emits no missing values.
 
 Column-level documentation lives beside each source: advisory features in

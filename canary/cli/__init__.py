@@ -31,6 +31,7 @@ from canary.cli.collect import (
     _cmd_collect_gharchive,  # noqa: F401
     _cmd_collect_github,  # noqa: F401
     _cmd_collect_healthscore,  # noqa: F401
+    _cmd_collect_installstats,  # noqa: F401
     _cmd_collect_plugin,  # noqa: F401
     _cmd_collect_registry,  # noqa: F401
     _cmd_collect_software_heritage,  # noqa: F401

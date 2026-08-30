@@ -12,6 +12,7 @@ from canary.cli._common import _iter_registry_plugin_ids, _nonempty, bulk_collec
 from canary.collectors.gharchive_history import collect_gharchive_history_real
 from canary.collectors.github_plugin import collect_github_plugin_real
 from canary.collectors.healthscore import collect_health_scores
+from canary.collectors.install_stats import collect_install_stats
 from canary.collectors.jenkins_advisories import collect_advisories_real, collect_advisories_sample
 from canary.collectors.plugin_snapshot import collect_plugin_snapshot
 from canary.collectors.plugins_registry import (
@@ -234,6 +235,19 @@ def _cmd_collect_healthscore(args: argparse.Namespace) -> int:
         data_dir=args.data_dir,
         timeout_s=float(args.timeout_s),
         overwrite=bool(args.overwrite),
+    )
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _cmd_collect_installstats(args: argparse.Namespace) -> int:
+    result = collect_install_stats(
+        data_dir=args.data_dir,
+        registry_path=args.registry_path,
+        sleep_s=float(args.sleep),
+        overwrite=bool(args.overwrite),
+        max_plugins=int(args.max_plugins) if args.max_plugins is not None else None,
+        timeout_s=float(args.timeout_s),
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0
@@ -648,6 +662,45 @@ def register(subparsers: Any) -> None:
         help="Overwrite existing healthscore files",
     )
     healthscore.set_defaults(func=_cmd_collect_healthscore)
+
+    installstats = collect_subparsers.add_parser(
+        "installstats",
+        help=(
+            "Collect per-plugin monthly installation trends (true history "
+            "back to 2008) from stats.jenkins.io"
+        ),
+    )
+    installstats.add_argument(
+        "--data-dir",
+        default="data/raw",
+        help="Raw data root (writes jenkins_stats/ beneath this)",
+    )
+    installstats.add_argument(
+        "--registry-path",
+        default="data/raw/registry/plugins.jsonl",
+        help="Registry jsonl listing the plugins to collect",
+    )
+    installstats.add_argument(
+        "--sleep",
+        default=0.2,
+        help="Seconds to sleep between requests (be gentle; static file host)",
+    )
+    installstats.add_argument(
+        "--timeout-s",
+        default=30.0,
+        help="Network timeout per request",
+    )
+    installstats.add_argument(
+        "--max-plugins",
+        default=None,
+        help="Stop after this many registry plugins (smoke tests)",
+    )
+    installstats.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Re-fetch plugins that already have a stats file (refresh run)",
+    )
+    installstats.set_defaults(func=_cmd_collect_installstats)
 
     software_heritage = collect_subparsers.add_parser(
         "software-heritage",

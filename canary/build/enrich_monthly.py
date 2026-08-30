@@ -42,6 +42,13 @@ without re-running the monthly build (and without any new data collection):
     commits) and governance-adoption events (``has_security_md`` flipping
     on, etc.) from the per-plugin Athena visit files.
 
+``installs_*``
+    Install-base scale, trend, and rank from stats.jenkins.io monthly
+    installation history (collected by ``canary collect installstats``) —
+    the demand-side channel. Publication-lag aware: observation month T
+    uses the series only through T-1, since month T's figures publish
+    after T ends.
+
 Encoding convention (deliberate — see praxis Section 4.4.6 on imputation
 semantics): these families emit NO missing values. A "never happened yet"
 recency is encoded as the cap value (``ADVHIST_MONTHS_CAP`` months /
@@ -58,7 +65,7 @@ import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +82,13 @@ GHTEXT_DAYS_CAP = 3650
 CONTAGION_MONTHS_CAP = 120
 CONTAGION_WINDOW_MONTHS = 24  # trailing window defining an "active maintainer"
 SWHDELTA_DAYS_CAP = 3650
+
+# installs_*: stats.jenkins.io publishes month M's numbers shortly AFTER M
+# ends, so at scoring time (the first of T+1) month T's figure is typically
+# not yet available. Deployment-honest features for observation month T
+# therefore use the series only through T-1.
+INSTALLS_PUBLICATION_LAG_MONTHS = 1
+INSTALLS_GROWTH_CAP = 10.0  # +1000%; relative growth is clamped to [-1, cap]
 
 # Case-insensitive security vocabulary for ghtext_*. Deliberately narrow:
 # generic words like "fix" or "bug" would swamp the signal with noise.
@@ -331,6 +345,151 @@ def build_ghclock_features(
             )
         features["ghclock_has_events"] = any_event
         out[(plugin_id, month)] = features
+    return out
+
+
+# ---------------------------------------------------------------------------
+# installs_* — Jenkins install statistics (stats.jenkins.io monthly history)
+# ---------------------------------------------------------------------------
+
+
+def _shift_month(key: tuple[int, int], months_back: int) -> tuple[int, int]:
+    year, month = key
+    month -= months_back
+    while month < 1:
+        year, month = year - 1, month + 12
+    return (year, month)
+
+
+def collect_install_series(
+    stats_dir: str | Path,
+) -> dict[str, list[tuple[tuple[int, int], int, float]]]:
+    """
+    Read ``<plugin>.stats.json`` files collected by
+    ``canary collect installstats`` and return, per plugin, an ascending list
+    of (month key, installation count, install-share percent). Timestamps in
+    the source are epoch milliseconds (UTC, first of the month).
+    """
+    from datetime import datetime
+
+    out: dict[str, list[tuple[tuple[int, int], int, float]]] = {}
+    paths = sorted(Path(stats_dir).glob(f"*{'.stats.json'}"))
+    if not paths:
+        raise FileNotFoundError(f"No .stats.json files found under {stats_dir}")
+    for path in paths:
+        plugin_id = path.name[: -len(".stats.json")]
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        installations = payload.get("installations")
+        if not isinstance(installations, dict):
+            continue
+        percentages = payload.get("installationsPercentage")
+        percentages = percentages if isinstance(percentages, dict) else {}
+        series: list[tuple[tuple[int, int], int, float]] = []
+        for ts_ms, count in installations.items():
+            try:
+                when = datetime.fromtimestamp(int(ts_ms) / 1000.0, tz=UTC)
+                count_i = int(count)
+            except (TypeError, ValueError, OSError):
+                continue
+            try:
+                pct = float(percentages.get(ts_ms) or 0.0)
+            except (TypeError, ValueError):
+                pct = 0.0
+            series.append(((when.year, when.month), count_i, pct))
+        if series:
+            out[plugin_id] = sorted(series)
+    return out
+
+
+def build_installs_features(
+    rows: list[dict[str, Any]],
+    series: dict[str, list[tuple[tuple[int, int], int, float]]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """
+    Install-base (adoption) features per (plugin_id, month) — the demand-side
+    channel: every other family measures the supply side (maintainer
+    activity, advisories, repo state); this measures who is running the
+    plugin. Deployment-honest: observation month T uses the series only
+    through T - INSTALLS_PUBLICATION_LAG_MONTHS, because month T's figures
+    publish after T ends. Historical values are published once and never
+    restated, so there is no embargo interaction.
+    """
+    import bisect
+
+    # Ecosystem-wide sorted counts per stats month, for percentile ranks.
+    counts_by_month: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for plugin_series in series.values():
+        for month_key, count, _pct in plugin_series:
+            counts_by_month[month_key].append(count)
+    for counts in counts_by_month.values():
+        counts.sort()
+
+    def _rank_pct(month_key: tuple[int, int], count: int) -> float:
+        counts = counts_by_month.get(month_key, [])
+        if not counts:
+            return 0.0
+        return round(bisect.bisect_right(counts, count) / len(counts), 4)
+
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        plugin_id = str(row.get("plugin_id") or "")
+        month = _get_month_value(row)
+        target = _shift_month(_parse_month_key(month), INSTALLS_PUBLICATION_LAG_MONTHS)
+        plugin_series = series.get(plugin_id, [])
+        months = [m for m, _c, _p in plugin_series]
+        idx = bisect.bisect_right(months, target) - 1
+
+        def _value_at_or_before(
+            when: tuple[int, int],
+            *,
+            _months=months,
+            _series=plugin_series,
+        ) -> tuple[tuple[int, int], int] | None:
+            pos = bisect.bisect_right(_months, when) - 1
+            if pos < 0:
+                return None
+            return _series[pos][0], _series[pos][1]
+
+        def _growth(months_back: int, current: int, *, _target=target) -> float:
+            prior = _value_at_or_before(_shift_month(_target, months_back))
+            if prior is None or prior[1] <= 0 or current <= 0:
+                return 0.0
+            return round(max(-1.0, min(current / prior[1] - 1.0, INSTALLS_GROWTH_CAP)), 4)
+
+        if idx < 0:
+            out[(plugin_id, month)] = {
+                "installs_has_data": False,
+                "installs_count": 0,
+                "installs_log10_count": 0.0,
+                "installs_pct": 0.0,
+                "installs_rank_pct": 0.0,
+                "installs_growth_3m": 0.0,
+                "installs_growth_12m": 0.0,
+                "installs_peak_ratio": 0.0,
+                "installs_rank_delta_12m": 0.0,
+                "installs_months_of_data": 0,
+            }
+            continue
+
+        stats_month, count, pct = plugin_series[idx]
+        peak = max(c for _m, c, _p in plugin_series[: idx + 1])
+        rank_now = _rank_pct(stats_month, count)
+        prior_12 = _value_at_or_before(_shift_month(target, 12))
+        rank_prior = _rank_pct(prior_12[0], prior_12[1]) if prior_12 is not None else None
+        out[(plugin_id, month)] = {
+            "installs_has_data": True,
+            "installs_count": count,
+            "installs_log10_count": round(math.log10(count + 1), 4),
+            "installs_pct": round(pct, 4),
+            "installs_rank_pct": rank_now,
+            "installs_growth_3m": _growth(3, count),
+            "installs_growth_12m": _growth(12, count),
+            "installs_peak_ratio": round(count / peak, 4) if peak > 0 else 0.0,
+            "installs_rank_delta_12m": (
+                round(rank_now - rank_prior, 4) if rank_prior is not None else 0.0
+            ),
+            "installs_months_of_data": idx + 1,
+        }
     return out
 
 
@@ -813,7 +972,7 @@ def build_swhdelta_features(
 
 
 EVENT_FAMILIES = ("ghclock", "ghtext", "contagion", "ghdyn")
-ALL_FAMILIES = ("advhist",) + EVENT_FAMILIES + ("swhdelta",)
+ALL_FAMILIES = ("advhist",) + EVENT_FAMILIES + ("swhdelta", "installs")
 
 
 def build_family_features(
@@ -822,6 +981,7 @@ def build_family_features(
     families: tuple[str, ...],
     events_dir: str | Path | None,
     swh_dir: str | Path | None,
+    installs_dir: str | Path | None = None,
 ) -> dict[str, dict[tuple[str, str], dict[str, Any]]]:
     """
     Compute the requested feature families for *rows* and return them keyed
@@ -852,6 +1012,9 @@ def build_family_features(
 
     if "swhdelta" in families and swh_dir is not None:
         out["swhdelta"] = build_swhdelta_features(rows, collect_swh_visits(swh_dir))
+
+    if "installs" in families and installs_dir is not None:
+        out["installs"] = build_installs_features(rows, collect_install_series(installs_dir))
     return out
 
 
@@ -860,6 +1023,7 @@ def enrich_rows(
     *,
     events_dir: str | Path | None,
     swh_dir: str | Path | None = None,
+    installs_dir: str | Path | None = None,
     families: tuple[str, ...] = ALL_FAMILIES,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
@@ -869,7 +1033,11 @@ def enrich_rows(
     *events_dir* given yields advhist + all event families.
     """
     by_family = build_family_features(
-        rows, families=families, events_dir=events_dir, swh_dir=swh_dir
+        rows,
+        families=families,
+        events_dir=events_dir,
+        swh_dir=swh_dir,
+        installs_dir=installs_dir,
     )
 
     enriched: list[dict[str, Any]] = []

@@ -17,6 +17,8 @@ no-missing-values encoding):
     contagion_  shared-maintainer graph, rebuilt as-of each month
     ghdyn_      contributor turnover / churn / concentration
     swhdelta_   Software Heritage visit-to-visit deltas + governance adoption
+    installs_   Jenkins install-base scale/trend/rank (stats.jenkins.io;
+                needs a prior `canary collect installstats` run)
 
 All four event families share a single pass over the events directory. No
 family emits missing values: "never" is an explicit cap plus a has-* flag,
@@ -80,6 +82,7 @@ DEFAULT_IN_PATH = "data/processed/features/plugins.monthly.labeled.jsonl"
 DEFAULT_OUT_PATH = "data/processed/features/plugins.monthly.labeled.enriched.jsonl"
 DEFAULT_EVENTS_DIR = "data/raw/gharchive/normalized-events"
 DEFAULT_SWH_DIR = "data/raw/software_heritage_athena"
+DEFAULT_INSTALLS_DIR = "data/raw/jenkins_stats"
 
 
 def _stream_jsonl(path: Path):
@@ -131,6 +134,14 @@ def main() -> int:
         help="directory of <plugin>.swh_athena_visits.jsonl files (for swhdelta_*)",
     )
     parser.add_argument(
+        "--installs-dir",
+        default=DEFAULT_INSTALLS_DIR,
+        help=(
+            "directory of <plugin>.stats.json files from `canary collect "
+            "installstats` (for installs_*)"
+        ),
+    )
+    parser.add_argument(
         "--families",
         default=",".join(ALL_FAMILIES),
         help=f"comma-separated subset of: {','.join(ALL_FAMILIES)} (default: all)",
@@ -156,6 +167,27 @@ def main() -> int:
     if args.skip_ghclock:
         families = tuple(f for f in families if f not in EVENT_FAMILIES)
 
+    # swhdelta_/installs_ need their source data on disk. When such a family
+    # is only present via the everything-by-default value, a missing source
+    # downgrades to a warning so the tool keeps working on checkouts without
+    # that collection; naming the family explicitly with --families makes
+    # the absence a hard error instead.
+    families_explicit = args.families != ",".join(ALL_FAMILIES)
+    sourced = (
+        ("swhdelta", args.swh_dir, "*.swh_athena_visits.jsonl", "the SWH Athena collection"),
+        ("installs", args.installs_dir, "*.stats.json", "`canary collect installstats`"),
+    )
+    for family, source_dir, pattern, hint in sourced:
+        if family not in families or any(Path(source_dir).glob(pattern)):
+            continue
+        if families_explicit:
+            raise SystemExit(
+                f"{family} family requested but {source_dir} has no {pattern} files — "
+                f"run {hint} first."
+            )
+        print(f"NOTE: skipping {family}_* (no {pattern} under {source_dir}; needs {hint}).")
+        families = tuple(f for f in families if f != family)
+
     t0 = time.time()
     print(f"Pass 1: scanning {in_path} for the advisory calendar …")
     minimal = _collect_minimal_rows(in_path)
@@ -169,6 +201,7 @@ def main() -> int:
         families=families,
         events_dir=args.events_dir if needs_events else None,
         swh_dir=args.swh_dir if "swhdelta" in families else None,
+        installs_dir=args.installs_dir if "installs" in families else None,
     )
 
     # Second streaming pass: merge and write row by row. The output goes to a

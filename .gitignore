@@ -35,6 +35,8 @@ data/tmp*/**
 !data/processed/models/.gitkeep
 !data/cache/**/.gitkeep
 !data/raw/advisories/
+!data/raw/jenkins_stats/
+!data/raw/jenkins_stats/.gitkeep
 !data/raw/plugins/
 !data/raw/healthscore/
 !data/raw/healthscore/plugins/
