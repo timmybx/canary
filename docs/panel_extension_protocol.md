@@ -148,11 +148,29 @@ change is a modeling change by definition) and logged in the changelog
 below. Anything that alters development-fold numbers is a modeling change
 and is out of scope until after the praxis freeze.
 
-## 7. To be recorded at freeze (before any extension fold runs)
+## 7. Recorded at freeze (before any extension fold runs)
 
-- Development-era sweep results (17 configurations) and the champion +
-  runner-up with their pooled metrics: _pending the grid runs._
-- Freeze commit hash of this repository: _pending._
+**Recorded 2026-09-01.** The declared development sweep (19 configurations,
+13 embargoed rolling folds, 53,378 pooled test rows / 760 positives, 4,106
+test rows per fold in every run) is complete. Under the §2.7 rule (best
+pooled embargoed ROC-AUC):
+
+- **Champion:** `ghclock_,ghdyn_` logistic — pooled ROC 0.6381, AP 0.0308,
+  lift 2.16×, mean P@25 6.5%; fold floor 0.479 (10/13 folds ≥ 0.55).
+- **Runner-up:** `ghclock_,installs_` xgboost — pooled ROC 0.6319, AP
+  0.0253, lift 1.78×; fold floor 0.578 (13/13 folds ≥ 0.55).
+- **Baseline:** `ghclock_`-only logistic — pooled ROC 0.6275, AP 0.0273,
+  lift 1.92×; fold floor 0.465 (10/13).
+- Context, not an OOT slot: `ghclock_,ghdyn_,installs_` xgboost — pooled
+  ROC 0.6311, lift 1.89×, and the sweep's best fold floor (0.591) and
+  fold-mean (0.654); reported in the sweep table as the stability leader.
+
+Negative results retained in full (all below chance alone: advhist_ 0.435,
+ghtext_ 0.491, swhdelta_ 0.474; contagion_ ≈ chance at 0.551 and dilutive
+in every combination; the five-family pool at 0.551 under xgboost).
+
+- Freeze commit hash of this repository: _to be filled by the commit that
+  includes this §7 record (the working tree's v0.1.16 commit)._
 - Extended panel row count (new `EXPECTED_ROWS`): _pending collection._
 
 ## 8. Schedule and external constraints
@@ -177,3 +195,17 @@ and is out of scope until after the praxis freeze.
   result, where ghclock_ghdyn_logistic leads and ghclock_only_logistic is
   runner-up; the three installs_ runs remain to complete the declared sweep
   before §7 is recorded.
+- 2026-09-01 — second-stage development sweep declared (pre-collection, OOT
+  holdout untouched): the 17-config sweep is complete (installs_ results:
+  installs_xgb 0.568; ghclock_installs_xgb 0.632, 13/13 folds ≥ 0.55;
+  ghclock_installs_logistic 0.620). Because ghdyn_ and installs_ are the
+  only two additive families and were never combined, two further
+  configurations are added — `ghclock_,ghdyn_,installs_` under xgboost and
+  logistic — making the declared development sweep 19 configurations. The
+  §2.7 champion rule applies unchanged over all 19; the sweep size is
+  reported as 19 wherever the champion is cited.
+- 2026-09-01 (later) — sweep complete; §7 recorded; MODELING FREEZE in
+  effect. Both pre-stated triple-combo predictions held (xgb triple ≈ tree
+  ceiling ~0.63 with the sweep's best stability; logistic triple inherits
+  the 2025 install-drift collapse). From here, only the §3 collection, the
+  §4 OOT runs, and §6 data-integrity fixes.

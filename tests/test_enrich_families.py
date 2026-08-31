@@ -434,6 +434,12 @@ def test_enrich_cli_all_six_families(
             str(events_dir),
             "--swh-dir",
             str(swh_dir),
+            # Explicit family list keeps the test hermetic: with the default
+            # ("all families"), a real data/raw/jenkins_stats/ collection in
+            # the working directory would add installs_ and break the
+            # six-family assertions below.
+            "--families",
+            "advhist,ghclock,ghtext,contagion,ghdyn,swhdelta",
         ],
     )
     assert tool.main() == 0

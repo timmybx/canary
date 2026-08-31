@@ -264,6 +264,10 @@ def test_enrich_cli_default_families_skip_missing_installs_dir(
             str(tmp_path / "out.jsonl"),
             "--installs-dir",
             str(tmp_path / "does-not-exist"),
+            # Hermetic: point swhdelta at an empty dir too, so a real SWH
+            # collection in the working directory can't leak into the test.
+            "--swh-dir",
+            str(tmp_path / "no-swh"),
             "--skip-ghclock",
         ],
     )
