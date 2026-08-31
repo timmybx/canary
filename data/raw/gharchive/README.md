@@ -175,8 +175,8 @@ can be scaled if needed.
 | `gharchive_dependency_bump_events` | PRs or issues related to dependency updates (Dependabot PRs, "bump" commits, Renovate). Alfadel et al. (2023) found that projects using automated dependency tooling update dependencies 1.6× more frequently, directly reducing their vulnerability exposure window. |
 | `gharchive_pr_merge_time_p50_hours` | Median hours from PR creation to merge. Zhang et al. (2022) found in a large-scale study that the same-user factor (whether contributor and integrator are the same person) is one of the strongest predictors of merge latency — short times can indicate either efficiency or lack of review. |
 | `gharchive_pr_merge_time_p90_hours` | 90th percentile of PR merge time. The tail captures the slowest PRs; a high p90 may indicate security-sensitive PRs are getting stuck in review. |
-| `gharchive_issue_close_time_p50_hours` | Median hours from issue creation to close. Fast issue resolution suggests an engaged maintainer team; slow times may indicate security reports go unacknowledged. |
-| `gharchive_issue_close_time_p90_hours` | 90th percentile of issue close time. The tail captures severely delayed responses, which is particularly concerning if those issues contain vulnerability reports. |
+| `gharchive_issue_close_time_p50_hours` | Median hours from issue creation to close. Fast issue resolution suggests an engaged maintainer team; slow times may indicate security reports go unacknowledged. Bühlmann & Ghafari (2022) found across 3,493 GitHub security issues that a fast first response is associated with significantly shorter overall close times; Yang-Smith & Abdellatif (2025) reported that median response time drops from 151 days for low-severity CVEs to 78 days for critical ones, confirming maintainer responsiveness as a security health signal. |
+| `gharchive_issue_close_time_p90_hours` | 90th percentile of issue close time. The tail captures severely delayed responses, which is particularly concerning if those issues contain vulnerability reports. Bühlmann & Ghafari (2022) documented cases where security-related issues remained unresolved for extended periods despite active repositories, motivating the use of tail metrics to capture worst-case response behavior. |
 
 ---
 
@@ -282,10 +282,10 @@ value depends on advisories published after the observation month.
 |-------|----------------------|
 | `contagion_active_maintainers` | Size of the plugin's current active-maintainer set. |
 | `contagion_shared_maintainers` | How many of those maintainers are also active on other plugins — the plugin's attachment to the wider graph. |
-| `contagion_neighbor_count` | Plugins sharing an active maintainer. A larger neighborhood means more paths for correlated risk exposure (shared practices, shared attention, shared code idioms). |
-| `contagion_neighbors_hit_12m` | Neighbors with a security advisory in the trailing 12 months — does risk cluster along the maintainer graph? |
-| `contagion_neighbors_hit_24m` | The 24-month companion window. |
-| `contagion_months_since_neighbor_advisory` | Months since any current neighbor's most recent advisory (120 = never; see `contagion_has_neighbor_advisory`). |
+| `contagion_neighbor_count` | Plugins sharing an active maintainer. A larger neighborhood means more paths for correlated risk exposure (shared practices, shared attention, shared code idioms). Schueller & Wachs (2022) modeled shared-developer failure-risk propagation in the Rust ecosystem and found that interconnected social and technical networks amplify vulnerability spread; Zimmermann et al. (2019) showed that in npm a small number of maintainer accounts collectively controlled the majority of popular packages, creating correlated risk channels across the dependency graph. |
+| `contagion_neighbors_hit_12m` | Neighbors with a security advisory in the trailing 12 months — does risk cluster along the maintainer graph? Arvanitis et al. (2022) conducted a systematic analysis of the event-stream incident and demonstrated how a malicious maintainer account takeover propagated to millions of downstream packages; the neighbor-hit signal operationalizes this contagion channel at the ecosystem level. |
+| `contagion_neighbors_hit_24m` | The 24-month companion window. Extends neighbor-hit coverage over a longer horizon, capturing risks that may lie dormant before manifesting, as illustrated by the multi-month gap between the event-stream maintainer takeover and its malicious activation (Arvanitis et al., 2022). |
+| `contagion_months_since_neighbor_advisory` | Months since any current neighbor's most recent advisory (120 = never; see `contagion_has_neighbor_advisory`). Encodes the recency of neighbor risk exposure as a continuous clock, motivated by the contagion dynamics modeled by Schueller & Wachs (2022). |
 | `contagion_has_neighbors` | Whether the plugin shares an active maintainer with any other plugin this month. |
 | `contagion_has_neighbor_advisory` | Whether any current neighbor has ever had an in-panel advisory as of this month; companion flag for the capped recency. |
 
@@ -303,12 +303,12 @@ literature ties to knowledge loss and review-quality risk.
 |-------|----------------------|
 | `ghdyn_active_actors_3m` | Distinct human actors in the trailing 3 months. |
 | `ghdyn_active_actors_12m` | Distinct human actors in the trailing 12 months — the engaged pool. |
-| `ghdyn_new_actors_12m` | Actors whose first-ever observed activity on this plugin falls within the trailing 12 months. Onboarding of unfamiliar contributors changes review dynamics. |
+| `ghdyn_new_actors_12m` | Actors whose first-ever observed activity on this plugin falls within the trailing 12 months. Onboarding of unfamiliar contributors changes review dynamics. Foucault et al. (2015) found in a large-scale study of open-source projects that an influx of newcomers negatively impacts software quality, as new contributors lack the codebase familiarity needed to identify security-relevant regressions during code review. |
 | `ghdyn_departed_actors_12m` | Actors active in months 13–24 back with no activity in the trailing 12 months — contributor loss. |
-| `ghdyn_turnover_rate_12m` | Departed / prior-year actors (0 when none). Normalized churn — a proxy for maintainer knowledge loss. |
+| `ghdyn_turnover_rate_12m` | Departed / prior-year actors (0 when none). Normalized churn — a proxy for maintainer knowledge loss. Nassif & Robillard (2017) found that developer turnover leads to measurable knowledge loss in software projects; Russo Latona et al. (2024) quantified a sustained ~20% productivity drop after core developer dropout in OSS projects, a deficit that correlates with reduced security-issue resolution capacity. |
 | `ghdyn_events_12m` | Total human-attributed events in the trailing 12 months. |
-| `ghdyn_top_actor_share_12m` | Share of those events from the single most active actor — a bus-factor / concentration measure. |
-| `ghdyn_single_actor_12m` | Exactly one human actor active in the trailing 12 months — the classic single-maintainer situation. |
+| `ghdyn_top_actor_share_12m` | Share of those events from the single most active actor — a bus-factor / concentration measure. Nourry et al. (2024) found that 89% of OSS projects lost their core team at least once; Fan et al. (2025) showed that the majority of Rust packages have a single core developer whose departure leads to deprecation. Yang-Smith & Abdellatif (2025) specifically identified contributor absence as correlated with CVE incidence in Maven packages. |
+| `ghdyn_single_actor_12m` | Exactly one human actor active in the trailing 12 months — the classic single-maintainer situation. Fan et al. (2025) found that the majority of packages in the Rust ecosystem are maintained by a single core developer and that their departure is the primary predictor of package deprecation; Nourry et al. (2024) reported a ~70% abandonment rate within three years of core team loss across OSS projects broadly. |
 | `ghdyn_has_actors` | Whether any human actor has ever been observed as of this month; companion flag for the counts. |
 
 ---
@@ -425,18 +425,39 @@ vulnerabilities live in the code? A large-scale empirical measurement study on
 FOSS vulnerability lifetimes. *Proceedings of the 31st USENIX Security Symposium*,
 4187–4204. https://www.usenix.org/system/files/sec22-alexopoulos.pdf
 
-Claes, M., Mäntylä, M. V., Kuutila, M., & Adams, B. (2018). Do programmers work at night or
-during the weekend? *Proceedings of the 40th International Conference on Software
+Arvanitis, I., Spinellis, D., & Louridas, P. (2022). A systematic analysis of the
+event-stream incident. *Proceedings of the 19th International Conference on Mining
+Software Repositories (MSR 2022)*. https://doi.org/10.1145/3517208.3523753
+
+Bühlmann, N., & Ghafari, M. (2022). How do developers deal with security issue reports
+on GitHub? *Proceedings of the 37th ACM/SIGAPP Symposium on Applied Computing
+(SAC 2022)*, 1580–1589. https://doi.org/10.1145/3477314.3507123
+
+Claes, M., Mäntylä, M. V., Kuutila, M., & Adams, B. (2018). Do programmers work at night or during the weekend? *Proceedings of the 40th International Conference on Software
 Engineering (ICSE 2018)*, 705–716. https://doi.org/10.1145/3180155.3180193
 
-Thompson, C. (2017). *Large-scale analysis of modern code review practices and
-software security in open source software* (Technical Report No. UCB/EECS-2017-217). University of
-California, Berkeley.
-https://www2.eecs.berkeley.edu/Pubs/TechRpts/2017/EECS-2017-217.pdf
+Fan, M., Cheng, Y., & Lyu, M. (2025). Core developer turnover in the Rust package
+ecosystem: Prevalence, impact, and awareness. *Proceedings of the 47th International
+Conference on Software Engineering (ICSE 2025)*.
+https://doi.org/10.1145/3729392
+
+Foucault, M., Teyton, C., Lo, D., Blanc, X., & Falleri, J.-R. (2015). On the impact of
+developer turnover on quality in open-source software. *Proceedings of the 2015
+ACM/IEEE International Symposium on Empirical Software Engineering and Measurement
+(ESEM 2015)*. https://doi.org/10.1145/2786805.2786870
 
 Goldman, I., & Landsman, I. (2024). *50 shades of vulnerabilities: Uncovering
 flaws in open-source vulnerability disclosures*. Aqua Nautilus Research.
 https://www.aquasec.com/blog/50-shades-of-vulnerabilities-uncovering-flaws-in-open-source-vulnerability-disclosures/
+
+Nassif, M., & Robillard, M. P. (2017). Revisiting turnover-induced knowledge loss in
+software projects. *Proceedings of the 33rd IEEE International Conference on Software
+Maintenance and Evolution (ICSME 2017)*, 261–271.
+https://doi.org/10.1109/ICSME.2017.64
+
+Nourry, O., Kula, R. G., Hata, H., & Matsumoto, K. (2024). Myth: The loss of core
+developers is a critical issue for OSS communities. arXiv preprint arXiv:2412.00313.
+https://doi.org/10.48550/arxiv.2412.00313
 
 Przymus, P., & Durieux, T. (2025). *Wolves in the repository: A software engineering
 analysis of the XZ Utils supply chain attack*. Presented at MSR 2025. arXiv preprint arXiv:2504.17473.
@@ -446,10 +467,33 @@ Panter, S. K., & Eisty, N. U. (2026). *MALTA: Maintenance-aware technical lag
 estimation to address software abandonment*. arXiv preprint arXiv:2603.10265.
 https://arxiv.org/abs/2603.10265
 
+Russo Latona, G., Tamburri, D. A., & Van Den Heuvel, W.-J. (2024). Shock! Quantifying
+the impact of core developers' dropout on the productivity of OSS projects. *Companion
+Proceedings of the ACM on Web Conference 2024 (WWW 2024)*.
+https://doi.org/10.1145/3589335.3651559
+
+Schueller, W., & Wachs, J. (2022). Modeling interconnected social and technical risks in
+open source software ecosystems. arXiv preprint arXiv:2205.04268.
+https://doi.org/10.48550/arXiv.2205.04268
+
+Thompson, C. (2017). *Large-scale analysis of modern code review practices and
+software security in open source software* (Technical Report No. UCB/EECS-2017-217). University of California, Berkeley.
+https://www2.eecs.berkeley.edu/Pubs/TechRpts/2017/EECS-2017-217.pdf
+
 Xu, Y., He, R., Ye, H., Zhou, M., & Wang, H. (2025). *Predicting abandonment of
 open source software projects with an integrated feature framework*. arXiv preprint
 arXiv:2507.21678. https://arxiv.org/abs/2507.21678
 
+Yang-Smith, C., & Abdellatif, A. (2025). Tracing vulnerabilities in Maven: A study of CVE
+lifecycles and dependency networks. *2025 IEEE/ACM 22nd International Conference on Mining
+Software Repositories (MSR)*, 349–353.
+https://doi.org/10.1109/MSR66628.2025.00064
+
 Zhang, X., Yu, Y., Rastogi, A., Zanetti, A., & Hassan, A. E. (2022). Pull request
 latency explained: An empirical overview. *Empirical Software Engineering*, *27*(6),
 131. https://doi.org/10.1007/s10664-022-10172-1
+
+Zimmermann, M., Staicu, C.-A., Tenny, C., & Pradel, M. (2019). Small world with high risks:
+A study of security threats in the npm ecosystem. *Proceedings of the 28th USENIX Security
+Symposium*, 995–1010.
+https://www.usenix.org/system/files/sec19-zimmermann.pdf

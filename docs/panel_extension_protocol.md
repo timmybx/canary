@@ -107,6 +107,10 @@ on the expanding window through the month before the test start, embargoed
 as always. The runner-up configuration and the `ghclock_`-only logistic
 baseline are run identically (`oot_runnerup`, `oot_ghclock_logistic`) for
 context — declared here, so the OOT sweep is exactly three configurations.
+If the runner-up IS the `ghclock_`-only logistic baseline, the third slot
+goes to the best tree-model configuration from the development sweep
+(`oot_tree_reference`), so that the OOT evaluation always includes one
+stability reference alongside the pooled-metric leaders.
 
 Also reported: the full 16-fold curve (`--start 2023-05 --end 2025-11`) for
 the combined pooled number and the fold-by-fold trajectory across the
@@ -167,3 +171,9 @@ and is out of scope until after the praxis freeze.
 ## Changelog
 
 - 2026-08-30 — protocol created and committed (pre-collection).
+- 2026-08-31 — §4 clarified (pre-collection, no extension data exists yet):
+  when the runner-up coincides with the declared baseline, the third OOT
+  slot is the best tree-model configuration. Prompted by the 14-run grid
+  result, where ghclock_ghdyn_logistic leads and ghclock_only_logistic is
+  runner-up; the three installs_ runs remain to complete the declared sweep
+  before §7 is recorded.

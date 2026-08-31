@@ -73,13 +73,34 @@ absent from the stats site get zeros plus `installs_has_data = false`.
 
 | Field | Predictive rationale |
 |-------|----------------------|
-| `installs_count` | Reported installations at the most recent available stats month. The demand-side exposure measure: install base draws both attackers and security researchers (the H1 attention channel). |
+| `installs_count` | Reported installations at the most recent available stats month. The demand-side exposure measure: install base draws both attackers and security researchers (the H1 attention channel). Butler et al. (2025) found a moderate positive correlation between package popularity and security scrutiny in software ecosystems; Zimmermann et al. (2019) showed that in npm, a small number of highly popular packages were disproportionate targets for malicious maintainer account takeovers. |
 | `installs_log10_count` | log10(installations + 1) — the same scale on compressed dynamic range for linear models. |
-| `installs_pct` | Share of reporting Jenkins instances with the plugin installed — the count normalized by the reporting population. |
-| `installs_rank_pct` | Percentile of the plugin's count among all plugins with stats that month (0–1). Growth-invariant popularity: ranks stay comparable across years as the ecosystem itself grows and shrinks. |
+| `installs_pct` | Share of reporting Jenkins instances with the plugin installed — the count normalized by the reporting population. Scale-invariant complement to `installs_count`; both measure the popularity-driven exposure surface documented by Butler et al. (2025). |
+| `installs_rank_pct` | Percentile of the plugin's count among all plugins with stats that month (0–1). Growth-invariant popularity: ranks stay comparable across years as the ecosystem itself grows and shrinks. Provides ecosystem-relative standing complementary to absolute count; Zimmermann et al. (2019) found that relative ecosystem position is relevant to attacker targeting strategies. |
 | `installs_growth_3m` | Relative change vs. three months earlier (clamped to [−1, +10]; 0 when unknown). Short-horizon adoption momentum. |
-| `installs_growth_12m` | Relative change vs. twelve months earlier (same clamp). A shrinking install base is an abandonment-adjacent signal the activity clocks cannot see. |
-| `installs_peak_ratio` | Current count / historical peak (0–1]. Low values on a still-large base mark the legacy-decay archetype: widely deployed, fading attention. |
+| `installs_growth_12m` | Relative change vs. twelve months earlier (same clamp). A shrinking install base is an abandonment-adjacent signal the activity clocks cannot see. Avelino et al. (2019) found that sustained decline in external usage is a leading indicator of open-source project abandonment; Panter & Eisty (2026) demonstrated that maintenance-aware abandonment metrics substantially improve on version-lag-alone measures of vulnerability risk. |
+| `installs_peak_ratio` | Current count / historical peak (0–1]. Low values on a still-large base mark the legacy-decay archetype: widely deployed, fading attention. This decay pattern aligns with the abandonment trajectory described by Avelino et al. (2019) and the "stale but large installed base" risk profile highlighted by Panter & Eisty (2026). |
 | `installs_rank_delta_12m` | Change in percentile rank vs. twelve months earlier — the ecosystem moving toward or away from the plugin, independent of raw scale. |
 | `installs_months_of_data` | Monthly observations available as of scoring time. |
 | `installs_has_data` | Whether stats.jenkins.io has any history for the plugin as of scoring time; companion flag for the zero-filled values. |
+
+## References
+
+Avelino, G., Constantinou, E., Mens, T., & Serebrenik, A. (2019). On the abandonment and
+survival of open source projects: An empirical investigation. *Proceedings of the 13th
+ACM/IEEE International Symposium on Empirical Software Engineering and Measurement
+(ESEM 2019)*, 1–11. https://doi.org/10.1109/ESEM.2019.8870181
+
+Butler, A., O'Keeffe, D., & Dash, S. K. (2025). Links between package popularity,
+criticality, and security in software ecosystems. *Proceedings of the 32nd IEEE
+International Conference on Software Analysis, Evolution and Reengineering
+(SANER 2025 — Companion)*. https://doi.org/10.1109/saner-c66551.2025.00020
+
+Panter, S. K., & Eisty, N. U. (2026). *MALTA: Maintenance-aware technical lag
+estimation to address software abandonment*. arXiv preprint arXiv:2603.10265.
+https://arxiv.org/abs/2603.10265
+
+Zimmermann, M., Staicu, C.-A., Tenny, C., & Pradel, M. (2019). Small world with high
+risks: A study of security threats in the npm ecosystem. *Proceedings of the 28th
+USENIX Security Symposium*, 995–1010.
+https://www.usenix.org/system/files/sec19-zimmermann.pdf

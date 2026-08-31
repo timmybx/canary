@@ -369,7 +369,7 @@ longitudinal design, not a data quality issue.
 | `has_tests_directory` | bool | Presence of a `src/`, `tests/`, `test/`, or `spec/` directory suggests an automated test suite exists. Projects with tests tend to catch regressions and security issues earlier. |
 | `has_github_actions` | bool | A `workflows/` directory inside `.github/` indicates GitHub Actions CI. Rare before 2020; becomes common after 2021. The temporal variation in this signal is informative for the longitudinal study. |
 | `has_dependabot` | bool | A `dependabot.yml` file enables automated dependency update PRs. Alfadel et al. (2023) found that maintainers update dependencies 1.6× more frequently when using automated dependency tools, directly reducing the vulnerability exposure window. Rare before 2020; becomes common after 2021. |
-| `has_sonar_config` | bool | SonarQube/SonarCloud configuration (`sonar-project.properties`) indicates static analysis is part of the build process, which can catch security-relevant code patterns. |
+| `has_sonar_config` | bool | SonarQube/SonarCloud configuration (`sonar-project.properties`) indicates static analysis is part of the build process, which can catch security-relevant code patterns. Kim & Kim (2025) found in an empirical analysis of open-source software that SonarQube-based static analysis detects common vulnerability classes including hardcoded credentials and weak cryptography across a broad corpus of OSS projects. |
 | `has_snyk_config` | bool | A `.snyk` policy file indicates the project uses Snyk for dependency vulnerability scanning. |
 | `top_level_entry_count` | int | Number of entries in the repository root directory. A rough proxy for project complexity — very large or very small counts may indicate unusual project structure. |
 
@@ -437,9 +437,9 @@ flags) and deltas default to 0 when fewer than two visits exist.
 | `swhdelta_commits_delta` | Change in total commit count between the two most recent visits — observed development volume between snapshots. |
 | `swhdelta_commit_rate_per_month` | The commit delta normalized to a 30-day rate, so plugins with different visit spacing remain comparable. |
 | `swhdelta_security_fix_commits_delta` | Change in the count of security-fix-labeled commits between visits — a direct, if sparse, remediation-activity signal. |
-| `swhdelta_governance_adds` | Governance or tooling files adopted between the two most recent visits (SECURITY.md, Dependabot config, GitHub Actions, tests directory, …). |
+| `swhdelta_governance_adds` | Governance or tooling files adopted between the two most recent visits (SECURITY.md, Dependabot config, GitHub Actions, tests directory, …). Ayala et al. (2025) found that having a security contact point is the most commonly cited governance factor among OSS maintainers who experienced security incidents; Reid et al. (2025) found that GitHub issues referencing security-policy files closed a median of two days faster, indicating that governance adoption is associated with more engaged security attention. |
 | `swhdelta_governance_drops` | Governance or tooling files removed between the two most recent visits. |
-| `swhdelta_days_since_governance_add` | Days since the most recent visit at which any governance file flipped on. Governance adoption often follows — or invites — security attention. |
+| `swhdelta_days_since_governance_add` | Days since the most recent visit at which any governance file flipped on. Governance adoption often follows — or invites — security attention; Reid et al. (2025) provide direct empirical support, showing that security-policy adoption measurably accelerates community issue resolution. |
 | `swhdelta_has_visits` | Whether at least one visit exists as of this month; companion flag for the capped recencies. |
 | `swhdelta_has_prior_visit` | Whether at least two visits exist, so the delta fields are actual deltas rather than defaults. |
 | `swhdelta_has_governance_add` | Whether any governance adoption has ever been observed between visits as of this month. |
@@ -507,16 +507,8 @@ software maintainers on vulnerability management and platform security features*
 Proceedings of the 34th USENIX Security Symposium.
 https://www.usenix.org/system/files/usenixsecurity25-ayala.pdf
 
-Zhang, X., Yu, Y., Wang, T., Rastogi, A., & Wang, H. (2022). Pull request latency explained: An empirical overview. Empirical Software Engineering, 27, 126. https://doi.org/10.1007/s10664-022-10143-4
-
-Claes, M., Mäntylä, M. V., Kuutila, M., & Adams, B. (2018). Do programmers work at night or
-during the weekend? *Proceedings of the 40th International Conference on Software
+Claes, M., Mäntylä, M. V., Kuutila, M., & Adams, B. (2018). Do programmers work at night or during the weekend? *Proceedings of the 40th International Conference on Software
 Engineering (ICSE 2018)*, 705–716. https://doi.org/10.1145/3180155.3180193
-
-Thompson, C. (2017). *Large-scale analysis of modern code review practices and
-software security in open source software* (Technical Report No. UCB/EECS-2017-217).
-University of California, Berkeley.
-https://www2.eecs.berkeley.edu/Pubs/TechRpts/2017/EECS-2017-217.pdf
 
 Eyolfson, J., Tan, L., & Lam, P. (2011). Do time of day and developer experience
 affect commit bugginess? *Proceedings of the 8th Working Conference on Mining
@@ -527,9 +519,23 @@ Goldman, I., & Landsman, I. (2024). *50 shades of vulnerabilities: Uncovering
 flaws in open-source vulnerability disclosures*. Aqua Nautilus Research.
 https://www.aquasec.com/blog/50-shades-of-vulnerabilities-uncovering-flaws-in-open-source-vulnerability-disclosures/
 
+Kim, D. H., & Kim, H. K. (2025). Empirical analysis of security vulnerabilities in open
+source software using static analysis tools. *2025 IEEE Conference on Artificial
+Intelligence and Robotics Systems (CARS 2025)*.
+https://doi.org/10.1109/cars67163.2025.11337539
+
 Panter, S. K., & Eisty, N. U. (2026). *MALTA: Maintenance-aware technical lag
 estimation to address software abandonment*. arXiv preprint arXiv:2603.10265.
 https://arxiv.org/abs/2603.10265
+
+Reid, B., Sheriff, M., & Kula, R. G. (2025). An empirical study of security-policy related
+issues in open source projects. arXiv preprint arXiv:2510.05604.
+https://doi.org/10.48550/arxiv.2510.05604
+
+Thompson, C. (2017). *Large-scale analysis of modern code review practices and
+software security in open source software* (Technical Report No. UCB/EECS-2017-217).
+University of California, Berkeley.
+https://www2.eecs.berkeley.edu/Pubs/TechRpts/2017/EECS-2017-217.pdf
 
 Tian, Y., Zhang, Y., Stol, K.-J., Jiang, L., & Liu, H. (2023). Commit message
 matters: Investigating impact and evolution of commit message quality.
@@ -539,3 +545,5 @@ matters: Investigating impact and evolution of commit message quality.
 Xu, Y., He, R., Ye, H., Zhou, M., & Wang, H. (2025). *Predicting abandonment of
 open source software projects with an integrated feature framework*. arXiv preprint
 arXiv:2507.21678. https://arxiv.org/abs/2507.21678
+
+Zhang, X., Yu, Y., Wang, T., Rastogi, A., & Wang, H. (2022). Pull request latency explained: An empirical overview. Empirical Software Engineering, 27, 126. https://doi.org/10.1007/s10664-022-10143-4
