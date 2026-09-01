@@ -52,6 +52,10 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 def test_monthly_feature_small_helpers_cover_real_edge_cases() -> None:
     assert _is_bot_actor("") is False
     assert _is_bot_actor("release-drafter[bot]") is True
+    # Jenkins infra automation account (no "[bot]" suffix); first seen 2025-11,
+    # ran the Dec-2025 JIRA->GitHub issue migration across 155 plugin repos.
+    assert _is_bot_actor("jenkins-infra-bot") is True
+    assert _is_bot_actor("MarkEWaite") is False
     assert _text_blob_matches(None, _SECURITY_KEYWORDS) is False
     assert _text_blob_matches("urgent security fix for CVE", _SECURITY_KEYWORDS) is True
     assert _text_blob_matches("urgent hotfix release", _HOTFIX_KEYWORDS) is True

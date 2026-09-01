@@ -6,8 +6,8 @@ This project follows a lightweight adaptation of “Keep a Changelog”.
 (Research prototype: entries focus on features, data pipeline changes, and scoring behavior.)
 
 ## [Unreleased]
-
-(nothing yet)
+### Fixed
+- **`jenkins-infra-bot` classified as a bot actor.** Added to `_BOT_LOGINS` in `canary/build/monthly_features.py`. The account has no `[bot]` suffix, so the human/bot split used by `ghclock_human_push` and the `ghdyn_*` contributor features treated it as a person. It first appears in the GH Archive stream in 2025-11 and ran the Dec-2025 bulk JIRA→GitHub issue migration (17,642 issues opened across 155 plugin repos on 2025-12-01). Zero events exist for it in any 2018-01..2025-10 month, so every development-era feature value is unchanged (data-integrity correction under `docs/panel_extension_protocol.md` §6; see its changelog).
 
 ## [0.1.16] - 2026-09-01
 ### Added

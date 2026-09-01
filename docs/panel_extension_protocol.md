@@ -150,7 +150,7 @@ and is out of scope until after the praxis freeze.
 
 ## 7. Recorded at freeze (before any extension fold runs)
 
-**Recorded 2026-09-01.** The declared development sweep (19 configurations,
+**Recorded 2026-08-31.** The declared development sweep (19 configurations,
 13 embargoed rolling folds, 53,378 pooled test rows / 760 positives, 4,106
 test rows per fold in every run) is complete. Under the §2.7 rule (best
 pooled embargoed ROC-AUC):
@@ -169,8 +169,11 @@ Negative results retained in full (all below chance alone: advhist_ 0.435,
 ghtext_ 0.491, swhdelta_ 0.474; contagion_ ≈ chance at 0.551 and dilutive
 in every combination; the five-family pool at 0.551 under xgboost).
 
-- Freeze commit hash of this repository: _to be filled by the commit that
-  includes this §7 record (the working tree's v0.1.16 commit)._
+- Freeze commit: tag `v0.1.16`, hash
+  `eebc53f17b1c69c9efb3e30b1a9b213db16e5749` (contains this §7 record and
+  the complete frozen feature/tooling state; this hash line was added in
+  the immediately following commit, since a commit cannot contain its own
+  hash).
 - Extended panel row count (new `EXPECTED_ROWS`): _pending collection._
 
 ## 8. Schedule and external constraints
@@ -195,7 +198,7 @@ in every combination; the five-family pool at 0.551 under xgboost).
   result, where ghclock_ghdyn_logistic leads and ghclock_only_logistic is
   runner-up; the three installs_ runs remain to complete the declared sweep
   before §7 is recorded.
-- 2026-09-01 — second-stage development sweep declared (pre-collection, OOT
+- 2026-08-31 — second-stage development sweep declared (pre-collection, OOT
   holdout untouched): the 17-config sweep is complete (installs_ results:
   installs_xgb 0.568; ghclock_installs_xgb 0.632, 13/13 folds ≥ 0.55;
   ghclock_installs_logistic 0.620). Because ghdyn_ and installs_ are the
@@ -204,8 +207,63 @@ in every combination; the five-family pool at 0.551 under xgboost).
   logistic — making the declared development sweep 19 configurations. The
   §2.7 champion rule applies unchanged over all 19; the sweep size is
   reported as 19 wherever the champion is cited.
-- 2026-09-01 (later) — sweep complete; §7 recorded; MODELING FREEZE in
+- 2026-08-31 (later) — sweep complete; §7 recorded; MODELING FREEZE in
   effect. Both pre-stated triple-combo predictions held (xgb triple ≈ tree
   ceiling ~0.63 with the sweep's best stability; logistic triple inherits
   the 2025 install-drift collapse). From here, only the §3 collection, the
   §4 OOT runs, and §6 data-integrity fixes.
+- 2026-08-31 (later; pre-collection, no extension data exists yet) — §3
+  sequencing amendment, recorded before any collection: the §4 OOT runs
+  will execute on a panel whose Software Heritage inputs remain FROZEN at
+  their development-era values (the existing Athena visit files; swh_* and
+  swhdelta_ columns recomputed from them with unchanged semantics).
+  Rationale: none of the three declared OOT configurations includes any
+  SWH-derived feature prefix, so new SWH data cannot alter the OOT numbers;
+  extraction from the 2026-06-04 export proceeds on a parallel track and
+  feeds the praxis discussion and future work, not the OOT evaluation.
+  Additionally made explicit: the extended grid keeps the development-era
+  plugin universe (the frozen registry, 2,053 plugins), preserving the
+  4,106-rows-per-fold integrity gate; plugins registered after the
+  development era are out of cohort and disclosed as such. Advisor
+  sign-off on this amendment is a Sep 6 agenda item alongside the protocol
+  itself.
+- 2026-08-31 — date correction (no content changed): the §7 record and two
+  changelog entries above were previously dated 2026-09-01; they were written
+  late on 2026-08-31 US Mountain time and picked up the UTC date. Corrected to
+  match the freeze commit timestamp (`eebc53f`, 2026-08-31 10:20 −0600).
+- 2026-09-01 — §3 collection status and two post-freeze data events (recorded
+  BEFORE any OOT fold runs; no extension fold has been evaluated).
+  Collection: plugin snapshots and advisories refreshed (advisories through
+  2026-08-05; the five 2026 Jenkins plugin batches, 53 plugin-advisory
+  records, batch sizes matching jenkins.io exactly); GH Archive extended
+  2025-10 → 2026-06 at 100% sampling with the dev-era repo mapping
+  (0 of 340 sampled plugins changed repositories); install stats collected
+  2026-08-31. Plugin universe held at the frozen registry (2,053; one plugin,
+  keepSlaveOffline, removed from the update center since 2026-04 — its
+  dev-era snapshot retained). SWH extraction remains on the parallel track
+  per the 2026-08-31 amendment.
+  Event 1 — GH Archive per-repository capture collapses in 2026. Global
+  archive intake is unchanged (BigQuery `githubarchive.day.__TABLES__`:
+  3.3–3.8M rows/day in 2025-06 vs 3.0–3.9M/day in 2026-06), but captured
+  events for cohort repositories fall from ~7.5k/month (2025-08) to ~1.3k
+  (2026-06) with PR-opened events vanishing on core plugins (git-plugin:
+  9 PRs created on GitHub in 2026-06, 0 captured). Consequence: observation
+  months from ~2026-02 onward are collected but NOT evaluable and are
+  excluded from all reporting beyond coverage statistics; the declared OOT
+  window (through 2025-12) lies before the collapse. Calibration of the
+  2025-10..2025-12 months against GitHub's own PR counts is recorded here
+  when done: _pending_.
+  Event 2 — Dec-2025 JIRA→GitHub issue migration by `jenkins-infra-bot`:
+  17,642 issues opened across 155 cohort plugins on 2025-12-01 (plus ~95k
+  label events; smaller waves in 2025-11 and 2026-01). The account carries
+  no `[bot]` suffix and was absent from the frozen bot list, so `ghdyn_*`
+  would count it as a human contributor for those rows in the third OOT
+  fold. Correction (§6 data-integrity): `jenkins-infra-bot` added to
+  `_BOT_LOGINS`. Proof it cannot alter development-fold numbers: the account
+  has zero events in every 2018-01..2025-10 month of the normalized event
+  store (exhaustive grep), so all dev-era feature values are bit-identical;
+  re-validated by the gate-2b dev-fold regression run before any OOT run.
+  Not corrected (disclosed): the `ghclock_days_since_issue_opened` clock is
+  not actor-filtered and resets for the 155 migrated plugins; a fold-3
+  sensitivity excluding those plugins will be reported as a secondary,
+  descriptive number alongside the primary result.

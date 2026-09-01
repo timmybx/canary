@@ -100,6 +100,7 @@ _BOT_LOGINS: frozenset[str] = frozenset(
         "sonarcloud",
         "mergify",
         "semantic-release-bot",
+        "jenkins-infra-bot",
     }
 )
 
