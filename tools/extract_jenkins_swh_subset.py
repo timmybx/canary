@@ -224,10 +224,13 @@ def _sql_create_jenkins_visits(
     src_database: str,
     dest_database: str,
     dest_location: str,
+    visit_start: str = "2018-01-01",
+    visit_end: str = "2025-10-01",
 ) -> str:
     """
-    Extract one visit per plugin per calendar month for 2018-01-01 to
-    2025-10-01 (the dataset snapshot date).
+    Extract one visit per plugin per calendar month for the
+    [visit_start, visit_end) window (defaults preserve the dev-era
+    2018-01-01 to 2025-10-01 extraction bit-for-bit).
 
     ROW_NUMBER() picks the latest visit within each (plugin, year, month)
     window, giving ~12 data points per plugin per year rather than every visit.
@@ -261,8 +264,8 @@ WITH ranked AS (
     FROM "{src_database}"."origin_visit_status" ovs
     INNER JOIN "{dest_database}"."jenkins_plugin_urls" pu
         ON ovs.origin = pu.url
-    WHERE ovs.date     >= TIMESTAMP '2018-01-01 00:00:00'
-      AND ovs.date < TIMESTAMP '2025-10-01 00:00:00'
+    WHERE ovs.date     >= TIMESTAMP '{visit_start} 00:00:00'
+      AND ovs.date < TIMESTAMP '{visit_end} 00:00:00'
       AND ovs.snapshot IS NOT NULL
 )
 SELECT origin, visit, visit_date, snapshot_id
@@ -424,6 +427,16 @@ def main() -> int:
         help=f"Glue/Athena database for extracted tables (default: {DEFAULT_DEST_DATABASE})",
     )
     parser.add_argument(
+        "--visit-start",
+        default="2018-01-01",
+        help="Inclusive visit-date lower bound YYYY-MM-DD (default preserves the dev-era window).",
+    )
+    parser.add_argument(
+        "--visit-end",
+        default="2025-10-01",
+        help="Exclusive visit-date upper bound YYYY-MM-DD (default preserves the dev-era window).",
+    )
+    parser.add_argument(
         "--only",
         choices=STEPS,
         help="Run only one step (useful for resuming after a failure).",
@@ -462,7 +475,9 @@ def main() -> int:
         "plugin_urls": _sql_create_plugin_urls_table(
             args.database, args.dest_database, loc("plugin_urls"), plugin_urls
         ),
-        "visits": _sql_create_jenkins_visits(args.database, args.dest_database, loc("visits")),
+        "visits": _sql_create_jenkins_visits(
+            args.database, args.dest_database, loc("visits"), args.visit_start, args.visit_end
+        ),
         "snapshot_branch": _sql_create_jenkins_snapshot_branch(
             args.database, args.dest_database, loc("snapshot_branch")
         ),

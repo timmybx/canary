@@ -250,9 +250,16 @@ in every combination; the five-family pool at 0.551 under xgboost).
   9 PRs created on GitHub in 2026-06, 0 captured). Consequence: observation
   months from ~2026-02 onward are collected but NOT evaluable and are
   excluded from all reporting beyond coverage statistics; the declared OOT
-  window (through 2025-12) lies before the collapse. Calibration of the
-  2025-10..2025-12 months against GitHub's own PR counts is recorded here
-  when done: _pending_.
+  window (through 2025-12) predates the collapse but not the decay.
+  Calibration against GitHub's own PR-created counts (jenkinsci/git-plugin,
+  captured `PullRequestEvent` opened / PRs created on GitHub): 2024-Q4
+  39/42 = 93%; 2025-Q3 23/38 = 61%; 2025-Q4 16/37 = 43%; 2026-06 0/9 = 0%.
+  Development-era months were therefore near-completely captured while the
+  OOT months run at roughly 43-61% capture: any OOT decline is confounded
+  with archive coverage loss and is reported with these ratios beside it.
+  The decay's onset (~mid-2025) also coincides with the historically weakest
+  development fold (test 2025-05/06); noted as a hypothesis for the praxis
+  temporal-stability discussion, not as a finding.
   Event 2 — Dec-2025 JIRA→GitHub issue migration by `jenkins-infra-bot`:
   17,642 issues opened across 155 cohort plugins on 2025-12-01 (plus ~95k
   label events; smaller waves in 2025-11 and 2026-01). The account carries
@@ -267,3 +274,15 @@ in every combination; the five-family pool at 0.551 under xgboost).
   not actor-filtered and resets for the 155 migrated plugins; a fold-3
   sensitivity excluding those plugins will be reported as a secondary,
   descriptive number alongside the primary result.
+- 2026-09-01 (later) — SWH 2026-06-04 schema smoke-test: PASSED (run early;
+  §8 had it ~Sep 5). `s3://softwareheritage/graph/2026-06-04/orc` registered
+  as `swh_graph_2026_06_04`; `origin_visit_status` schema identical to the
+  2025-10-08 export. git-plugin shows 29 full visits with snapshots covering
+  2025-10-29 → 2026-05-30 at roughly WEEKLY cadence (dev-era data averaged
+  ~9 visits/plugin/YEAR) — the denser archival cadence weakens the
+  measurement-cadence explanation for the swhdelta_ refutation prospectively
+  and is noted for future work. Incremental extraction is GO: visit window
+  2025-10-01 → 2026-06-01, destination `swh_jenkins_2026` (frozen
+  `swh_jenkins` untouched), new local out-dir
+  `data/raw/software_heritage_athena_2026/`. Merged data feeds the
+  post-OOT/archival record only, per the SWH-decoupling amendment.
