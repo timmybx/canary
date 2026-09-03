@@ -174,7 +174,9 @@ in every combination; the five-family pool at 0.551 under xgboost).
   the complete frozen feature/tooling state; this hash line was added in
   the immediately following commit, since a commit cannot contain its own
   hash).
-- Extended panel row count (new `EXPECTED_ROWS`): _pending collection._
+- Extended panel row count (new `EXPECTED_ROWS`): **209,406** (102 months,
+  2018-01 → 2026-06, × 2,053 plugins; recorded 2026-09-02 after the
+  rebuild's integrity gates passed — see changelog).
 
 ## 8. Schedule and external constraints
 
@@ -286,3 +288,25 @@ in every combination; the five-family pool at 0.551 under xgboost).
   `swh_jenkins` untouched), new local out-dir
   `data/raw/software_heritage_athena_2026/`. Merged data feeds the
   post-OOT/archival record only, per the SWH-decoupling amendment.
+- 2026-09-02 — §3 panel rebuild complete and integrity gates PASSED (still
+  before any OOT fold runs). Rebuilt on the frozen registry with
+  `monthly-features --start 2018-01 --end 2026-06` → `monthly-labels` →
+  enrichment (all seven families): 209,406 rows = 102 × 2,053 exactly,
+  `.summary.json` completion marker present (`row_count` 209406), 65
+  enrichment columns; `EXPECTED_ROWS` in §7 set to 209,406. Labels: the
+  6-month target is non-null on 197,088 rows (the trailing six unmatured
+  months are unlabeled, as designed) with 5,496 positives vs 5,369 in the
+  development-era file — the difference is newly matured 2025-H2 windows,
+  not relabeling of any development-era row. Gate 2b (development-fold
+  regression, `ghclock_`-only logistic, 13 embargoed folds 2023-05 →
+  2025-05) was run twice — once on the interim 96-month panel (run dir
+  `ghclock_only_logistic_rebuilt`) and once on the final 102-month panel
+  (`ghclock_only_logistic_rebuilt_102m`) — and both reproduce the frozen
+  `ghclock_only_logistic` run bit-for-bit: every fold identical in ROC-AUC,
+  AP, P@25, base rate, 4,106 test rows, positive counts, training rows and
+  as-of statistics; pooled ROC-AUC 0.6274790771018923 in all three. This
+  also certifies the `jenkins-infra-bot` §6 correction as a development-era
+  no-op, as predicted. Software Heritage 2026-06-04 pull-down continues on
+  the decoupled parallel track (~420 of 2,053 plugins at this entry; the
+  only failures are plugins whose snapshot carries no repository URL, as in
+  the development-era extraction).
