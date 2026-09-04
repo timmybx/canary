@@ -150,3 +150,60 @@ def test_honest_tab_route_renders(results_root: Path) -> None:
     assert 'data-tab-panel="honest"' in body
     assert "Honest evaluation" in body
     assert "ghclock" in body
+
+
+# ---------------------------------------------------------------------------
+# Feature-family / model tooltips on the honest tab
+# ---------------------------------------------------------------------------
+
+
+def test_every_enrichment_family_has_a_plain_language_tip() -> None:
+    from canary.build.enrich_monthly import ALL_FAMILIES
+    from canary.web.ui import _HONEST_FAMILY_TIPS
+
+    missing = [f for f in ALL_FAMILIES if f not in _HONEST_FAMILY_TIPS]
+    assert not missing, f"families without a honest-tab description: {missing}"
+    for key, (name, tip) in _HONEST_FAMILY_TIPS.items():
+        assert name and tip.startswith(f"{key}_ — "), key
+
+
+def test_run_label_html_names_families_with_tooltips() -> None:
+    from canary.web.ui import _honest_run_label_html
+
+    html = _honest_run_label_html({"include_prefixes": ["ghclock_", "ghdyn_"]})
+    assert "Activity-recency clocks" in html
+    assert "Contributor dynamics" in html
+    assert html.count('class="tip tip--below"') == 2
+    assert 'data-tip="ghclock_ — nine day-resolution clocks' in html
+    # unknown prefixes degrade to the raw name rather than failing
+    assert "<code>mystery</code>" in _honest_run_label_html({"include_prefixes": ["mystery_"]})
+    # no filter -> explains that the whole input file was used
+    html = _honest_run_label_html(
+        {"include_prefixes": None, "in_path": "a/b/plugins.monthly.labeled.advisory_only.jsonl"}
+    )
+    assert "all features in dataset" in html
+    assert "plugins.monthly.labeled.advisory_only.jsonl" in html
+
+
+def test_render_honest_tab_has_tooltips_and_legend() -> None:
+    runs = [
+        {
+            **_run_payload(pooled_roc=0.62, prefixes=["ghclock_"], model="logistic"),
+            "run_name": "champ",
+        },
+        {
+            **_run_payload(pooled_roc=0.60, prefixes=["ghclock_", "installs_"], model="xgboost"),
+            "run_name": "pair",
+        },
+    ]
+    html = _render_honest_tab(runs)
+    # champion card + table row both carry the family tooltip; model names carry theirs
+    assert html.count("Activity-recency clocks") == 4  # legend, champion card, 2 table rows
+    assert "Install base" in html
+    assert 'data-tip="Logistic regression:' in html
+    assert 'data-tip="XGBoost gradient-boosted trees:' in html
+    # legend lists every family for readers without hover
+    assert "What the feature-set names mean" in html
+    assert "<code style='font-size:.8rem'>swhdelta_</code>" in html
+    # the plain-text label helper is unchanged
+    assert _honest_run_label(runs[1]) == "ghclock, installs"

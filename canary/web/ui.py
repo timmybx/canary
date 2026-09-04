@@ -201,6 +201,10 @@ code { background:rgba(255,255,255,.05); padding:.15rem .35rem; border-radius:6p
   box-shadow: 0 8px 24px rgba(0,0,0,.35);
 }
 .tip:hover::after { opacity: 1; }
+/* Honest-tab variant: opens below the label (the table sits near the top of the
+   page, so an upward tooltip would clip) and is wide enough for a family description. */
+.tip.tip--below::after { bottom: auto; top: calc(100% + 6px); width: 320px; text-align: left; }
+.tip.tip--below { border-bottom: none; text-decoration: underline dotted var(--muted); text-underline-offset: 3px; }
 
 /* ── Model badge ─────────────────────────────────────────────── */
 .model-badge {
@@ -2799,6 +2803,165 @@ def _honest_run_label(run: dict[str, Any]) -> str:
     return "all features in dataset"
 
 
+# Plain-language descriptions of the feature families that make up a
+# rolling-backtest run name.  Keys are the family prefixes passed to
+# ``tools/rolling_backtest.py --include-prefixes`` (trailing underscore
+# stripped); values are (display name, what the family is composed of).
+# Every family in ``canary.build.enrich_monthly.ALL_FAMILIES`` must have an
+# entry — ``tests/test_webapp_honest.py`` guards that.
+_HONEST_FAMILY_TIPS: dict[str, tuple[str, str]] = {
+    "ghclock": (
+        "Activity-recency clocks",
+        "ghclock_ — nine day-resolution clocks from GH Archive events, measured at month end: "
+        "days since the last human push, any push (bots included), release, pull request "
+        "opened, PR merged, PR review, issue opened and tag created, plus a has-events flag. "
+        "'Never' is encoded as a 3,650-day cap plus the flag, so a missing history can never "
+        "look like recent activity.",
+    ),
+    "ghdyn": (
+        "Contributor dynamics",
+        "ghdyn_ — nine columns on who is doing the work, from GH Archive actors over trailing "
+        "windows: active contributors in the last 3 and 12 months, newcomers and departures over "
+        "12 months, turnover rate, event count, the top contributor's share of activity, a "
+        "single-maintainer flag and a has-actors flag. Bot accounts are excluded.",
+    ),
+    "installs": (
+        "Install base",
+        "installs_ — ten columns from stats.jenkins.io monthly installation history: install "
+        "count (raw and log10), share of all Jenkins installs, ecosystem percentile rank, 3- and "
+        "12-month growth (clamped), ratio to the plugin's own peak, 12-month rank change, months "
+        "of data and a has-data flag. Month T uses figures published through T-1 — what was "
+        "knowable at scoring time.",
+    ),
+    "advhist": (
+        "Advisory recurrence",
+        "advhist_ — ten columns from the plugin's own advisory calendar: months since the last "
+        "and first advisory, advisory months and advisory count to date, advisory months in the "
+        "trailing 12 and 24 months, mean gap between advisories, size of the ecosystem batch the "
+        "latest advisory arrived in, an exponential recency decay and a has-history flag.",
+    ),
+    "ghtext": (
+        "Security vocabulary in project text",
+        "ghtext_ — seven columns from the text of commits, pull requests and issues in GH "
+        "Archive: days since the last security-vocabulary mention (CVE/CWE ids, 'vulnerability', "
+        "XSS, CSRF, sanitize, disclosure, ...) and since the last CVE id, mention counts over 90 "
+        "and 365 days, and has-mention flags. Generic 'fix' / 'bug' words are excluded.",
+    ),
+    "contagion": (
+        "Shared-maintainer contagion",
+        "contagion_ — eight columns from a maintainer graph rebuilt as-of each month from GH "
+        "Archive actors (push, PR merge, release; trailing 24 months): the plugin's active "
+        "maintainers, maintainers shared with other plugins, number of neighbouring plugins, "
+        "neighbours with an advisory in the last 12 and 24 months, months since the latest "
+        "neighbour advisory, and has-neighbour flags.",
+    ),
+    "swhdelta": (
+        "Software Heritage visit deltas",
+        "swhdelta_ — twelve columns comparing consecutive Software Heritage archive visits: "
+        "visits to date, days since and between visits, commits added and commit rate per month, "
+        "security-fix commits added, governance/tooling files adopted or dropped (SECURITY.md, "
+        "Dependabot, GitHub Actions, Jenkinsfile, tests, ...), days since the last adoption, and "
+        "presence flags. Changes between visits, not levels.",
+    ),
+    "advisory": (
+        "Advisory history (base panel)",
+        "advisory_ — the advisory columns built into the monthly panel: count to date, count this "
+        "month, CVE count, maximum and mean CVSS to date, count with CVSS >= 7, days since the "
+        "first and latest advisory, and advisory span.",
+    ),
+    "advisories": (
+        "Advisory presence flags (base panel)",
+        "advisories_ — whether the plugin has ever had an advisory and whether it had one in "
+        "the trailing 365 days.",
+    ),
+    "gharchive": (
+        "GH Archive activity (base panel)",
+        "gharchive_ — the ~100 month-granularity GitHub activity columns of the base panel: "
+        "event, push, pull-request, issue, release, tag, fork and watch counts over trailing 3- "
+        "and 6-month windows, human vs bot splits, unique actors, PR merge and issue close "
+        "rates and times, months since the last activity of each kind, and security / hotfix / "
+        "dependency-bump keyword counts.",
+    ),
+    "swh": (
+        "Software Heritage snapshot (base panel)",
+        "swh_ — the ~37 archive-visit columns of the base panel, as of the most recent visit "
+        "before the observation month: visit counts and archive age, commit count and days "
+        "since the last commit, commit-hygiene rates (merge, conventional-commit, issue-reference, "
+        "empty-message, weekend / late-night fractions), security-fix commit count, and the "
+        "presence of governance and build files (README, SECURITY.md, Dependabot, GitHub "
+        "Actions, Jenkinsfile, tests directory, ...).",
+    ),
+}
+
+_HONEST_MODEL_TIPS: dict[str, str] = {
+    "logistic": (
+        "Logistic regression: inputs standardised, class-balanced weights, L2 regularisation "
+        "(scikit-learn defaults, lbfgs solver). A linear model — each feature contributes a "
+        "fixed, interpretable amount to the log-odds."
+    ),
+    "xgboost": (
+        "XGBoost gradient-boosted trees: 500 trees, depth 6, no early stopping; registry "
+        "defaults, not tuned on these folds. Captures interactions and thresholds."
+    ),
+    "lightgbm": (
+        "LightGBM gradient-boosted trees with the registry defaults, not tuned on these folds. "
+        "Included as a second tree family to check the result is not model-specific."
+    ),
+    "random_forest": (
+        "Random forest: 500 trees, class-balanced, minimum 5 samples per leaf (registry defaults)."
+    ),
+}
+
+
+def _honest_family_html(prefix: str) -> str:
+    """Render one family prefix as a plain-language name with a hover description."""
+    key = str(prefix).rstrip("_")
+    entry = _HONEST_FAMILY_TIPS.get(key)
+    if entry is None:
+        return f"<code>{_escape(key)}</code>"
+    name, tip = entry
+    return f'<span class="tip tip--below" data-tip="{_escape(tip)}">{_escape(name)}</span>'
+
+
+def _honest_run_label_html(run: dict[str, Any]) -> str:
+    """HTML counterpart of _honest_run_label: family names with hover descriptions."""
+    prefixes = run.get("include_prefixes")
+    if prefixes:
+        return " + ".join(_honest_family_html(str(p)) for p in prefixes)
+    in_path = str(run.get("in_path") or "")
+    dataset = in_path.replace("\\", "/").rsplit("/", 1)[-1] or "the input dataset"
+    tip = (
+        "No family filter was applied: every feature column present in "
+        f"{dataset} was used (the base panel families plus any enrichment columns it carries)."
+    )
+    return f'<span class="tip tip--below" data-tip="{_escape(tip)}">all features in dataset</span>'
+
+
+def _honest_model_html(model_name: Any) -> str:
+    name = str(model_name or "?")
+    tip = _HONEST_MODEL_TIPS.get(name)
+    if not tip:
+        return _escape(name)
+    return f'<span class="tip tip--below" data-tip="{_escape(tip)}">{_escape(name)}</span>'
+
+
+def _render_honest_family_legend() -> str:
+    """Collapsible legend listing every feature family (hover is not available on touch)."""
+    items = "".join(
+        f"<li style='margin:.25rem 0'><strong>{_escape(name)}</strong> "
+        f"<code style='font-size:.8rem'>{_escape(key)}_</code>"
+        f"<span style='color:var(--muted)'> — {_escape(tip.split(' — ', 1)[-1])}</span></li>"
+        for key, (name, tip) in _HONEST_FAMILY_TIPS.items()
+    )
+    return (
+        "<details style='margin:.6rem 0 0'>"
+        "<summary style='cursor:pointer;color:var(--muted);font-size:.9rem'>"
+        "What the feature-set names mean</summary>"
+        f"<ul style='font-size:.88rem;margin:.5rem 0 0;padding-left:1.2rem'>{items}</ul>"
+        "</details>"
+    )
+
+
 def _render_honest_fold_table(run: dict[str, Any]) -> str:
     rows = []
     for fold in run.get("folds") or []:
@@ -2854,7 +3017,9 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
         "<p style='color:var(--muted);font-size:.9rem'>Runs marked <em>stored labels</em> use the "
         "historical (leaky) labels on the same folds, shown for contrast. Produced by "
         "<code>tools/rolling_backtest.py</code>.</p>"
-        "</div>"
+        "<p style='color:var(--muted);font-size:.9rem;margin-bottom:0'>Feature-set names are the feature <em>families</em> a run was allowed to see — hover a name for what the family is made of, or expand the legend.</p>"
+        + _render_honest_family_legend()
+        + "</div>"
     )
 
     if not runs:
@@ -2876,8 +3041,8 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
         champion_html = (
             "<div class='card' style='margin-bottom:1rem'>"
             "<p class='eyebrow'>Best embargoed result</p>"
-            f"<h3 style='margin:.1rem 0 .5rem'>{_escape(_honest_run_label(champion))} "
-            f"<span style='color:var(--muted);font-weight:normal'>({_escape(champion.get('model_name') or '?')})</span></h3>"
+            f"<h3 style='margin:.1rem 0 .5rem'>{_honest_run_label_html(champion)} "
+            f"<span style='color:var(--muted);font-weight:normal'>({_honest_model_html(champion.get('model_name'))})</span></h3>"
             "<div class='metrics-row'>"
             f"<div class='metric'><span class='metric__label'>Pooled ROC-AUC</span>"
             f"<span class='metric__value'>{_fmt_metric(pooled.get('roc_auc'), 3)}</span></div>"
@@ -2909,9 +3074,9 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
         )
         body_rows.append(
             "<tr>"
-            f"<td style='padding:.45rem .6rem'><strong>{_escape(_honest_run_label(run))}</strong>"
+            f"<td style='padding:.45rem .6rem'><strong>{_honest_run_label_html(run)}</strong>"
             f"<br><span style='color:var(--muted);font-size:.82rem'>{_escape(run.get('run_name'))}</span></td>"
-            f"<td style='padding:.45rem .6rem'>{_escape(run.get('model_name') or '?')}</td>"
+            f"<td style='padding:.45rem .6rem'>{_honest_model_html(run.get('model_name'))}</td>"
             f"<td style='padding:.45rem .6rem'>{protocol}</td>"
             f"<td style='padding:.45rem .6rem;text-align:right'>{_escape(summary.get('fold_count'))}</td>"
             f"<td style='padding:.45rem .6rem;text-align:right'>{_escape(positives_str)}</td>"
