@@ -196,7 +196,7 @@ code { background:rgba(255,255,255,.05); padding:.15rem .35rem; border-radius:6p
   position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
   background: #111c30; color: var(--text); border: 1px solid var(--line);
   border-radius: 10px; padding: .55rem .75rem; font-size: .82rem; font-weight: 400;
-  white-space: normal; width: 240px; z-index: 99; pointer-events: none;
+  white-space: normal; width: 240px; z-index: 99; pointer-events: none; text-align: left;
   opacity: 0; transition: opacity .15s; line-height: 1.5;
   box-shadow: 0 8px 24px rgba(0,0,0,.35);
 }
@@ -205,6 +205,7 @@ code { background:rgba(255,255,255,.05); padding:.15rem .35rem; border-radius:6p
    page, so an upward tooltip would clip) and is wide enough for a family description. */
 .tip.tip--below::after { bottom: auto; top: calc(100% + 6px); width: 320px; text-align: left; }
 .tip.tip--below { border-bottom: none; text-decoration: underline dotted var(--muted); text-underline-offset: 3px; }
+.tip.tip--plain { border-bottom: none; text-decoration: none; }
 
 /* ── Model badge ─────────────────────────────────────────────── */
 .model-badge {
@@ -917,6 +918,60 @@ def _render_feature_columns_panel(feature_columns: Any) -> str:
 
 
 _METRIC_TIPS: dict[str, str] = {
+    # --- Honest-evaluation tab (rolling backtests) ---
+    "Pooled ROC-AUC": (
+        "ROC-AUC computed once over the concatenated test predictions of every fold, rather than "
+        "averaged fold by fold. With 13 folds that is 53,378 plugin-months and 760 advisory "
+        "outcomes behind one number instead of 20-130 positives per fold. 0.5 is chance; the "
+        "praxis's H2 criterion is 0.55. This is the headline metric for the honest layer."
+    ),
+    "Pooled AP": (
+        "Average precision over the concatenated fold predictions: the area under the "
+        "precision-recall curve, i.e. how much of the ranking's top is occupied by plugins that "
+        "did go on to receive an advisory. Read it against the pooled base rate (~1.4%) — the "
+        "lift column does that for you."
+    ),
+    "AP lift": (
+        "Pooled average precision divided by the pooled base rate. 1.0x means the ranking is no "
+        "better than picking plugins at random; 2.0x means advisory-bound plugins are twice as "
+        "concentrated at the top of the list as chance would put them. Under the honest protocol "
+        "lifts are modest (roughly 1.3-2.2x) — CANARY is a triage signal, not a detector."
+    ),
+    "Fold ROC mean (range)": (
+        "The plain average of the per-fold ROC-AUC values, with the weakest and strongest fold in "
+        "brackets. Folds differ a lot (the 2025 folds are the hardest for every model), so the "
+        "range shows stability where the pooled number shows overall separation. A fold below "
+        "0.5 means the model ranked that window's advisory-bound plugins below the rest."
+    ),
+    "Folds": (
+        "Number of rolling-origin folds. Each fold trains on every observation month before its "
+        "test window (expanding window) and scores a two-month test window; test starts advance "
+        "in two-month steps so the windows never overlap and pooled metrics are valid."
+    ),
+    "Positives": (
+        "Total advisory-positive plugin-months across all fold test windows: observations whose "
+        "plugin received a Jenkins security advisory within the following six months. The "
+        "denominator for the pooled base rate is the total number of test rows."
+    ),
+    "Protocol": (
+        "Embargoed: at every fold the training labels are rebuilt using only advisories "
+        "published before that fold's scoring date, so no training label can depend on an "
+        "advisory the model is later tested on. Stored labels: the historical labels as saved, "
+        "which is the standard (leaky) chronological protocol — shown for contrast only."
+    ),
+    "Test window": (
+        "The two observation months scored in this fold. Each observation month is scored as of "
+        "the first day of the following month, using only what was knowable then."
+    ),
+    "Labels as-of": (
+        "The month whose first day is the fold's scoring date. Training labels were rebuilt with "
+        "every advisory published before this date and nothing after it (test start + 1 month, "
+        "the deployment-realistic embargo)."
+    ),
+    "Fold ROC range": (
+        "The weakest and strongest single-fold ROC-AUC. The pooled number above is the headline; "
+        "the range tells you how much a single two-month window can differ from it."
+    ),
     "ROC AUC": (
         "Area Under the ROC Curve. Measures how well the model ranks positive cases above negative ones. "
         "0.5 = no better than random; 1.0 = perfect separation. "
@@ -2938,11 +2993,13 @@ def _honest_run_label_html(run: dict[str, Any]) -> str:
 
 
 def _honest_model_html(model_name: Any) -> str:
+    """The console's model badge (same colours as the ML tab) with a hover description."""
     name = str(model_name or "?")
+    badge = _render_model_badge(name)
     tip = _HONEST_MODEL_TIPS.get(name)
     if not tip:
-        return _escape(name)
-    return f'<span class="tip tip--below" data-tip="{_escape(tip)}">{_escape(name)}</span>'
+        return badge
+    return f'<span class="tip tip--below tip--plain" data-tip="{_escape(tip)}">{badge}</span>'
 
 
 def _render_honest_family_legend() -> str:
@@ -2985,12 +3042,12 @@ def _render_honest_fold_table(run: dict[str, Any]) -> str:
         f"Per-fold detail ({len(run.get('folds') or [])} folds)</summary>"
         "<table style='width:100%;border-collapse:collapse;font-size:.88rem;margin-top:.5rem'>"
         "<thead><tr>"
-        "<th style='text-align:left;padding:.35rem .6rem'>Test window</th>"
-        "<th style='text-align:left;padding:.35rem .6rem'>Labels as-of</th>"
+        f"<th style='text-align:left;padding:.35rem .6rem'>{_tip('Test window')}</th>"
+        f"<th style='text-align:left;padding:.35rem .6rem'>{_tip('Labels as-of')}</th>"
         "<th style='text-align:right;padding:.35rem .6rem'>Positives / rows</th>"
-        "<th style='text-align:right;padding:.35rem .6rem'>ROC-AUC</th>"
-        "<th style='text-align:right;padding:.35rem .6rem'>Avg precision</th>"
-        "<th style='text-align:right;padding:.35rem .6rem'>AP lift</th>"
+        f"<th style='text-align:right;padding:.35rem .6rem'>{_tip('ROC-AUC', 'ROC AUC')}</th>"
+        f"<th style='text-align:right;padding:.35rem .6rem'>{_tip('Avg precision', 'Average Precision')}</th>"
+        f"<th style='text-align:right;padding:.35rem .6rem'>{_tip('AP lift')}</th>"
         "</tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table></details>"
     )
@@ -3044,13 +3101,13 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
             f"<h3 style='margin:.1rem 0 .5rem'>{_honest_run_label_html(champion)} "
             f"<span style='color:var(--muted);font-weight:normal'>({_honest_model_html(champion.get('model_name'))})</span></h3>"
             "<div class='metrics-row'>"
-            f"<div class='metric'><span class='metric__label'>Pooled ROC-AUC</span>"
+            f"<div class='metric'><span class='metric__label'>{_tip('Pooled ROC-AUC')}</span>"
             f"<span class='metric__value'>{_fmt_metric(pooled.get('roc_auc'), 3)}</span></div>"
-            f"<div class='metric'><span class='metric__label'>Pooled avg precision</span>"
+            f"<div class='metric'><span class='metric__label'>{_tip('Pooled avg precision', 'Pooled AP')}</span>"
             f"<span class='metric__value'>{_fmt_metric(pooled.get('average_precision'))}</span></div>"
-            f"<div class='metric'><span class='metric__label'>Lift over base rate</span>"
+            f"<div class='metric'><span class='metric__label'>{_tip('Lift over base rate', 'AP lift')}</span>"
             f"<span class='metric__value'>{_fmt_metric(pooled.get('ap_lift_over_base_rate'), 2)}×</span></div>"
-            f"<div class='metric'><span class='metric__label'>Fold ROC range</span>"
+            f"<div class='metric'><span class='metric__label'>{_tip('Fold ROC range')}</span>"
             f"<span class='metric__value'>{_fmt_metric(roc.get('min'), 3)} – {_fmt_metric(roc.get('max'), 3)}</span></div>"
             "</div>"
             f"<p style='color:var(--muted);font-size:.9rem;margin-bottom:0'>"
@@ -3076,7 +3133,7 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
             "<tr>"
             f"<td style='padding:.45rem .6rem'><strong>{_honest_run_label_html(run)}</strong>"
             f"<br><span style='color:var(--muted);font-size:.82rem'>{_escape(run.get('run_name'))}</span></td>"
-            f"<td style='padding:.45rem .6rem'>{_honest_model_html(run.get('model_name'))}</td>"
+            f"<td style='padding:.45rem .6rem;white-space:nowrap'>{_honest_model_html(run.get('model_name'))}</td>"
             f"<td style='padding:.45rem .6rem'>{protocol}</td>"
             f"<td style='padding:.45rem .6rem;text-align:right'>{_escape(summary.get('fold_count'))}</td>"
             f"<td style='padding:.45rem .6rem;text-align:right'>{_escape(positives_str)}</td>"
@@ -3096,13 +3153,13 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
         "<thead><tr>"
         "<th style='text-align:left;padding:.45rem .6rem'>Feature set</th>"
         "<th style='text-align:left;padding:.45rem .6rem'>Model</th>"
-        "<th style='text-align:left;padding:.45rem .6rem'>Protocol</th>"
-        "<th style='text-align:right;padding:.45rem .6rem'>Folds</th>"
-        "<th style='text-align:right;padding:.45rem .6rem'>Positives</th>"
-        "<th style='text-align:right;padding:.45rem .6rem'>Pooled ROC-AUC</th>"
-        "<th style='text-align:right;padding:.45rem .6rem'>Pooled AP</th>"
-        "<th style='text-align:right;padding:.45rem .6rem'>AP lift</th>"
-        "<th style='text-align:right;padding:.45rem .6rem'>Fold ROC mean (range)</th>"
+        f"<th style='text-align:left;padding:.45rem .6rem'>{_tip('Protocol')}</th>"
+        f"<th style='text-align:right;padding:.45rem .6rem'>{_tip('Folds')}</th>"
+        f"<th style='text-align:right;padding:.45rem .6rem'>{_tip('Positives')}</th>"
+        f"<th style='text-align:right;padding:.45rem .6rem'>{_tip('Pooled ROC-AUC')}</th>"
+        f"<th style='text-align:right;padding:.45rem .6rem'>{_tip('Pooled AP')}</th>"
+        f"<th style='text-align:right;padding:.45rem .6rem'>{_tip('AP lift')}</th>"
+        f"<th style='text-align:right;padding:.45rem .6rem'>{_tip('Fold ROC mean (range)')}</th>"
         "</tr></thead>"
         f"<tbody>{''.join(body_rows)}</tbody></table></div>"
     )

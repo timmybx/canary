@@ -596,15 +596,18 @@ def _load_rolling_backtests() -> list[dict[str, Any]]:
     rolling_backtest.json with per-fold metrics, an across-fold summary, and
     (when the fold test windows do not overlap) pooled metrics over every
     fold's test predictions. Directories with "INVALID" in the name are
-    skipped (quarantined runs). Embargoed runs sort before stored-label
-    (leaky) runs; within each group, best pooled ROC-AUC first.
+    skipped (quarantined runs), as are directories with "REBUILT" in the
+    name (integrity-gate reruns that must reproduce a frozen run exactly and
+    would otherwise appear as duplicate rows). Embargoed runs sort before
+    stored-label (leaky) runs; within each group, best pooled ROC-AUC first.
     """
     runs: list[dict[str, Any]] = []
     root = ROLLING_RESULTS_ROOT
     if not root.exists():
         return runs
     for run_dir in sorted(root.iterdir()):
-        if not run_dir.is_dir() or "INVALID" in run_dir.name.upper():
+        name_upper = run_dir.name.upper()
+        if not run_dir.is_dir() or "INVALID" in name_upper or "REBUILT" in name_upper:
             continue
         payload_path = run_dir / "rolling_backtest.json"
         if not payload_path.exists():

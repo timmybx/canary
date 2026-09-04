@@ -90,6 +90,9 @@ def test_loader_orders_embargoed_first_then_by_pooled_roc(results_root: Path) ->
 def test_loader_skips_invalid_and_broken_entries(results_root: Path) -> None:
     _write_run(results_root, "good", _run_payload())
     _write_run(results_root, "bad_INVALID_partial_data", _run_payload())
+    # integrity-gate reruns reproduce a frozen run bit-for-bit and would show as duplicates
+    _write_run(results_root, "good_rebuilt", _run_payload())
+    _write_run(results_root, "good_rebuilt_102m", _run_payload())
     broken = results_root / "broken"
     broken.mkdir()
     (broken / "rolling_backtest.json").write_text("{not json", encoding="utf-8")
@@ -207,3 +210,31 @@ def test_render_honest_tab_has_tooltips_and_legend() -> None:
     assert "<code style='font-size:.8rem'>swhdelta_</code>" in html
     # the plain-text label helper is unchanged
     assert _honest_run_label(runs[1]) == "ghclock, installs"
+
+
+def test_render_honest_tab_metric_tips_and_model_badges() -> None:
+    runs = [
+        {**_run_payload(pooled_roc=0.62, prefixes=["ghclock_"], model="xgboost"), "run_name": "x"},
+        {**_run_payload(pooled_roc=0.60, prefixes=["ghclock_"], model="lightgbm"), "run_name": "l"},
+        {**_run_payload(pooled_roc=0.58, prefixes=["ghclock_"], model="logistic"), "run_name": "g"},
+    ]
+    html = _render_honest_tab(runs)
+    # the ML tab's model badges, wrapped in a hover description
+    assert '<span class="model-badge model-badge--xgb">XGBoost</span>' in html
+    assert '<span class="model-badge model-badge--lgb">LightGBM</span>' in html
+    assert '<span class="model-badge ">Logistic Regression</span>' in html
+    assert 'tip--plain" data-tip="XGBoost gradient-boosted trees:' in html
+    # metric tooltips on the champion card, the run table and the per-fold table
+    for label in (
+        "Pooled ROC-AUC",
+        "Pooled AP",
+        "AP lift",
+        "Fold ROC mean (range)",
+        "Folds",
+        "Positives",
+        "Protocol",
+        "Test window",
+        "Labels as-of",
+    ):
+        assert f">{label}</span>" in html, label
+    assert html.count('data-tip="ROC-AUC computed once over the concatenated') >= 2
