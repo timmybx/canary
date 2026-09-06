@@ -1,8 +1,8 @@
 # Panel Extension & Out-of-Time Validation Protocol
 
 **Status:** Pre-registered — written and committed BEFORE any post-June-2025
-data was collected. **Signed:** 2026-08-30. **Advisor sign-off:** pending
-(Sep 6, 2026 meeting).
+data was collected. **Signed:** 2026-08-30. **Advisor sign-off:** obtained
+2026-09-06 (Dr. Jim Johnstone, biweekly advising session; see changelog).
 
 This document pre-specifies how the CANARY monthly panel will be extended
 with newly available data and how the extended months will be used. Its
@@ -310,3 +310,15 @@ in every combination; the five-family pool at 0.551 under xgboost).
   the decoupled parallel track (~420 of 2,053 plugins at this entry; the
   only failures are plugins whose snapshot carries no repository URL, as in
   the development-era extraction).
+- 2026-09-06 — ADVISOR SIGN-OFF obtained (still before any OOT fold has been run). At the
+  Sep 6 advising session Dr. Johnstone reviewed this protocol and its amendments (SWH
+  decoupling, plugin universe frozen at 2,053, the `jenkins-infra-bot` §6 correction, the
+  GH Archive capture-decay caveat, the date correction) and confirmed the next step in the
+  written advising report: "running the three pre-registered out-of-time folds exactly as
+  written and reporting the results regardless of outcome." The report also fixes the
+  interpretive language the praxis is to use unless the out-of-time result supports a
+  stronger claim: current findings are "weak but measurable discrimination, not strong
+  operational triage"; the H2 success criterion must be justified in the methodology
+  chapter and must not appear to shift after the results. §4 (three declared runs, first
+  recorded run is the result) is therefore unblocked as of this entry; the runs recorded
+  below this line are the out-of-time result.
