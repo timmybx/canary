@@ -322,3 +322,59 @@ in every combination; the five-family pool at 0.551 under xgboost).
   chapter and must not appear to shift after the results. §4 (three declared runs, first
   recorded run is the result) is therefore unblocked as of this entry; the runs recorded
   below this line are the out-of-time result.
+- 2026-09-07 — OUT-OF-TIME RESULTS RECORDED (first run of each declared configuration, per
+  §4; launched 2026-09-06 evening after the sign-off entry above; commands exactly as in the
+  runbook). All folds 4,106 test rows; three OOT folds 2025-07/08, 2025-09/10, 2025-11/12
+  (40, 31, 56 positives; pooled base rate 1.03%).
+  **Champion** `ghclock_,ghdyn_` logistic (`oot_champion`): pooled ROC-AUC **0.6703**, AP
+  0.0393, lift **3.81×**; folds 0.589 / 0.632 / 0.758; P@25 0.04 / 0.04 / 0.12; 127
+  positives / 12,318 rows. Development-era reference 0.6381 (13 folds).
+  **Baseline** `ghclock_` logistic (`oot_ghclock_logistic`): pooled **0.6379**, AP 0.0183,
+  lift 1.77×; folds 0.580 / 0.606 / 0.717; P@25 0.00 / 0.00 / 0.04. Development-era 0.6275.
+  **16-fold curve** `ghclock_,ghdyn_` logistic (`full_curve_champion`, 2023-05 → 2025-11):
+  pooled 0.6480, AP 0.0312, lift 2.31×, 887 positives / 65,696 rows; the three OOT folds are
+  identical to `oot_champion`'s (same training windows), and the 2025-H1 trough (0.504 /
+  0.526 / 0.487) is followed by the three strongest folds since mid-2024.
+  **Runner-up** `ghclock_,installs_` xgboost (`oot_runnerup`): NOT completed — the Docker
+  container was lost ("error waiting for container: unexpected EOF") after fold 2025-07/08
+  finished (ROC 0.6107, AP 0.0168, P@25 0.00; `fold_2025-07/metrics.json` on disk); no
+  `rolling_backtest.json` was written. An interrupted run that produced no recorded result
+  is not a recorded run: the same command is re-issued unchanged to complete it, the partial
+  directory is set aside as `oot_runnerup_PARTIAL_INTERRUPTED`, and the completed run's fold
+  2025-07 must reproduce the partial fold's metrics exactly (seeded, deterministic) — that
+  equality is the integrity check that nothing changed between attempts.
+  Reading (capture-decay caveat from the 2026-09-01 entry applies — these folds ran at
+  roughly 43–61% GH Archive capture): the frozen configurations perform at least as well on
+  months no modelling decision ever saw as on the development folds; the H2 reference
+  (ROC ≥ 0.55) is met on the pooled OOT result and in every OOT fold for the champion and
+  the baseline. Interpretive language per the advising report remains "weak but measurable
+  discrimination, not strong operational triage": lift is higher on the OOT months (3.8×)
+  but P@25 stays at 4–12%.
+- 2026-09-07 — §6 DEVIATION DISCOVERED BY THE REPRODUCTION CHECK (after the runs above; no
+  configuration was changed before or since). The full curve's 13 development folds do not
+  reproduce the frozen `ghclock_ghdyn_logistic` run exactly: every fold differs by
+  0.001–0.010 ROC (e.g. 2025-05: 0.4787 → 0.4866; 2023-05: 0.7000 → 0.7054); pooled dev-13
+  on the rebuilt panel 0.6422 vs 0.6381 frozen. Labels, positives, training counts, feature
+  set and column order are identical; the `ghclock_`-only gate (2026-09-02) was bit-identical.
+  Root cause (code, not data): `build_ghdyn_features` sets `ghdyn_has_actors = bool(months)`
+  over the plugin's ENTIRE actor-month map rather than the months at or before the
+  observation month — i.e. the flag encodes "this plugin has human activity anywhere in the
+  event store". Extending the store from 2025-09 to 2026-06 therefore flipped the flag on
+  development-era rows of plugins whose first human activity is after 2025-09 (the
+  identically-scored "no events" block moves 0.362 → 0.253 in fold 2023-05), and the
+  refitted coefficients shift every score slightly. This is future information in a frozen
+  encoding — mild (one binary feature, coefficient ≈ −0.15; +0.004 pooled on the dev folds)
+  but real, and it affects the two `ghdyn_`-bearing runs above; the baseline is unaffected.
+  Direction for the OOT months: the flag can only flip for plugins dormant through the
+  observation month that become active later; with a negative coefficient that LOWERS the
+  score of exactly the dormant plugins whose advisory prompts a fix push, so the plausible
+  bias is against the model, and 2026 capture is near zero — stated as a hypothesis, to be
+  measured, not assumed. Disposition under §6: a fix changes development-fold numbers,
+  therefore it is a post-freeze modelling change; the recorded OOT results above are THE
+  result and are reported with this disclosure. DECLARED NOW, BEFORE RUNNING: one
+  sensitivity analysis — re-enrich `ghdyn_` with `has_actors` computed as-of (any human
+  actor event in a month ≤ the observation month), re-run `ghclock_,ghdyn_` logistic on the
+  13 development folds (`ghclock_ghdyn_logistic_asof`) and the 3 OOT folds
+  (`oot_champion_asof`), and report both beside the primary numbers whatever they show.
+  Pre-stated expectation: movement within ±0.01 pooled ROC in both. The corrected encoding
+  becomes the definition for CANARY 2.0; it does not replace the frozen champion here.
