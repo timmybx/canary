@@ -774,10 +774,12 @@ def build_ghdyn_features(
         current = Counter()
         prior: set[str] = set()
         recent = Counter()
+        has_actors = False  # any human activity at or before the observation month
         for mk, counts in months.items():
             age = _months_between(mk, month_key)
             if age < 0:
                 continue
+            has_actors = True
             if age < 12:
                 current.update(counts)
                 if age < 3:
@@ -805,7 +807,7 @@ def build_ghdyn_features(
             "ghdyn_events_12m": events_12m,
             "ghdyn_top_actor_share_12m": round(top_share, 4),
             "ghdyn_single_actor_12m": len(actors_12m) == 1,
-            "ghdyn_has_actors": bool(months),
+            "ghdyn_has_actors": has_actors,
         }
     return out
 

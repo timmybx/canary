@@ -97,6 +97,10 @@ def test_loader_skips_invalid_and_broken_entries(results_root: Path) -> None:
     broken.mkdir()
     (broken / "rolling_backtest.json").write_text("{not json", encoding="utf-8")
     (results_root / "no_payload").mkdir()
+    # valid JSON that is not a rolling-backtest payload (no summary dict) is skipped too
+    foreign = results_root / "foreign"
+    foreign.mkdir()
+    (foreign / "rolling_backtest.json").write_text("[1, 2, 3]", encoding="utf-8")
     runs = webapp._load_rolling_backtests()
     assert [r["run_name"] for r in runs] == ["good"]
 
@@ -238,3 +242,25 @@ def test_render_honest_tab_metric_tips_and_model_badges() -> None:
     ):
         assert f">{label}</span>" in html, label
     assert html.count('data-tip="ROC-AUC computed once over the concatenated') >= 2
+
+
+def test_render_honest_tab_degenerate_runs_do_not_crash() -> None:
+    """Inputs the tool can genuinely produce must render, not raise.
+
+    Overlapping test windows (``--step`` < ``--test-months``) make the tool write
+    ``pooled: null``; a model name outside the registry descriptions gets a plain
+    badge; a run without folds gets no per-fold table; and a directory holding only
+    stored-label runs has no champion card.
+    """
+    overlapping = {
+        **_run_payload(embargo=False, pooled_roc=None, prefixes=["ghclock_"], model="extra_trees"),
+        "run_name": "overlap",
+        "test_windows_overlap": True,
+    }
+    overlapping["folds"] = []
+    html = _render_honest_tab([overlapping])
+    assert "Best embargoed result" not in html
+    assert "Per-fold detail" not in html
+    assert html.count("—") >= 3  # pooled ROC, AP and lift are all unknown
+    assert "EXTRA_TREES" in html  # model badge without a description
+    assert html.count("stored labels</span>") == 1

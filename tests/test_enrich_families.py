@@ -266,15 +266,21 @@ def test_ghdyn_no_activity_and_as_of() -> None:
     from collections import Counter
 
     monthly_actors = {"p": {(2024, 6): Counter({"alice": 1})}}
-    rows = [_row("p", "2024-05"), _row("q", "2024-05")]
+    rows = [_row("p", "2024-05"), _row("p", "2024-06"), _row("q", "2024-05")]
     feats = build_ghdyn_features(rows, monthly_actors)
-    # June activity is in the future of a May row — everything must read zero.
+    # June activity is in the future of a May row — everything must read zero,
+    # INCLUDING the has-actors flag: a plugin that is dormant as of May must not
+    # be marked active because it becomes active later (that flag leaked future
+    # knowledge until 2026-09; see CHANGELOG).
     may = feats[("p", "2024-05")]
     assert may["ghdyn_active_actors_12m"] == 0
     assert may["ghdyn_events_12m"] == 0
     assert may["ghdyn_top_actor_share_12m"] == 0.0
     assert may["ghdyn_turnover_rate_12m"] == 0.0
     assert may["ghdyn_single_actor_12m"] is False
+    assert may["ghdyn_has_actors"] is False
+    # From June onward the same plugin is active.
+    assert feats[("p", "2024-06")]["ghdyn_has_actors"] is True
     # q has no events at all.
     assert feats[("q", "2024-05")]["ghdyn_has_actors"] is False
 
