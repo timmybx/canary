@@ -378,3 +378,27 @@ in every combination; the five-family pool at 0.551 under xgboost).
   (`oot_champion_asof`), and report both beside the primary numbers whatever they show.
   Pre-stated expectation: movement within ±0.01 pooled ROC in both. The corrected encoding
   becomes the definition for CANARY 2.0; it does not replace the frozen champion here.
+- 2026-09-08 — RUNNER-UP OOT RESULT RECORDED (completes the §4 sweep; first recorded run of
+  this configuration). `ghclock_,installs_` xgboost (`oot_runnerup`): pooled ROC-AUC
+  **0.6283**, AP 0.0209, lift 2.03×; folds 0.611 / 0.728 / 0.601; P@25 0.00 / 0.08 / 0.00;
+  127 positives / 12,318 rows. Development-era reference 0.6319 (13 folds). Fold 2025-07/08
+  reproduced the interrupted attempt's metrics exactly (ROC 0.6107, AP 0.0168), as required.
+  Environment note (mechanics, not modelling): the two earlier attempts stalled inside the
+  second fold's XGBoost fit and took the Docker Desktop WSL2 VM down with them (engine
+  returning HTTP 500) — the VM's default memory ceiling on this 16 GB laptop is 8 GB, and the
+  backtest tool holds the full 209,406-row panel in memory before XGBoost's working set is
+  added. Resolved by raising the WSL2 ceiling (`.wslconfig`: memory=12GB, swap=8GB) and
+  running XGBoost single-threaded (`OMP_NUM_THREADS=1`); XGBoost's `hist` method is
+  deterministic for the fixed seed, and the first-fold equality above is the evidence that
+  the thread count did not change the result. The completed run is the recorded result; the
+  set-aside partial directory (`oot_runnerup_PARTIAL_INTERRUPTED`, no `rolling_backtest.json`)
+  is retained as the record of the interruption.
+  **§4 sweep complete — summary of the out-of-time evaluation (all embargoed, 2025-07 →
+  2025-12, 127 positives, base rate 1.03%):** champion 0.670 (dev 0.638), runner-up 0.628
+  (dev 0.632), baseline 0.638 (dev 0.6275). All three exceed the H2 reference (ROC ≥ 0.55)
+  pooled, and all nine configuration-folds exceed it individually. The champion and baseline
+  improved on months no modelling decision ever saw; the tree-model runner-up held flat. The
+  `ghdyn_has_actors` disclosure (entry above) applies to the champion only; the baseline and
+  runner-up carry no `ghdyn_` column and are unaffected. Interpretation per the advising
+  report: weak but measurable discrimination, validated out of time — top-of-list
+  concentration remains modest (P@25 0–12%).
