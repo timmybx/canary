@@ -969,6 +969,64 @@ _METRIC_TIPS: dict[str, str] = {
         "every advisory published before this date and nothing after it (test start + 1 month, "
         "the deployment-realistic embargo)."
     ),
+    "Feature set": (
+        "The feature families the run was allowed to see, named in plain language — hover a "
+        "family for what it is made of. The grey line beneath is the run directory under "
+        "data/processed/results/rolling_backtest/, which is how the run is cited in the "
+        "protocol and the praxis."
+    ),
+    "Model": (
+        "The estimator family. Hover the badge for its settings. Every model uses the frozen "
+        "registry defaults: nothing was tuned on these folds."
+    ),
+    "Embargoed": (
+        "At every fold the training labels were rebuilt using only advisories published "
+        "before that fold's scoring date, so no training label can depend on an advisory the "
+        "model is later tested on. This is the deployment-honest protocol and the basis of "
+        "every reported number."
+    ),
+    "Stored labels": (
+        "The historical labels as saved, without the embargo — the standard chronological "
+        "protocol of the literature. Shown only for contrast: on this task it lets training "
+        "labels share advisory events with the test window and inflates the numbers."
+    ),
+    "Development window": (
+        "Every fold's test window lies at or before 2025-06, the protocol's development "
+        "boundary. These are the folds the champion configurations were selected on, so their "
+        "numbers are development-era results, not a holdout."
+    ),
+    "Out-of-time window": (
+        "Every fold's test window lies after the development boundary — months no modelling "
+        "decision ever saw. The configuration was frozen before any of this data was collected "
+        "and run exactly once; the first recorded run is the result, whatever it showed."
+    ),
+    "Dev + out-of-time window": (
+        "One rolling curve that crosses the development boundary, so its pooled number mixes "
+        "development and out-of-time folds. Reported for the fold-by-fold trajectory, not as a "
+        "headline."
+    ),
+    "Sensitivity run": (
+        "The same configuration re-run with one corrected feature encoding, declared in the "
+        "protocol before it was run. It is reported beside the primary result to show how much "
+        "the correction moves the number; it never replaces the primary."
+    ),
+    "Development ROC-AUC": (
+        "The same configuration's pooled ROC-AUC on the 13 development folds (2023-05 → "
+        "2025-05), the number it was selected on. Compare it with the out-of-time value to the "
+        "left: similar or higher means the signal generalised to months the model never saw; "
+        "lower would be a temporal-stability finding."
+    ),
+    "Out-of-time ROC-AUC": (
+        "Pooled ROC-AUC over the three out-of-time folds (July–December 2025, 127 advisory "
+        "outcomes), the pre-registered holdout. 0.5 is chance; the praxis's H2 criterion is "
+        "0.55. Fewer positives than the development sweep, so expect wider uncertainty."
+    ),
+    "Positives / rows": (
+        "Advisory-positive plugin-months in this fold's test window over all plugin-months "
+        "scored in it. Each fold scores every plugin for two months (2 × 2,053 = 4,106 rows); "
+        "the positives are the plugins that received an advisory within six months of the "
+        "observation month."
+    ),
     "Window": (
         "Development: every fold's test window lies at or before the protocol's development "
         "boundary (observation months through 2025-06), the folds on which the champion was "
@@ -3028,16 +3086,25 @@ def _render_honest_family_legend() -> str:
     )
 
 
+def _pill_with_tip(label: str, cls: str, tip_key: str) -> str:
+    """A status pill wrapped in the console's hover description (no underline)."""
+    pill = f"<span class='pill {cls}'>{_escape(label)}</span>"
+    tip = _METRIC_TIPS.get(tip_key, "")
+    if not tip:
+        return pill
+    return f'<span class="tip tip--below tip--plain" data-tip="{_escape(tip)}">{pill}</span>'
+
+
 def _honest_window_pill(run: dict[str, Any]) -> str:
     """Pill for where a run's folds sit relative to the out-of-time boundary."""
     kind = str(run.get("window_kind") or "development")
-    label, cls = {
-        "out_of_time": ("out-of-time", "pill--good"),
-        "mixed": ("dev + out-of-time", "pill--good"),
-    }.get(kind, ("development", "pill--muted"))
-    html_out = f"<span class='pill {cls}'>{label}</span>"
+    label, cls, tip_key = {
+        "out_of_time": ("out-of-time", "pill--good", "Out-of-time window"),
+        "mixed": ("dev + out-of-time", "pill--good", "Dev + out-of-time window"),
+    }.get(kind, ("development", "pill--muted", "Development window"))
+    html_out = _pill_with_tip(label, cls, tip_key)
     if run.get("sensitivity"):
-        html_out += " <span class='pill pill--warn'>sensitivity</span>"
+        html_out += " " + _pill_with_tip("sensitivity", "pill--warn", "Sensitivity run")
     return html_out
 
 
@@ -3092,10 +3159,10 @@ def _render_honest_oot_card(runs: list[dict[str, Any]]) -> str:
         "development-era pooled ROC-AUC of the same configuration is shown for comparison.</p>"
         "<table style='width:100%;border-collapse:collapse;font-size:.92rem'>"
         "<thead><tr>"
-        "<th style='text-align:left;padding:.4rem .6rem'>Feature set</th>"
-        "<th style='text-align:left;padding:.4rem .6rem'>Model</th>"
-        f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('Out-of-time ROC-AUC', 'Pooled ROC-AUC')}</th>"
-        "<th style='text-align:right;padding:.4rem .6rem'>Development ROC-AUC</th>"
+        f"<th style='text-align:left;padding:.4rem .6rem'>{_tip('Feature set')}</th>"
+        f"<th style='text-align:left;padding:.4rem .6rem'>{_tip('Model')}</th>"
+        f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('Out-of-time ROC-AUC')}</th>"
+        f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('Development ROC-AUC')}</th>"
         f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('AP lift')}</th>"
         f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('Fold ROC range')}</th>"
         "</tr></thead>"
@@ -3128,7 +3195,7 @@ def _render_honest_fold_table(run: dict[str, Any]) -> str:
         "<thead><tr>"
         f"<th style='text-align:left;padding:.35rem .6rem'>{_tip('Test window')}</th>"
         f"<th style='text-align:left;padding:.35rem .6rem'>{_tip('Labels as-of')}</th>"
-        "<th style='text-align:right;padding:.35rem .6rem'>Positives / rows</th>"
+        f"<th style='text-align:right;padding:.35rem .6rem'>{_tip('Positives / rows')}</th>"
         f"<th style='text-align:right;padding:.35rem .6rem'>{_tip('ROC-AUC', 'ROC AUC')}</th>"
         f"<th style='text-align:right;padding:.35rem .6rem'>{_tip('Avg precision', 'Average Precision')}</th>"
         f"<th style='text-align:right;padding:.35rem .6rem'>{_tip('AP lift')}</th>"
@@ -3207,9 +3274,9 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
         embargoed = bool(run.get("embargo"))
         positives_str = f"{summary.get('total_test_positives') or 0:,}"
         protocol = (
-            "<span class='pill pill--muted'>embargoed</span>"
+            _pill_with_tip("embargoed", "pill--muted", "Embargoed")
             if embargoed
-            else "<span class='pill pill--warn'>stored labels</span>"
+            else _pill_with_tip("stored labels", "pill--warn", "Stored labels")
         )
         body_rows.append(
             "<tr>"
@@ -3234,8 +3301,8 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
         "<h3 style='margin-top:0'>All rolling backtest runs</h3>"
         "<table style='width:100%;border-collapse:collapse;font-size:.92rem'>"
         "<thead><tr>"
-        "<th style='text-align:left;padding:.45rem .6rem'>Feature set</th>"
-        "<th style='text-align:left;padding:.45rem .6rem'>Model</th>"
+        f"<th style='text-align:left;padding:.45rem .6rem'>{_tip('Feature set')}</th>"
+        f"<th style='text-align:left;padding:.45rem .6rem'>{_tip('Model')}</th>"
         f"<th style='text-align:left;padding:.45rem .6rem'>{_tip('Protocol')}</th>"
         f"<th style='text-align:left;padding:.45rem .6rem'>{_tip('Window')}</th>"
         f"<th style='text-align:right;padding:.45rem .6rem'>{_tip('Folds')}</th>"

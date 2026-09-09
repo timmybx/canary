@@ -327,3 +327,56 @@ def test_render_honest_tab_oot_card_and_window_pills() -> None:
     assert html.count("<span class='pill pill--good'>out-of-time</span>") == 2
     assert html.count("<span class='pill pill--muted'>development</span>") == 1
     assert html.count("<span class='pill pill--warn'>sensitivity</span>") == 1
+
+
+def test_render_honest_tab_explains_every_pill_and_header() -> None:
+    dev = {
+        **_run_payload(pooled_roc=0.638, prefixes=["ghclock_"]),
+        "run_name": "dev",
+        "window_kind": "development",
+        "sensitivity": False,
+    }
+    leaky = {
+        **_run_payload(embargo=False, pooled_roc=0.70, prefixes=["ghclock_"]),
+        "run_name": "leaky",
+        "window_kind": "development",
+        "sensitivity": False,
+    }
+    oot = {
+        **_run_payload(pooled_roc=0.670, prefixes=["ghclock_"], fold_month="2025-07"),
+        "run_name": "oot",
+        "window_kind": "out_of_time",
+        "sensitivity": False,
+    }
+    asof = {
+        **_run_payload(pooled_roc=0.668, prefixes=["ghclock_"], fold_month="2025-07"),
+        "run_name": "oot_asof",
+        "window_kind": "out_of_time",
+        "sensitivity": True,
+    }
+    curve = {
+        **_run_payload(pooled_roc=0.648, prefixes=["ghclock_"]),
+        "run_name": "curve",
+        "window_kind": "mixed",
+        "sensitivity": False,
+    }
+    html = _render_honest_tab([dev, leaky, oot, asof, curve])
+    # every status pill carries a hover description
+    for tip_start in (
+        "At every fold the training labels were rebuilt",
+        "The historical labels as saved",
+        "Every fold&#x27;s test window lies at or before",  # escaped inside the attribute
+        "Every fold&#x27;s test window lies after",
+        "One rolling curve that crosses",
+        "The same configuration re-run with one corrected",
+    ):
+        assert f'data-tip="{tip_start}' in html, tip_start
+    # column headers that are not self-explanatory
+    for key in (
+        "Feature set",
+        "Model",
+        "Development ROC-AUC",
+        "Out-of-time ROC-AUC",
+        "Positives / rows",
+    ):
+        assert f">{key}</span>" in html, key
