@@ -82,6 +82,14 @@ DEFAULT_REGISTRY_PATH = "data/raw/registry/plugins.jsonl"
 DEFAULT_MODEL_DIR = "data/processed/models/baseline_6m"
 MODEL_OUTPUTS_ROOT = Path("data/processed/models").resolve()
 ROLLING_RESULTS_ROOT = Path("data/processed/results/rolling_backtest").resolve()
+# Development-era boundary of the pre-registered out-of-time protocol
+# (docs/panel_extension_protocol.md): every modelling decision used observation
+# months through 2025-06, so a fold whose test window starts after that month is
+# out-of-time. Run directories ending in this suffix are the protocol's declared
+# sensitivity analyses (same configuration, corrected encoding) and are shown
+# beside — never instead of — the primary runs.
+OOT_BOUNDARY_MONTH = "2025-06"
+SENSITIVITY_RUN_SUFFIX = "_asof"
 ADVISORY_DATA_ROOT = Path("data/raw/advisories").resolve()
 MODEL_OUTPUTS_ROOT_PARTS = Path("data/processed/models").parts
 VALID_TABS = frozenset({"score", "ml", "about", "casestudy", "honest"})
@@ -620,15 +628,44 @@ def _load_rolling_backtests() -> list[dict[str, Any]]:
         if not isinstance(payload, dict) or not isinstance(payload.get("summary"), dict):
             continue
         payload["run_name"] = run_dir.name
+        payload["window_kind"] = _rolling_window_kind(payload)
+        payload["sensitivity"] = run_dir.name.endswith(SENSITIVITY_RUN_SUFFIX)
         runs.append(payload)
 
-    def _sort_key(run: dict[str, Any]) -> tuple[bool, float]:
+    kind_rank = {"development": 0, "out_of_time": 1, "mixed": 2}
+
+    def _sort_key(run: dict[str, Any]) -> tuple[bool, int, bool, float]:
         pooled = run.get("pooled") or {}
         roc = pooled.get("roc_auc")
-        return (not bool(run.get("embargo")), -(float(roc) if roc is not None else -1.0))
+        return (
+            not bool(run.get("embargo")),
+            kind_rank.get(str(run.get("window_kind")), 3),
+            bool(run.get("sensitivity")),
+            -(float(roc) if roc is not None else -1.0),
+        )
 
     runs.sort(key=_sort_key)
     return runs
+
+
+def _rolling_window_kind(payload: dict[str, Any]) -> str:
+    """Classify a rolling run by where its fold test windows sit relative to
+    the protocol's development-era boundary: "development" (all folds at or
+    before it), "out_of_time" (all folds after it) or "mixed" (a curve that
+    crosses it). ``YYYY-MM`` strings compare correctly as text."""
+    starts = [
+        str(f.get("test_start_month"))
+        for f in payload.get("folds") or []
+        if isinstance(f, dict) and f.get("test_start_month")
+    ]
+    if not starts:
+        return "development"
+    after = [m > OOT_BOUNDARY_MONTH for m in starts]
+    if all(after):
+        return "out_of_time"
+    if any(after):
+        return "mixed"
+    return "development"
 
 
 def _load_case_study_view(values: dict[str, Any]) -> dict[str, Any] | None:

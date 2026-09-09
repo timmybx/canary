@@ -19,7 +19,7 @@
 
 CANARY is a research prototype that predicts near-term security advisory risk for Jenkins plugins using publicly observable project signals — commit patterns, governance artifacts, advisory history, and ecosystem metadata.
 
-A live demo is available at **[canary-score.com](https://canary-score.com)**, where you can score any Jenkins plugin, explore pre-trained ML model results across 64 model configurations, and view validated predictions alongside confirmed security advisories.
+A live demo is available at **[canary-score.com](https://canary-score.com)**, where you can score any Jenkins plugin, explore pre-trained ML model results across 64 model configurations, compare them with the embargoed **honest evaluation** layer (rolling backtests and the pre-registered out-of-time result), and view validated predictions alongside confirmed security advisories.
 
 The project includes a Docker-based CLI, a publicly deployed web console, collectors for registry/snapshot/advisory/healthscore/GitHub/GHArchive/Software Heritage data, an ML scoring pipeline trained on seven years of historical data, feature selection analysis, operational precision@k evaluation, and an AI-powered explanation feature.
 
@@ -246,18 +246,24 @@ Processed:
 
 ## 🗃️ Published Dataset & Model Artifacts (Zenodo)
 
-The datasets and trained models behind the reported results are archived on Zenodo:
+The datasets, trained models and evaluation artifacts behind the reported results are archived
+on Zenodo as versions of one record:
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21970272.svg)](https://doi.org/10.5281/zenodo.21970272)
 
-The record contains all labeled monthly plugin datasets (the master dataset plus the
-per-feature-family variants used in ablation experiments), the full saved model suite
-(per-configuration `model.joblib`, metrics, and test predictions), the analysis result
-JSONs behind the reported figures and tables, and a sha256 manifest. See the record's
-`DATASET_README.md` for the full file inventory.
+- **v0.1.15 (record 21970272)** — the historical / diagnostic layer: all labeled monthly datasets
+  (master plus the per-family ablation variants), the full saved model suite, the analysis
+  result JSONs, and a sha256 manifest.
+- **v0.1.17** — adds the honest layer: the enriched panels (`enriched`, `enriched2`,
+  `enriched_asof`, with their completion markers), the `_embargo` model suite, every
+  rolling-backtest run directory (development sweep, pre-registered out-of-time runs,
+  sensitivity runs), and `docs/panel_extension_protocol.md` as the provenance record.
+  Quarantined `*_INVALID_*` / `*_PARTIAL_*` directories are excluded.
+
+See each version's `DATASET_README.md` for the file inventory and the two-layer reading guide.
 
 To reproduce reported results without re-running data collection:
 
-1. Clone this repo at the tag matching the record version (e.g. `v0.1.15`).
+1. Clone this repo at the tag matching the record version (e.g. `v0.1.17`).
 2. Download the record, gunzip the feature files into `data/processed/features/`,
    and extract `models.tar.gz` / `results.tar.gz` into `data/processed/`.
 3. Build the pinned container (`make build`) and run the version-drift self-check,
@@ -269,9 +275,12 @@ To reproduce reported results without re-running data collection:
 
    Expected: `max |diff| = 0.00e+00`.
 
+4. Honest layer: `tools/rolling_backtest.py` reproduces any run directory from the enriched
+   panel; the exact command lines are in `docs/panel_extension_protocol.md` and `tools/README.md`.
+
 The bundle is produced by `tools/make_zenodo_bundle.sh`. All data derives from public
-sources (Jenkins registry and advisories, GitHub Archive, Software Heritage, plugin
-health scores) and is licensed CC-BY-4.0.
+sources (Jenkins registry and advisories, GitHub Archive, Software Heritage, stats.jenkins.io
+install statistics, plugin health scores) and is licensed CC-BY-4.0.
 
 ## ✅ Prerequisites
 
@@ -689,17 +698,41 @@ The `canary score-ml` CLI path loads a trained model from `data/processed/models
 
 CANARY is being developed as a Doctor of Engineering praxis at The George Washington University.
 
-**Primary reported result (leakage-controlled):**
+**Read the results as two layers.** A label-leakage audit (August 2026) showed that the
+original chronological-split headline was structurally optimistic for this task: entity-level
+label overlap between training and test observations of the same plugin, plus advisory-label
+maturity, let the model recover test-window advisories from training labels. Those numbers are
+kept as the **historical / diagnostic layer**; the **honest layer** below is the reported result.
 
-- **XGBoost, Advisory + Software Heritage features, strict time split, calendar/window features excluded:** Average Precision 0.583, ROC-AUC 0.930 (held-out test window May–June 2025: 4,106 plugin-month rows, 77 positives)
-- **Operational ranking (component-level, deduplicated):** top-10 = 100% precision, top-25 = 76%
-- **Feature selection (H3):** a compact 15-feature subset retains 92.4% of full-model average precision
-- **Training data:** approximately 180,664 plugin-month observations spanning January 2018 – April 2025
+**Honest layer (embargoed rolling-origin backtests — the reported result):**
 
-**Historical model suite:**
+- Protocol: at every fold, training labels are rebuilt using only advisories published before the
+  fold's scoring date (the label embargo); 13 non-overlapping folds 2023-05 → 2025-05, 53,378
+  test plugin-months, 760 advisory-positive; pooled metrics over all folds' predictions.
+- Development sweep (19 declared configurations): activity-recency clocks + contributor dynamics
+  (logistic) **pooled ROC-AUC 0.638**, AP lift 2.16×; clocks + install base (XGBoost) 0.632, the
+  only configuration ≥ 0.55 in all 13 folds; clocks alone (logistic) 0.627. Advisory recurrence,
+  security-keyword activity and Software Heritage visit deltas score at or below chance.
+- **Pre-registered out-of-time evaluation** (`docs/panel_extension_protocol.md`, frozen before
+  any post-2025-06 data was collected; three folds 2025-07 → 2025-12, 127 positives, each
+  configuration run once): champion **0.670** (AP lift 3.8×), clocks + install base 0.628,
+  clocks alone 0.638 — every fold above the pre-specified 0.55 criterion. One encoding defect
+  found by the reproduction check is disclosed in the protocol with a pre-declared sensitivity
+  run (dev +0.005, out-of-time −0.002).
+- Interpretation: weak but measurable discrimination, validated out of time — not strong
+  operational triage. Top-25 precision stays at 4–12% against a ~1% base rate; CANARY is a triage
+  signal, not evidence that a component is vulnerable.
 
-- The full 64-model suite is retained for reproducibility. Earlier headline configurations included calendar/window features and scored higher (AP up to ~0.79), but those features encode label maturity across the train/test boundary, so they are no longer the primary reported result; window features are excluded by default as of v0.1.15.
-- **Case study validation (historical configuration):** 23 of 25 top-ranked predictions confirmed by Jenkins security advisories published within the 180-day window (May – November 2025 case window), with lead times exceeding 60 days in several cases
+**Historical / diagnostic layer (standard chronological split; not deployment-valid):**
+
+- XGBoost, Advisory + Software Heritage features, time split, window features excluded:
+  AP 0.583 / ROC-AUC 0.930 on the May–June 2025 window (4,106 rows, 77 positives). Under the
+  embargo protocol the same configuration scores AP 0.019 / ROC-AUC ≈ 0.5 — the entire headline
+  rests on 105 training labels (0.06%) that depended on test-window advisories.
+- The full 64-model suite and its `_embargo` twin are retained so the inflation can be reproduced
+  configuration by configuration (`data/processed/results/embargo_suite_comparison.csv`).
+- Case-study validation (23 of 25 top-ranked predictions confirmed) and the 92.4% feature-selection
+  retention (H3) belong to this layer and are reported as such.
 
 ---
 

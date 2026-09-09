@@ -97,6 +97,7 @@ p { margin:.35rem 0 0; }
 .pill--muted { background:rgba(255,255,255,.05); border-color:rgba(255,255,255,.08); color:var(--muted); }
 .pill--warn  { background:rgba(230,160,30,.15);  border-color:rgba(230,160,30,.35);  color:#e6a01e; }
 .pill--danger{ background:rgba(220,80,60,.15);   border-color:rgba(220,80,60,.35);   color:#e05c5c; }
+.pill--good  { background:rgba(141,240,188,.12); border-color:rgba(141,240,188,.35); color:var(--good); }
 .form-grid {
   display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:.9rem; margin-top:1rem;
 }
@@ -967,6 +968,14 @@ _METRIC_TIPS: dict[str, str] = {
         "The month whose first day is the fold's scoring date. Training labels were rebuilt with "
         "every advisory published before this date and nothing after it (test start + 1 month, "
         "the deployment-realistic embargo)."
+    ),
+    "Window": (
+        "Development: every fold's test window lies at or before the protocol's development "
+        "boundary (observation months through 2025-06), the folds on which the champion was "
+        "selected. Out-of-time: every fold lies after it — months no modelling decision ever "
+        "saw, run once under the pre-registered protocol. Dev + out-of-time: one curve across "
+        "the boundary. Sensitivity: the same configuration re-run with a corrected feature "
+        "encoding, declared before running and reported beside the primary result."
     ),
     "Fold ROC range": (
         "The weakest and strongest single-fold ROC-AUC. The pooled number above is the headline; "
@@ -3019,6 +3028,81 @@ def _render_honest_family_legend() -> str:
     )
 
 
+def _honest_window_pill(run: dict[str, Any]) -> str:
+    """Pill for where a run's folds sit relative to the out-of-time boundary."""
+    kind = str(run.get("window_kind") or "development")
+    label, cls = {
+        "out_of_time": ("out-of-time", "pill--good"),
+        "mixed": ("dev + out-of-time", "pill--good"),
+    }.get(kind, ("development", "pill--muted"))
+    html_out = f"<span class='pill {cls}'>{label}</span>"
+    if run.get("sensitivity"):
+        html_out += " <span class='pill pill--warn'>sensitivity</span>"
+    return html_out
+
+
+def _is_primary_run(run: dict[str, Any], kind: str) -> bool:
+    return (
+        bool(run.get("embargo"))
+        and not run.get("sensitivity")
+        and str(run.get("window_kind") or "development") == kind
+        and bool((run.get("pooled") or {}).get("roc_auc"))
+    )
+
+
+def _render_honest_oot_card(runs: list[dict[str, Any]]) -> str:
+    """The pre-registered out-of-time result: every primary OOT run, with the
+    development-era number of the same configuration beside it."""
+    oot = [r for r in runs if _is_primary_run(r, "out_of_time")]
+    if not oot:
+        return ""
+
+    def _config(r: dict[str, Any]) -> tuple[tuple[str, ...], str]:
+        return (tuple(str(p) for p in r.get("include_prefixes") or ()), str(r.get("model_name")))
+
+    dev_by_config = {_config(r): r for r in runs if _is_primary_run(r, "development")}
+    rows = []
+    for r in oot:
+        pooled = r.get("pooled") or {}
+        roc = (r.get("summary") or {}).get("roc_auc") or {}
+        dev = dev_by_config.get(_config(r))
+        dev_roc = _fmt_metric(((dev or {}).get("pooled") or {}).get("roc_auc"), 3) if dev else "—"
+        rows.append(
+            "<tr>"
+            f"<td style='padding:.4rem .6rem'><strong>{_honest_run_label_html(r)}</strong>"
+            f"<br><span style='color:var(--muted);font-size:.82rem'>{_escape(r.get('run_name'))}</span></td>"
+            f"<td style='padding:.4rem .6rem;white-space:nowrap'>{_honest_model_html(r.get('model_name'))}</td>"
+            f"<td style='padding:.4rem .6rem;text-align:right'><strong>{_fmt_metric(pooled.get('roc_auc'), 3)}</strong></td>"
+            f"<td style='padding:.4rem .6rem;text-align:right'>{dev_roc}</td>"
+            f"<td style='padding:.4rem .6rem;text-align:right'>{_fmt_metric(pooled.get('ap_lift_over_base_rate'), 2)}×</td>"
+            f"<td style='padding:.4rem .6rem;text-align:right'>{_fmt_metric(roc.get('min'), 3)} – {_fmt_metric(roc.get('max'), 3)}</td>"
+            "</tr>"
+        )
+    first = oot[0]
+    summary = first.get("summary") or {}
+    n_pos = f"{summary.get('total_test_positives') or 0:,}"
+    n_rows = f"{summary.get('total_test_rows') or 0:,}"
+    return (
+        "<div class='card' style='margin-bottom:1rem'>"
+        "<p class='eyebrow'>Pre-registered out-of-time result</p>"
+        "<p style='color:var(--muted);font-size:.92rem;margin:.1rem 0 .6rem'>Configurations frozen "
+        "before any post-boundary data was collected, each run once on months no modelling "
+        f"decision ever saw ({_escape(summary.get('fold_count'))} folds, {_escape(n_rows)} test rows, "
+        f"{_escape(n_pos)} advisory outcomes). The first recorded run is the result; the "
+        "development-era pooled ROC-AUC of the same configuration is shown for comparison.</p>"
+        "<table style='width:100%;border-collapse:collapse;font-size:.92rem'>"
+        "<thead><tr>"
+        "<th style='text-align:left;padding:.4rem .6rem'>Feature set</th>"
+        "<th style='text-align:left;padding:.4rem .6rem'>Model</th>"
+        f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('Out-of-time ROC-AUC', 'Pooled ROC-AUC')}</th>"
+        "<th style='text-align:right;padding:.4rem .6rem'>Development ROC-AUC</th>"
+        f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('AP lift')}</th>"
+        f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('Fold ROC range')}</th>"
+        "</tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table></div>"
+    )
+
+
 def _render_honest_fold_table(run: dict[str, Any]) -> str:
     rows = []
     for fold in run.get("folds") or []:
@@ -3085,9 +3169,7 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
             "Run <code>tools/rolling_backtest.py</code> and refresh this page.</p></div>"
         )
 
-    champion = next(
-        (r for r in runs if r.get("embargo") and (r.get("pooled") or {}).get("roc_auc")), None
-    )
+    champion = next((r for r in runs if _is_primary_run(r, "development")), None)
     champion_html = ""
     if champion:
         pooled = champion.get("pooled") or {}
@@ -3097,7 +3179,7 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
         champ_pos_str = f"{summary.get('total_test_positives') or 0:,}"
         champion_html = (
             "<div class='card' style='margin-bottom:1rem'>"
-            "<p class='eyebrow'>Best embargoed result</p>"
+            "<p class='eyebrow'>Best embargoed development result</p>"
             f"<h3 style='margin:.1rem 0 .5rem'>{_honest_run_label_html(champion)} "
             f"<span style='color:var(--muted);font-weight:normal'>({_honest_model_html(champion.get('model_name'))})</span></h3>"
             "<div class='metrics-row'>"
@@ -3135,6 +3217,7 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
             f"<br><span style='color:var(--muted);font-size:.82rem'>{_escape(run.get('run_name'))}</span></td>"
             f"<td style='padding:.45rem .6rem;white-space:nowrap'>{_honest_model_html(run.get('model_name'))}</td>"
             f"<td style='padding:.45rem .6rem'>{protocol}</td>"
+            f"<td style='padding:.45rem .6rem;white-space:nowrap'>{_honest_window_pill(run)}</td>"
             f"<td style='padding:.45rem .6rem;text-align:right'>{_escape(summary.get('fold_count'))}</td>"
             f"<td style='padding:.45rem .6rem;text-align:right'>{_escape(positives_str)}</td>"
             f"<td style='padding:.45rem .6rem;text-align:right'><strong>{_fmt_metric(pooled.get('roc_auc'), 3)}</strong></td>"
@@ -3143,7 +3226,7 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
             f"<td style='padding:.45rem .6rem;text-align:right'>{_fmt_metric(roc.get('mean'), 3)} "
             f"<span style='color:var(--muted);font-size:.82rem'>({_fmt_metric(roc.get('min'), 3)}–{_fmt_metric(roc.get('max'), 3)})</span></td>"
             "</tr>"
-            f"<tr><td colspan='9' style='padding:0 .6rem'>{_render_honest_fold_table(run)}</td></tr>"
+            f"<tr><td colspan='10' style='padding:0 .6rem'>{_render_honest_fold_table(run)}</td></tr>"
         )
 
     table = (
@@ -3154,6 +3237,7 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
         "<th style='text-align:left;padding:.45rem .6rem'>Feature set</th>"
         "<th style='text-align:left;padding:.45rem .6rem'>Model</th>"
         f"<th style='text-align:left;padding:.45rem .6rem'>{_tip('Protocol')}</th>"
+        f"<th style='text-align:left;padding:.45rem .6rem'>{_tip('Window')}</th>"
         f"<th style='text-align:right;padding:.45rem .6rem'>{_tip('Folds')}</th>"
         f"<th style='text-align:right;padding:.45rem .6rem'>{_tip('Positives')}</th>"
         f"<th style='text-align:right;padding:.45rem .6rem'>{_tip('Pooled ROC-AUC')}</th>"
@@ -3179,7 +3263,7 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
         "</div>"
     )
 
-    return intro + champion_html + table + caveats
+    return intro + champion_html + _render_honest_oot_card(runs) + table + caveats
 
 
 def _render_about_tab() -> str:

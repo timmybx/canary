@@ -18,6 +18,7 @@ def _run_payload(
     pooled_roc: float | None = 0.62,
     prefixes: list[str] | None = None,
     model: str = "logistic",
+    fold_month: str = "2024-05",
 ) -> dict[str, Any]:
     return {
         "model_name": model,
@@ -25,7 +26,7 @@ def _run_payload(
         "include_prefixes": prefixes,
         "folds": [
             {
-                "test_start_month": "2024-05",
+                "test_start_month": fold_month,
                 "test_end_month": "2024-06",
                 "label_as_of_month": "2024-06" if embargo else None,
                 "test_row_count": 4106,
@@ -126,7 +127,7 @@ def test_render_honest_tab_champion_and_protocol_pills() -> None:
         {**_run_payload(embargo=False, pooled_roc=0.70), "run_name": "leaky"},
     ]
     html = _render_honest_tab(runs)
-    assert "Best embargoed result" in html
+    assert "Best embargoed development result" in html
     assert "ghclock" in html
     assert "0.620" in html  # pooled ROC of the embargoed champion, not the leaky 0.70
     assert html.count("embargoed</span>") == 1
@@ -264,3 +265,65 @@ def test_render_honest_tab_degenerate_runs_do_not_crash() -> None:
     assert html.count("—") >= 3  # pooled ROC, AP and lift are all unknown
     assert "EXTRA_TREES" in html  # model badge without a description
     assert html.count("stored labels</span>") == 1
+
+
+# ---------------------------------------------------------------------------
+# Out-of-time window classification (docs/panel_extension_protocol.md)
+# ---------------------------------------------------------------------------
+
+
+def test_loader_classifies_windows_and_orders_development_before_oot(results_root: Path) -> None:
+    _write_run(
+        results_root,
+        "oot_champ",
+        _run_payload(pooled_roc=0.67, prefixes=["ghclock_"], fold_month="2025-07"),
+    )
+    _write_run(results_root, "dev_champ", _run_payload(pooled_roc=0.64, prefixes=["ghclock_"]))
+    _write_run(results_root, "dev_champ_asof", _run_payload(pooled_roc=0.65, prefixes=["ghclock_"]))
+    curve = _run_payload(pooled_roc=0.66, prefixes=["ghclock_"])
+    curve["folds"] = curve["folds"] + [{**curve["folds"][0], "test_start_month": "2025-11"}]
+    _write_run(results_root, "curve", curve)
+    runs = webapp._load_rolling_backtests()
+    by_name = {r["run_name"]: r for r in runs}
+    assert by_name["dev_champ"]["window_kind"] == "development"
+    assert by_name["oot_champ"]["window_kind"] == "out_of_time"
+    assert by_name["curve"]["window_kind"] == "mixed"
+    assert by_name["dev_champ_asof"]["sensitivity"] is True
+    assert by_name["dev_champ"]["sensitivity"] is False
+    # a higher out-of-time or sensitivity ROC never outranks the development sweep
+    assert [r["run_name"] for r in runs] == ["dev_champ", "dev_champ_asof", "oot_champ", "curve"]
+    assert webapp._rolling_window_kind({"folds": []}) == "development"
+
+
+def test_render_honest_tab_oot_card_and_window_pills() -> None:
+    dev = {
+        **_run_payload(pooled_roc=0.638, prefixes=["ghclock_", "ghdyn_"]),
+        "run_name": "dev",
+        "window_kind": "development",
+        "sensitivity": False,
+    }
+    oot = {
+        **_run_payload(pooled_roc=0.670, prefixes=["ghclock_", "ghdyn_"], fold_month="2025-07"),
+        "run_name": "oot_champion",
+        "window_kind": "out_of_time",
+        "sensitivity": False,
+    }
+    asof = {
+        **_run_payload(pooled_roc=0.668, prefixes=["ghclock_", "ghdyn_"], fold_month="2025-07"),
+        "run_name": "oot_champion_asof",
+        "window_kind": "out_of_time",
+        "sensitivity": True,
+    }
+    html = _render_honest_tab([dev, oot, asof])
+    # champion card is the development sweep, not the higher out-of-time number
+    champ = html.split("Pre-registered out-of-time result")[0]
+    assert "Best embargoed development result" in champ
+    assert "0.638" in champ and "0.670" not in champ
+    # the out-of-time card pairs the OOT number with its development reference
+    card = html.split("Pre-registered out-of-time result")[1].split("All rolling backtest runs")[0]
+    assert "0.670" in card and "0.638" in card
+    assert "oot_champion_asof" not in card  # sensitivity runs stay out of the primary card
+    # window pills in the run table
+    assert html.count("<span class='pill pill--good'>out-of-time</span>") == 2
+    assert html.count("<span class='pill pill--muted'>development</span>") == 1
+    assert html.count("<span class='pill pill--warn'>sensitivity</span>") == 1
