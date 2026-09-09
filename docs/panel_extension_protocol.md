@@ -402,3 +402,19 @@ in every combination; the five-family pool at 0.551 under xgboost).
   runner-up carry no `ghdyn_` column and are unaffected. Interpretation per the advising
   report: weak but measurable discrimination, validated out of time — top-of-list
   concentration remains modest (P@25 0–12%).
+- 2026-09-08 (later) — PRE-DECLARED SENSITIVITY ANALYSIS RECORDED (declared in the 2026-09-07
+  entry before it was run; primary results unchanged). Encoding fix: `ghdyn_has_actors` is
+  now true only when the plugin has a human actor event in a month at or before the
+  observation month (`canary/build/enrich_monthly.py`; regression test added; CHANGELOG
+  "Fixed"). Data: `plugins.monthly.labeled.enriched_asof.jsonl` — the frozen enriched file
+  with only the `ghdyn_` family recomputed (209,406 rows, completion marker present); the
+  primary `enriched.jsonl` is untouched. Results (`ghclock_,ghdyn_` logistic, identical
+  folds and settings to the primary runs): development 13 folds
+  (`ghclock_ghdyn_logistic_asof`) pooled ROC-AUC **0.6429** vs 0.6381 frozen (+0.005), AP
+  0.0310 vs 0.0308, lift 2.17× vs 2.16×; out-of-time 3 folds (`oot_champion_asof`) pooled
+  ROC-AUC **0.6680** vs 0.6703 primary (−0.002), AP 0.0372 vs 0.0393, lift 3.61× vs 3.81×,
+  folds 0.586 / 0.646 / 0.746 vs 0.589 / 0.632 / 0.758, all above 0.55. Both movements are
+  within the pre-stated ±0.01 pooled ROC. Reading: the non-as-of flag had no material effect
+  on either the development or the out-of-time conclusion; the primary figures are reported
+  as recorded, with this sensitivity beside them. The corrected encoding is the definition
+  going forward (CANARY 2.0); the frozen champion remains the v0.1.16 encoding.
