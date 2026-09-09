@@ -13,7 +13,7 @@
 [![zizmor](https://github.com/timmybx/canary/actions/workflows/zizmor.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/zizmor.yml)
 [![CodeQL](https://img.shields.io/badge/CodeQL-enabled-brightgreen?logo=github)](https://github.com/timmybx/canary/security/code-scanning)
 [![Mutation Testing](https://github.com/timmybx/canary/actions/workflows/mutation.yml/badge.svg)](https://github.com/timmybx/canary/actions/workflows/mutation.yml)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21970272.svg)](https://doi.org/10.5281/zenodo.21970272)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21970271.svg)](https://doi.org/10.5281/zenodo.21970271)
 
 # 🐤 CANARY — Component Analytics & Near-term Advisory Risk Yardstick
 
@@ -247,13 +247,13 @@ Processed:
 ## 🗃️ Published Dataset & Model Artifacts (Zenodo)
 
 The datasets, trained models and evaluation artifacts behind the reported results are archived
-on Zenodo as versions of one record:
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21970272.svg)](https://doi.org/10.5281/zenodo.21970272)
+on Zenodo as versions of one record (the concept DOI below always resolves to the latest version):
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21970271.svg)](https://doi.org/10.5281/zenodo.21970271)
 
-- **v0.1.15 (record 21970272)** — the historical / diagnostic layer: all labeled monthly datasets
+- **v0.1.15** — [10.5281/zenodo.21970272](https://doi.org/10.5281/zenodo.21970272) — the historical / diagnostic layer: all labeled monthly datasets
   (master plus the per-family ablation variants), the full saved model suite, the analysis
   result JSONs, and a sha256 manifest.
-- **v0.1.17** — adds the honest layer: the enriched panels (`enriched`, `enriched2`,
+- **v0.1.17** — [10.5281/zenodo.22679867](https://doi.org/10.5281/zenodo.22679867) — adds the honest layer: the enriched panels (`enriched`, `enriched2`,
   `enriched_asof`, with their completion markers), the `_embargo` model suite, every
   rolling-backtest run directory (development sweep, pre-registered out-of-time runs,
   sensitivity runs), and `docs/panel_extension_protocol.md` as the provenance record.

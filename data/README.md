@@ -11,7 +11,7 @@ folder structure is preserved with `.gitkeep` where needed.
 
 > **Don't want to re-collect everything?** A published snapshot of
 > `data/processed/` (labeled datasets, trained models, analysis results) is
-> archived on Zenodo: [10.5281/zenodo.21970272](https://doi.org/10.5281/zenodo.21970272).
+> archived on Zenodo: [10.5281/zenodo.21970271](https://doi.org/10.5281/zenodo.21970271) (concept DOI; v0.1.17 = [10.5281/zenodo.22679867](https://doi.org/10.5281/zenodo.22679867), v0.1.15 = [10.5281/zenodo.21970272](https://doi.org/10.5281/zenodo.21970272)).
 > See "Published Dataset & Model Artifacts" in the top-level README for restore
 > and verification steps.
 

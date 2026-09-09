@@ -13,6 +13,7 @@ authors:
     affiliation: George Washington University
     orcid: 'https://orcid.org/0009-0001-6376-410X'
 repository-code: 'https://github.com/timmybx/canary'
+doi: 10.5281/zenodo.21970271
 abstract: >-
   CANARY is a research prototype for collecting software
   ecosystem signals for Jenkins plugins and turning them
