@@ -7,6 +7,9 @@ This project follows a lightweight adaptation of “Keep a Changelog”.
 
 ## [Unreleased]
 
+### Added
+- **`tools/oot_migration_sensitivity.py` (logic in `canary/train/oot_sensitivity.py`) — the fold-3 migration sensitivity the protocol promised.** The 2026-09-01 protocol entry (Event 2) disclosed that `ghclock_days_since_issue_opened` is not actor-filtered and resets for the ~155 plugins whose JIRA issues `jenkins-infra-bot` migrated into GitHub on 2025-12-01, inside the third out-of-time fold, and committed to reporting a sensitivity that excludes those plugins as a secondary, descriptive number. The tool identifies the affected plugins from the normalized event store (IssuesEvent opened by that account in 2025-11/12), then re-scores the **already recorded** `test_predictions.csv` of each declared OOT run (`oot_champion`, `oot_runnerup`, `oot_ghclock_logistic`) with those plugins' fold-3 rows dropped — fold-3 and pooled ROC-AUC / AP / lift / P@25, with and without the exclusion. Because the migrated plugins are the ones that had a JIRA tracker (the active, watched plugins, which carry a disproportionate share of advisories), dropping them removes a positive-rich subset and would move the ROC-AUC even if the clock reset had no effect, so the tool also reports two descriptive controls: the same exclusion applied to every fold, including the 13 development folds of the same configuration (`--control-runs`), where no migration happened; and within-subset ROC-AUC (ranking quality among the migrated plugins only, and among the rest only) per fold. No model is trained and no feature is rebuilt; the primary numbers are untouched. Writes `data/processed/results/rolling_backtest/oot_migration_sensitivity.json`.
+
 ## [0.1.17] - 2026-09-09
 **The out-of-time release.** Panel extended to 2026-06 under the pre-registered protocol
 (`docs/panel_extension_protocol.md`), the three declared out-of-time runs recorded (champion

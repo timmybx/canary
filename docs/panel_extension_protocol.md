@@ -418,3 +418,35 @@ in every combination; the five-family pool at 0.551 under xgboost).
   on either the development or the out-of-time conclusion; the primary figures are reported
   as recorded, with this sensitivity beside them. The corrected encoding is the definition
   going forward (CANARY 2.0); the frozen champion remains the v0.1.16 encoding.
+- 2026-09-10 — Fold-3 migration sensitivity RECORDED (the secondary,
+  descriptive number promised in the 2026-09-01 Event 2 entry). Method:
+  `tools/oot_migration_sensitivity.py` re-scores the already recorded
+  `test_predictions.csv` of the three declared OOT runs with the plugins
+  that received `jenkins-infra-bot` IssuesEvent-opened events in 2025-11 or
+  2025-12 removed; no training, no feature rebuild, primary numbers
+  untouched (§5 reporting). Affected set: 179 plugins (the Sep 1 entry's
+  ~155 counted the 2025-12-01 wave only; the 2025-11 wave adds the rest),
+  358 rows per fold, carrying 25 of fold 3's 56 positives.
+  Fold 3 (test 2025-11/12), all → excluding: champion 0.758 → 0.643 (lift
+  5.2× → 2.2×); runner-up 0.601 → 0.545; baseline 0.718 → 0.627.
+  Pooled OOT, fold-3 exclusion only: champion 0.670 → 0.615; runner-up
+  0.628 → 0.625; baseline 0.638 → 0.600. Pooled OOT, same exclusion on all
+  three folds: 0.592 / 0.593 / 0.588.
+  Controls (same exclusion, no migration in play): development folds of
+  the champion drop in 12 of 13 folds by 0.017–0.060 (pooled 0.638 →
+  0.603); baseline pooled 0.628 → 0.599 (worst fold −0.051); runner-up
+  pooled 0.632 → 0.627. OOT fold 2 (2025-09/10, untouched by the
+  migration) drops 0.080 for the champion. Within-subset ROC-AUC in fold 3
+  (migrated only / rest only): champion 0.718 / 0.643, baseline 0.683 /
+  0.627, runner-up 0.693 / 0.545 — no between-group artifact pattern.
+  Reading: the migrated plugins are the active, watched subset and carry a
+  disproportionate share of positives in every era, so most of the fold-3
+  drop is a population effect that appears in every fold; a clock-reset
+  contribution is consistent with the excess of the fold-3 drop over the
+  development-fold range but cannot be separated from fold-level noise
+  (OOT fold 2 shows a drop of the same size with no migration). Under the
+  harshest exclusion every declared configuration stays above the 0.55
+  criterion. Not supportable: the recorded OOT pooled 0.670 exceeding the
+  development 0.638 — under like-for-like exclusion both sit near 0.60, so
+  the praxis reports the holdout result as HELD, not improved. Primary
+  numbers stand as recorded (§5: first recorded run is the result).
