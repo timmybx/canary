@@ -43,6 +43,18 @@ Features (all strictly ≤ observation month, no future leakage)
     advisory_max_cvss_to_date  float | None — highest CVSS score seen to date
 Label
     label_advisory_within_6m   int (0/1) — any advisory in (month, month+6]
+Embargo support (not features; both are in canary.train.baseline's
+DEFAULT_EXCLUDE_COLUMNS and never enter a model)
+    plugin_id                  str  — alias of package_id. The core training
+                                      path's label embargo (relabel_as_of)
+                                      and group split key on ``plugin_id``.
+    advisory_count_this_month  int  — advisories published IN the observation
+                                      month. Lets relabel_as_of rebuild each
+                                      training label from advisories published
+                                      before the fold's as-of month, so the
+                                      PyPI check can run under the same
+                                      embargoed rolling protocol as Jenkins
+                                      (tools/rolling_backtest.py).
 """
 
 from __future__ import annotations
@@ -167,6 +179,14 @@ def _advisory_features_to_date(
     }
 
 
+def _advisories_in_month(
+    entries: list[tuple[tuple[int, int], float | None, list[str]]],
+    obs_ym: tuple[int, int],
+) -> int:
+    """Number of advisories published in *obs_ym* itself (embargo bookkeeping)."""
+    return sum(1 for ym, _, __ in entries if ym == obs_ym)
+
+
 def _label(
     entries: list[tuple[tuple[int, int], float | None, list[str]]],
     obs_ym: tuple[int, int],
@@ -258,8 +278,14 @@ def main() -> None:
 
                 row: dict[str, Any] = {
                     "package_id": pkg,
+                    # Alias for the core training path (embargo + group split
+                    # key on plugin_id). Excluded from features by default.
+                    "plugin_id": pkg,
                     "month": _month_key(obs_ym),
                     **features,
+                    # Same-month advisory count: embargo bookkeeping only,
+                    # excluded from features by default (see module docstring).
+                    "advisory_count_this_month": _advisories_in_month(entries, obs_ym),
                     f"label_advisory_within_{HORIZON_M}m": label,
                 }
                 f_out.write(json.dumps(row) + "\n")

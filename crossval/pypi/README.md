@@ -188,6 +188,41 @@ python crossval/pypi/03_train.py
 
 Output: `data/pypi/processed/results/` (per-model JSON metrics files).
 
+### `05_rolling_embargo.sh` — Embargoed rolling-origin check (the honest layer)
+
+`03_train.py` is a single chronological split on stored labels: the same
+design as the original Jenkins time split, and it inherits the same
+label-side leakage (the last five training months carry labels that already
+encode advisories published inside the test window, and the same package
+appears on both sides of the cut). Its numbers are Layer 1 numbers in the
+praxis's terms. This script re-runs the advisory-only configuration under the
+protocol the Jenkins results are actually reported on: 13 embargoed
+rolling-origin folds (test starts 2023-05 -> 2025-05, step 2, 2-month test
+windows, training labels rebuilt as-of test start + 1 month at every fold),
+via the core `tools/rolling_backtest.py`. Three runs: embargoed xgboost,
+embargoed logistic, and the same folds on stored labels (`--no-embargo`) for
+the leaky-vs-honest side-by-side.
+
+It needs `monthly_labeled.jsonl` rebuilt by the current `02_build_monthly.py`,
+which adds two bookkeeping columns (`plugin_id`, an alias of `package_id`
+that the core embargo and group-split code keys on, and
+`advisory_count_this_month`, which lets the relabeler rebuild each training
+label from advisories published before the as-of month). Both are in the
+core path's default exclusion list and never enter a model; the feature set
+is still exactly the three `advisory_*_to_date` columns.
+
+```
+docker compose run --rm canary python crossval/pypi/02_build_monthly.py
+docker compose run --rm canary bash crossval/pypi/05_rolling_embargo.sh
+```
+
+Outputs: `data/pypi/processed/results/rolling_backtest/<run>/rolling_backtest.json`
+plus a per-fold directory each, and a `<run>.log` beside them. The pooled
+ROC-AUC over the 13 folds is the number to compare with the Jenkins
+advisory-only pooled result under the same protocol; `matured_mismatch` in
+each fold's `label_as_of_stats` must be 0 (stored labels reproduce exactly
+for fully matured windows), or the relabeling did not line up.
+
 ### `04_dedup_precision.py` — Package-level deduplicated P@k (~3 minutes)
 
 Recomputes precision-at-k after deduplicating the test ranking to one row per
