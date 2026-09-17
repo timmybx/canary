@@ -63,14 +63,75 @@ prediction horizon.
 
 ### Evaluation
 
-Time split: train on observations before 2025-05, test on 2025-05 onward.
-This matches the Jenkins time-split evaluation design.
+Two layers, matching the Jenkins study:
+
+1. **Single chronological split on stored labels** (`03_train.py`): train on
+   observations before 2025-05, test on 2025-05 through 2025-10. This is the
+   original design and it inherits the label-side leakage documented for the
+   Jenkins time split: the last five training months carry labels that
+   already encode advisories published inside the test window, and the same
+   package appears on both sides of the cut. Its numbers are diagnostic
+   (Layer 1 in the praxis's terms).
+2. **Embargoed rolling-origin backtest** (`05_rolling_embargo.sh`): the same
+   13 folds as the Jenkins development sweep (test starts 2023-05 -> 2025-05,
+   step 2, 2-month windows), training labels rebuilt as-of test start + 1
+   month at every fold. This is the layer the Jenkins results are reported
+   on, and it is the layer on which the two ecosystems are compared.
 
 ## Results
 
+### Embargoed rolling-origin backtest (primary)
+
+Container run of 2026-09-16 (PyPI) beside the Jenkins advisory-only runs of
+2026-08-28 from `data/processed/results/rolling_backtest/`, identical fold
+design and embargo. PyPI pools 183,378 test rows / 2,143 positives (base
+rate 1.17%); Jenkins pools 53,378 / 760 (1.42%).
+
+| Configuration | Ecosystem | Training labels | Pooled ROC-AUC | Pooled AP | AP lift | Fold ROC range | Mean P@25 |
+|---|---|---|---|---|---|---|---|
+| advisory-only XGBoost | PyPI | embargoed | 0.720 | 0.187 | 16.0x | 0.647 - 0.780 | 0.57 |
+| advisory-only logistic | PyPI | embargoed | 0.778 | 0.222 | 19.0x | 0.763 - 0.822 | 0.53 |
+| advisory-only XGBoost | PyPI | stored (leaky) | 0.773 | 0.288 | 24.6x | 0.750 - 0.832 | 0.71 |
+| advisory-only XGBoost | Jenkins | embargoed | 0.553 | 0.025 | 1.7x | 0.515 - 0.623 | 0.08 |
+| advisory-only XGBoost | Jenkins | stored (leaky) | 0.602 | 0.037 | 2.6x | 0.521 - 0.684 | 0.11 |
+
+Two things happen at once. The leakage mechanism replicates: on identical
+folds, stored labels inflate the PyPI advisory-only result (AP 0.288 -> 0.187
+when training labels are rebuilt honestly, P@25 0.71 -> 0.57, ROC-AUC
+0.773 -> 0.720), in the same direction and of a similar relative size as in
+Jenkins. The verdict does not replicate. Under the embargo, Jenkins advisory
+recurrence sits at the H2 criterion (0.553) and its richer `advhist_` form is
+below chance (0.435); PyPI advisory recurrence is the strongest honest number
+in the project, 0.72 - 0.78 pooled with every fold above 0.64, and about one in
+two of each fold's top-25 packages goes on to receive an advisory within six
+months against a 1.2% base rate. Same feature family, same honest protocol,
+strong forward signal in one ecosystem and none in the other. The plausible
+reason is how each ecosystem produces advisories: PyPI advisories accrue
+continuously to a small set of heavily used, heavily scrutinised packages, so
+past advisories predict future ones; Jenkins advisories arrive in coordinated
+batches from security-team audits, and an audited plugin tends to go quiet.
+
+Reading notes. Logistic beats XGBoost on PyPI under the embargo (0.778 vs
+0.720); with three features and a heavily skewed count the linear model is
+the safer one. In the logistic folds the cumulative CVE count carries the
+positive weight and the cumulative advisory count takes a negative,
+collinear coefficient; the XGBoost logs' "risk-reducing" SHAP direction
+lines are an averaging artifact over the zero-history majority and are not a
+finding. A leaky logistic run was not made; the like-for-like leaky/honest
+pair is the XGBoost one. No group-time split was run for PyPI, so this is a
+monitoring-setting result (same package in train and test), which is the
+deployment setting but not the cold-start one. `matured_mismatch` is 0 in
+every fold (stored labels reproduce exactly for fully matured windows).
+
+### Single chronological split, stored labels (Layer 1, `03_train.py`)
+
 Results from the July 31, 2026 container run (top-8000 universe, pinned
 `requirements.txt` environment), after the advisory zero-fill imputation
-correction (see `tools/README.md`):
+correction (see `tools/README.md`). These are stored-label numbers on a
+single test window and are subject to the label overlap described above;
+the Jenkins column here is the single-window advisory-only ablation, not the
+embargoed rolling result. Keep them as the diagnostic layer; do not cite
+them as the cross-ecosystem finding.
 
 | Model | Ecosystem | AP | AUC | Row-level P@10 | Row-level P@25 |
 |---|---|---|---|---|---|
@@ -94,13 +155,11 @@ Jenkins test set: 77 positives / 4,106 total (base rate 1.88%)
 > (e.g., PyPI XGBoost 0.2688 → 0.2704; Jenkins row-level P@k unchanged).
 > Cite only container-run numbers.
 
-The directional finding replicates: advisory history predicts near-term
-vulnerability risk above base rate in both ecosystems.  PyPI shows stronger
-advisory-only signal than Jenkins, likely because PyPI packages receive more
-formal CVE disclosures (wider deployment footprint, more external security
-scrutiny) and CVSS scores are more consistently populated in the OSV data.
+On this layer both ecosystems score above base rate and PyPI scores higher.
+The embargoed comparison above shows how much of each is leakage: most of
+the Jenkins number, about a third of the PyPI precision.
 
-### Package-level deduplicated precision (04_dedup_precision.py)
+### Package-level deduplicated precision (04_dedup_precision.py, Layer 1)
 
 Because observations are package-months, one high-risk package can occupy
 several top-k rows. Deduplicating to each package's highest-scored test row
@@ -252,9 +311,11 @@ The scripts use only the Python standard library for data collection
 
 ## Relation to the main CANARY pipeline
 
-These scripts are intentionally self-contained and do not depend on any
-`canary` package internals.  They are a standalone reproduction study, not
-an extension of the production pipeline.
+The collection and single-split scripts (`00` - `04`) are self-contained and
+do not depend on `canary` package internals. The embargoed rolling-origin
+check (`05_rolling_embargo.sh`) is the exception by design: it runs the
+core `tools/rolling_backtest.py` so that the PyPI numbers come from the
+same embargo, fold and scoring code as the Jenkins results.
 
 Data is written under `data/pypi/` to keep it separate from the Jenkins data
 under `data/raw/` and `data/processed/`.  If a full multi-ecosystem CANARY
@@ -276,3 +337,8 @@ were built in the future, the natural structure would be `data/jenkins/` and
 
 - **Time coverage**: OSV advisory data for PyPI is available from roughly
   2018 onward; earlier history is sparse.
+
+- **No cold-start evaluation**: the embargoed check is a monitoring-setting
+  result (the same package appears in training and test months). A
+  group-time split for PyPI has not been run, so nothing here says how the
+  advisory-recurrence signal behaves for a package with no history.
