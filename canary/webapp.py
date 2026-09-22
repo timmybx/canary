@@ -16,6 +16,7 @@ from wsgiref.simple_server import make_server
 
 from canary.scoring.baseline import score_plugin_baseline
 from canary.scoring.ml import MLScorer, load_ml_scorer, score_plugin_ml
+from canary.web import honest_viz
 from canary.web.services import (
     _EXPLAIN_RATE_LIMIT,  # noqa: F401
     _EXPLAIN_RATE_LIMIT_LOCK,  # noqa: F401
@@ -90,6 +91,17 @@ ROLLING_RESULTS_ROOT = Path("data/processed/results/rolling_backtest").resolve()
 # beside — never instead of — the primary runs.
 OOT_BOUNDARY_MONTH = "2025-06"
 SENSITIVITY_RUN_SUFFIX = "_asof"
+# The protocol's H2 criterion: pooled ROC-AUC under the embargo, drawn on the
+# Honest tab's fold timeline. 0.50 is chance for every base rate.
+H2_ROC_CRITERION = 0.55
+# Cross-ecosystem rolling results (crossval/pypi/05_rolling_embargo.sh) and
+# the single-split model pairs whose stored-label vs embargoed retrains
+# (tools/run_monthly_ablation_experiments.sh --embargo) are charted as the
+# before-and-after of the label leak. Only listed stems are drawn.
+PYPI_ROLLING_RESULTS_ROOT = Path("data/pypi/processed/results/rolling_backtest").resolve()
+HONEST_VIZ_TIME_SPLIT_STEMS: dict[str, str] = {
+    "xgb_6m_advisory_swh_no_window_time": "Advisory + Software Heritage (official config)",
+}
 ADVISORY_DATA_ROOT = Path("data/raw/advisories").resolve()
 MODEL_OUTPUTS_ROOT_PARTS = Path("data/processed/models").parts
 VALID_TABS = frozenset({"score", "ml", "about", "casestudy", "honest"})
@@ -668,6 +680,39 @@ def _rolling_window_kind(payload: dict[str, Any]) -> str:
     return "development"
 
 
+def _load_honest_viz(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    Chart inputs for the Honest-evaluation tab (see canary.web.honest_viz):
+    the per-configuration fold timeline, gain / ROC curves for every primary
+    out-of-time run (in the run table's order), and the stored-label vs
+    embargoed pairs across the time-split and rolling layers and ecosystems.
+    """
+    curves: list[dict[str, Any]] = []
+    for run in runs:
+        if (
+            run.get("embargo")
+            and not run.get("sensitivity")
+            and run.get("window_kind") == "out_of_time"
+        ):
+            payload = honest_viz.load_curves(ROLLING_RESULTS_ROOT / str(run.get("run_name")))
+            if payload:
+                curves.append({"run": run, "curves": payload})
+    pairs = (
+        honest_viz.time_split_leakage_pairs(
+            MODEL_OUTPUTS_ROOT, HONEST_VIZ_TIME_SPLIT_STEMS, "Jenkins"
+        )
+        + honest_viz.rolling_leakage_pairs(ROLLING_RESULTS_ROOT, "Jenkins")
+        + honest_viz.rolling_leakage_pairs(PYPI_ROLLING_RESULTS_ROOT, "PyPI")
+    )
+    return {
+        "timeline": honest_viz.timeline_series(runs),
+        "criterion": H2_ROC_CRITERION,
+        "boundary_month": OOT_BOUNDARY_MONTH,
+        "curves": curves,
+        "pairs": pairs,
+    }
+
+
 def _load_case_study_view(values: dict[str, Any]) -> dict[str, Any] | None:
     """
     Assemble everything the case-study tab renders: model metrics, the
@@ -755,7 +800,8 @@ def render_page(
     elif active_tab == "about":
         active_panel_html = _render_about_tab()
     elif active_tab == "honest":
-        active_panel_html = _render_honest_tab(_load_rolling_backtests())
+        honest_runs = _load_rolling_backtests()
+        active_panel_html = _render_honest_tab(honest_runs, viz=_load_honest_viz(honest_runs))
     elif active_tab == "casestudy":
         active_panel_html = _render_case_study_tab(
             values,

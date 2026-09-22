@@ -1,0 +1,6 @@
+# Configuration for crate-ci/typos (the "typos" pre-commit hook).
+# Add words here only when they are deliberate, and say why.
+
+[default.extend-identifiers]
+# False-positive rate, the x axis of a ROC curve (paired with `tpr`).
+fpr = "fpr"

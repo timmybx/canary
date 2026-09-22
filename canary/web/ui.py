@@ -13,6 +13,7 @@ from typing import Any, cast
 
 from canary.scoring.baseline import ScoreResult
 from canary.scoring.ml import MLScoreResult
+from canary.web import charts
 from canary.web.services import _EXPLAIN_RATE_MAX
 
 CSS = """
@@ -3204,7 +3205,154 @@ def _render_honest_fold_table(run: dict[str, Any]) -> str:
     )
 
 
-def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
+def _honest_config_text(run: dict[str, Any]) -> str:
+    """Plain-text (SVG-safe) configuration label: family names and model.
+
+    A run with no family filter was trained on a pre-filtered dataset, so the
+    dataset's family suffix (``plugins.monthly.labeled.<family>.jsonl``) or
+    an explicit ``label`` names it instead of "all features"."""
+    model = str(run.get("model_name") or "?")
+    model_label = _MODEL_LABELS.get(model.lower(), (model, ""))[0]
+    if run.get("label"):
+        return f"{run['label']} · {model_label}"
+    prefixes = run.get("include_prefixes")
+    if prefixes:
+        families = " + ".join(
+            _HONEST_FAMILY_TIPS.get(str(p).rstrip("_"), (str(p).rstrip("_"), ""))[0]
+            for p in prefixes
+        )
+    else:
+        dataset = str(run.get("in_path") or "").replace("\\", "/").rsplit("/", 1)[-1]
+        stem = dataset.removesuffix(".jsonl").removeprefix("plugins.monthly.labeled")
+        families = stem.strip(".").replace("_", " ").replace(".", " ") or "all features"
+    return f"{families} · {model_label}"
+
+
+def _render_honest_leakage_card(pairs: list[dict[str, Any]]) -> str:
+    """Before-and-after of the label leak: the same configuration on the same
+    test data, scored with stored labels and with the embargo applied."""
+    if not pairs:
+        return ""
+
+    def _items(metric: str) -> list[dict[str, Any]]:
+        items = []
+        for p in pairs:
+            n_pos = (p.get("embargoed") or {}).get("n_positive")
+            n_pos_str = f"{int(n_pos):,} positives" if n_pos else ""
+            items.append(
+                {
+                    "label": f"{p.get('ecosystem')} · {_honest_config_text(p)}",
+                    "sublabel": f"{p.get('layer')}, {p.get('folds')} fold"
+                    f"{'s' if p.get('folds') != 1 else ''}, {n_pos_str}".rstrip(", "),
+                    "stored": (p.get("stored") or {}).get(metric),
+                    "embargoed": (p.get("embargoed") or {}).get(metric),
+                }
+            )
+        return items
+
+    roc_svg = charts.svg_paired_bars(_items("roc_auc"), metric_label="ROC-AUC", chance=0.5)
+    ap_svg = charts.svg_paired_bars(_items("average_precision"), metric_label="Average precision")
+    return (
+        "<div class='card' style='margin-bottom:1rem'>"
+        "<p class='eyebrow'>The turning point</p>"
+        "<h3 style='margin:.1rem 0 .4rem'>Same features, same test months, honest labels</h3>"
+        "<p style='color:var(--muted);font-size:.92rem;margin:0 0 .8rem'>Each pair is one "
+        "configuration scored twice on identical test data. <em>Stored labels</em> let a training "
+        "label be set by an advisory published inside the test window; <em>embargoed</em> rebuilds "
+        "every training label from advisories known before the fold's forecast date. The gap is "
+        "the leak. Hover a bar for the value.</p>"
+        f"<p style='margin:0 0 .2rem;font-size:.85rem;color:var(--muted)'>{_tip('ROC-AUC', 'ROC AUC')}"
+        " — separation of advisory-bound plugins from the rest; 0.5 is chance</p>"
+        f"{roc_svg}"
+        f"<p style='margin:.8rem 0 .2rem;font-size:.85rem;color:var(--muted)'>{_tip('Average precision')}"
+        " — concentration of advisories at the top of the ranked list</p>"
+        f"{ap_svg}"
+        "</div>"
+    )
+
+
+def _render_honest_timeline_card(viz: dict[str, Any]) -> str:
+    """Per-fold ROC-AUC across the development sweep and the pre-registered holdout."""
+    series = [dict(s, label=_honest_config_text(s)) for s in viz.get("timeline") or []]
+    svg = charts.svg_timeline(
+        series,
+        criterion=float(viz.get("criterion") or 0.55),
+        boundary_month=str(viz.get("boundary_month") or ""),
+        width=1140,
+    )
+    if not svg:
+        return ""
+    n_folds = max((len(s.get("points") or []) for s in series), default=0)
+    return (
+        "<div class='card' style='margin-bottom:1rem'>"
+        "<p class='eyebrow'>Every fold, one criterion</p>"
+        f"<h3 style='margin:.1rem 0 .4rem'>ROC-AUC per fold across {n_folds} forecast dates</h3>"
+        "<p style='color:var(--muted);font-size:.92rem;margin:0 0 .8rem'>Each point is one "
+        "two-month test window scored by a model trained only on what was knowable at that "
+        "date. The configurations were chosen on the development folds; the criterion was written "
+        "down before the holdout months were collected; the holdout folds were run once. Larger "
+        "markers are the recorded out-of-time folds. Hover a point for the fold's outcome count.</p>"
+        f"{svg}</div>"
+    )
+
+
+def _render_honest_holdout_curves_card(curve_sets: list[dict[str, Any]]) -> str:
+    """Cumulative gain and ROC curves on the out-of-time predictions."""
+    curve_sets = [c for c in curve_sets if (c.get("curves") or {}).get("pooled", {}).get("gain")]
+    if not curve_sets:
+        return ""
+    gain_series = []
+    for c in curve_sets:
+        pooled = c["curves"]["pooled"]["gain"]
+        gain_series.append(
+            {
+                "label": _honest_config_text(c["run"]),
+                "fractions": pooled["fractions"],
+                "captured": pooled["captured"],
+            }
+        )
+    first = curve_sets[0]["curves"]
+    fold_curves = [f["gain"] for f in first.get("folds") or [] if f.get("gain")]
+    roc_folds = [
+        {
+            "label": f"{f['month']} ({f['n_positive']} outcomes)",
+            "fpr": f["roc"]["fpr"],
+            "tpr": f["roc"]["tpr"],
+            "auc": f["roc"]["auc"],
+        }
+        for f in first.get("folds") or []
+        if f.get("roc")
+    ]
+    gain_svg = charts.svg_gain(gain_series, fold_curves=fold_curves)
+    roc_svg = charts.svg_roc(roc_folds)
+    lookup = dict(zip(gain_series[0]["fractions"], gain_series[0]["captured"], strict=True))
+    at_20 = lookup.get(0.2)
+    headline = ""
+    if at_20 is not None:
+        headline = (
+            f"Reviewing the top 20% of plugins by score in each holdout fold would have caught "
+            f"{round(at_20 * 100)}% of the advisories that followed, against a base rate of "
+            f"{first.get('base_rate', 0) * 100:.1f}%. "
+        )
+    n_pos = f"{first.get('n_positive') or 0:,}"
+    n_rows = f"{first.get('n_rows') or 0:,}"
+    return (
+        "<div class='card' style='margin-bottom:1rem'>"
+        "<p class='eyebrow'>What the holdout ranking looks like</p>"
+        "<h3 style='margin:.1rem 0 .4rem'>Advisories caught vs plugins reviewed, out-of-time</h3>"
+        f"<p style='color:var(--muted);font-size:.92rem;margin:0 0 .8rem'>{_escape(headline)}"
+        "The thick line is the pooled ranking over every holdout fold; thin lines are the "
+        f"individual folds ({_escape(n_rows)} plugin-months, {_escape(n_pos)} advisory outcomes). "
+        "The dashed diagonal is random order. Right: the ROC curve of each holdout fold for the "
+        "first configuration.</p>"
+        "<div class='two-up' style='align-items:flex-start'>"
+        f"<div style='flex:3 1 420px;min-width:300px'>{gain_svg}</div>"
+        f"<div style='flex:2 1 300px;min-width:260px'>{roc_svg}</div>"
+        "</div></div>"
+    )
+
+
+def _render_honest_tab(runs: list[dict[str, Any]], viz: dict[str, Any] | None = None) -> str:
     """
     Render the Honest-evaluation tab: rolling-origin backtest results with
     the label embargo applied at every fold — the deployment-honest numbers,
@@ -3330,7 +3478,17 @@ def _render_honest_tab(runs: list[dict[str, Any]]) -> str:
         "</div>"
     )
 
-    return intro + champion_html + _render_honest_oot_card(runs) + table + caveats
+    viz = viz or {}
+    return (
+        intro
+        + _render_honest_leakage_card(viz.get("pairs") or [])
+        + champion_html
+        + _render_honest_timeline_card(viz)
+        + _render_honest_oot_card(runs)
+        + _render_honest_holdout_curves_card(viz.get("curves") or [])
+        + table
+        + caveats
+    )
 
 
 def _render_about_tab() -> str:
