@@ -115,6 +115,7 @@ DEFAULTS: dict[str, Any] = {
     "registry_path": DEFAULT_REGISTRY_PATH,
     "model_out_dir": DEFAULT_MODEL_DIR,
     "score_model_dir": DEFAULT_MODEL_DIR,
+    "oot_run": "",
 }
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -498,6 +499,75 @@ def _advisories_in_window(
     return [r for r in records if after_date < (r.get("published_date") or "") <= before_date]
 
 
+def _label_window_end(obs_month: str) -> str:
+    """Last day of the 180-day label window that opens at ``obs_month``
+    (``YYYY-MM``): the end of the sixth month after it. Empty on bad input."""
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    try:
+        obs_dt = _dt.strptime(obs_month, "%Y-%m")
+    except ValueError:
+        return ""
+    em = obs_dt.month + 6
+    ey = obs_dt.year + (em - 1) // 12
+    em = ((em - 1) % 12) + 1
+    end_dt = (_dt(ey, em, 1) + _td(days=32)).replace(day=1) - _td(days=1)
+    return end_dt.strftime("%Y-%m-%d")
+
+
+def _enrich_prediction_row(
+    row: dict[str, Any], rank: int, obs_date: str, window_end: str
+) -> dict[str, Any]:
+    """
+    One case-study row: the prediction joined with the highest-severity
+    advisory published for the plugin inside (obs_date, window_end]. A row
+    is confirmed when such an advisory exists or the stored label is
+    positive (the label can be positive when the local advisory files are
+    incomplete).
+    """
+    from datetime import datetime as _dt
+
+    pid = row["plugin_id"]
+    advisories = _advisories_in_window(pid, obs_date, window_end) if obs_date and window_end else []
+    confirmed = bool(advisories) or row["y_true"] == 1
+    adv_date = adv_sev = adv_url = ""
+    adv_cvss: float | None = None
+    sec_ids: list[str] = []
+    if advisories:
+        best = max(
+            advisories,
+            key=lambda a: (a.get("severity_summary") or {}).get("max_cvss_base_score") or 0,
+        )
+        adv_date = best.get("published_date", "")
+        sev_sum = best.get("severity_summary") or {}
+        adv_sev = (sev_sum.get("max_severity_label") or "").title()
+        adv_cvss = sev_sum.get("max_cvss_base_score")
+        adv_url = best.get("url", "")
+        sec_ids = best.get("security_warning_ids") or []
+    days_to_adv: int | None = None
+    if adv_date and obs_date:
+        try:
+            days_to_adv = (
+                _dt.strptime(adv_date, "%Y-%m-%d") - _dt.strptime(obs_date, "%Y-%m")
+            ).days
+        except ValueError:
+            pass
+    return {
+        "rank": rank,
+        "plugin_id": pid,
+        "month": row.get("month", obs_date),
+        "score": row["y_prob"],
+        "confirmed": confirmed,
+        "adv_date": adv_date,
+        "adv_sev": adv_sev,
+        "adv_cvss": adv_cvss,
+        "adv_url": adv_url,
+        "sec_ids": sec_ids,
+        "days_to_adv": days_to_adv,
+    }
+
+
 def _load_cs_prediction_rows(
     model_out_dir: str,
     metrics: dict[str, Any] | None,
@@ -511,8 +581,6 @@ def _load_cs_prediction_rows(
     adv_date, adv_url, days_to_adv, confirmed.
     """
     import csv as _csv
-    from datetime import datetime as _dt
-    from datetime import timedelta as _td
 
     stem = Path(model_out_dir).name
     pred_path = MODEL_OUTPUTS_ROOT / stem / "test_predictions.csv"
@@ -538,17 +606,7 @@ def _load_cs_prediction_rows(
     obs_date = (metrics or {}).get("test_start_month") or (
         min(r["month"] for r in rows) if rows else ""
     )
-    window_end = ""
-    if obs_date:
-        try:
-            obs_dt = _dt.strptime(obs_date, "%Y-%m")
-            em = obs_dt.month + 6
-            ey = obs_dt.year + (em - 1) // 12
-            em = ((em - 1) % 12) + 1
-            end_dt = (_dt(ey, em, 1) + _td(days=32)).replace(day=1) - _td(days=1)
-            window_end = end_dt.strftime("%Y-%m-%d")
-        except ValueError:
-            pass
+    window_end = _label_window_end(obs_date) if obs_date else ""
 
     # Deduplicate by plugin_id
     seen: set[str] = set()
@@ -558,49 +616,10 @@ def _load_cs_prediction_rows(
             seen.add(row["plugin_id"])
             deduped.append(row)
 
-    enriched: list[dict[str, Any]] = []
-    for rank, row in enumerate(deduped[:n_top], start=1):
-        pid = row["plugin_id"]
-        advisories = (
-            _advisories_in_window(pid, obs_date, window_end) if obs_date and window_end else []
-        )
-        confirmed = bool(advisories) or row["y_true"] == 1
-        adv_date = adv_sev = adv_url = ""
-        adv_cvss: float | None = None
-        sec_ids: list[str] = []
-        if advisories:
-            best = max(
-                advisories,
-                key=lambda a: (a.get("severity_summary") or {}).get("max_cvss_base_score") or 0,
-            )
-            adv_date = best.get("published_date", "")
-            sev_sum = best.get("severity_summary") or {}
-            adv_sev = (sev_sum.get("max_severity_label") or "").title()
-            adv_cvss = sev_sum.get("max_cvss_base_score")
-            adv_url = best.get("url", "")
-            sec_ids = best.get("security_warning_ids") or []
-        days_to_adv: int | None = None
-        if adv_date and obs_date:
-            try:
-                days_to_adv = (
-                    _dt.strptime(adv_date, "%Y-%m-%d") - _dt.strptime(obs_date, "%Y-%m")
-                ).days
-            except ValueError:
-                pass
-        enriched.append(
-            {
-                "rank": rank,
-                "plugin_id": pid,
-                "score": row["y_prob"],
-                "confirmed": confirmed,
-                "adv_date": adv_date,
-                "adv_sev": adv_sev,
-                "adv_cvss": adv_cvss,
-                "adv_url": adv_url,
-                "sec_ids": sec_ids,
-                "days_to_adv": days_to_adv,
-            }
-        )
+    enriched = [
+        _enrich_prediction_row(row, rank, obs_date, window_end)
+        for rank, row in enumerate(deduped[:n_top], start=1)
+    ]
 
     confirmed_rows = [r for r in enriched if r["confirmed"]]
     unconfirmed_rows = [r for r in enriched if not r["confirmed"]]
@@ -713,6 +732,128 @@ def _load_honest_viz(runs: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _primary_oot_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The recorded out-of-time runs (embargoed, not sensitivity), best first."""
+    return [
+        r
+        for r in runs
+        if r.get("embargo") and not r.get("sensitivity") and r.get("window_kind") == "out_of_time"
+    ]
+
+
+def _champion_run_dirs(runs: list[dict[str, Any]]) -> tuple[list[Path], dict[str, Any] | None]:
+    """
+    Fold directories of the leading pre-registered configuration: its
+    development run followed by its out-of-time run (the first series of the
+    Honest tab's timeline). Returns ([], None) when no rolling run exists.
+    """
+    series = honest_viz.timeline_series(runs)
+    if not series:
+        return [], None
+    lead = series[0]
+    return [ROLLING_RESULTS_ROOT / name for name in lead["run_names"] if name], lead
+
+
+def _load_plugin_track(plugin_id: str) -> dict[str, Any] | None:
+    """
+    A plugin's honest track record: its percentile rank at every forecast
+    date the champion configuration was scored on (development folds and the
+    out-of-time holdout), with the advisory that followed where the label
+    was positive. None when the plugin was never in a scored panel.
+    """
+    runs = _load_rolling_backtests()
+    run_dirs, lead = _champion_run_dirs(runs)
+    if not run_dirs or lead is None:
+        return None
+    index = honest_viz.ranked_index(run_dirs)
+    if index is None:
+        return None
+    rows = honest_viz.plugin_track(index, plugin_id)
+    if not rows:
+        return None
+    for row in rows:
+        row["window"] = "out_of_time" if row["month"] > OOT_BOUNDARY_MONTH else "development"
+        row["adv_date"] = ""
+        row["adv_id"] = ""
+        row["adv_url"] = ""
+        if row["y_true"]:
+            hits = _advisories_in_window(plugin_id, row["month"], _label_window_end(row["month"]))
+            if hits:
+                first = min(hits, key=lambda a: a.get("published_date") or "")
+                row["adv_date"] = first.get("published_date", "")
+                ids = first.get("security_warning_ids") or []
+                row["adv_id"] = str(ids[0]) if ids else ""
+                row["adv_url"] = first.get("url", "")
+    holdout = [r for r in rows if r["window"] == "out_of_time"]
+    return {
+        "plugin_id": plugin_id,
+        "include_prefixes": lead["include_prefixes"],
+        "model_name": lead["model_name"],
+        "run_names": lead["run_names"],
+        "boundary_month": OOT_BOUNDARY_MONTH,
+        "rows": rows,
+        "n_months": len(rows),
+        "n_positive": sum(r["y_true"] for r in rows),
+        "mean_percentile": sum(r["percentile"] for r in rows) / len(rows),
+        "holdout_mean_percentile": (
+            sum(r["percentile"] for r in holdout) / len(holdout) if holdout else None
+        ),
+    }
+
+
+def _load_honest_case_study(values: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    The Case-study tab's out-of-time view: the top-25 of each holdout fold of
+    a recorded run, joined with the advisories that followed. ``oot_run`` in
+    the query selects the run by directory name (validated against the
+    discovered runs, never path-joined from user input); the first recorded
+    run is the default. None when no out-of-time run exists.
+    """
+    runs = _load_rolling_backtests()
+    oot_runs = _primary_oot_runs(runs)
+    if not oot_runs:
+        return None
+    wanted = str(values.get("oot_run") or "")
+    run = next((r for r in oot_runs if r.get("run_name") == wanted), oot_runs[0])
+    run_dir = ROLLING_RESULTS_ROOT / str(run["run_name"])
+    index = honest_viz.ranked_index([run_dir])
+    folds: list[dict[str, Any]] = []
+    if index is not None:
+        for fold_meta in run.get("folds") or []:
+            fold = str(fold_meta.get("test_start_month") or "")
+            top = honest_viz.fold_top_n(index, fold)
+            if not top:
+                continue
+            enriched = [
+                _enrich_prediction_row(
+                    row, row["rank"], row["month"], _label_window_end(row["month"])
+                )
+                for row in top
+            ]
+            n_pos = int(fold_meta.get("test_positive_count") or 0)
+            n_rows = int(fold_meta.get("test_row_count") or 0)
+            base_rate = n_pos / n_rows if n_rows else 0.0
+            folds.append(
+                {
+                    "fold": fold,
+                    "test_end_month": str(fold_meta.get("test_end_month") or fold),
+                    "label_as_of_month": str(fold_meta.get("label_as_of_month") or ""),
+                    "roc_auc": fold_meta.get("roc_auc"),
+                    "n_positive": n_pos,
+                    "n_rows": n_rows,
+                    "base_rate": base_rate,
+                    "confirmed_rows": [r for r in enriched if r["confirmed"]],
+                    "unconfirmed_rows": [r for r in enriched if not r["confirmed"]],
+                }
+            )
+    return {
+        "run": run,
+        "runs": oot_runs,
+        "folds": folds,
+        "pred_exists": bool(folds),
+    }
+
+
 def _load_case_study_view(values: dict[str, Any]) -> dict[str, Any] | None:
     """
     Assemble everything the case-study tab renders: model metrics, the
@@ -787,6 +928,7 @@ def render_page(
     )
     active_panel_html = ""
     if active_tab == "score":
+        plugin_track = _load_plugin_track(score_result["plugin"]) if score_result else None
         active_panel_html = _render_score_section(
             values,
             plugin_options,
@@ -796,6 +938,7 @@ def render_page(
             ai_result=ai_result,
             ai_error=ai_error,
             rate_limited=rate_limited,
+            plugin_track=plugin_track,
         )
     elif active_tab == "about":
         active_panel_html = _render_about_tab()
@@ -803,13 +946,15 @@ def render_page(
         honest_runs = _load_rolling_backtests()
         active_panel_html = _render_honest_tab(honest_runs, viz=_load_honest_viz(honest_runs))
     elif active_tab == "casestudy":
+        cs_view = _load_case_study_view(values)
         active_panel_html = _render_case_study_tab(
             values,
             model_dir_options or [],
-            cs_view=_load_case_study_view(values),
+            cs_view=cs_view,
             cs_ai_result=cs_ai_result,
             cs_ai_error=cs_ai_error,
             cs_rate_limited=cs_rate_limited,
+            honest_view=_load_honest_case_study(values) if cs_view is None else None,
         )
     else:
         _ml_dir = values.get("model_out_dir") or ""
@@ -1096,6 +1241,7 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
             "model_out_dir": query.get("model_out_dir", [""])[-1],
             "plugin": query.get("plugin", [""])[-1],
             "score_model_dir": query.get("score_model_dir", [""])[-1],
+            "oot_run": query.get("oot_run", [""])[-1],
         }
     )
     _get_explain = query.get("explain", [""])[-1] == "1"

@@ -19,6 +19,9 @@ Three views are prepared:
   configuration on the same folds (rolling ``<run>`` / ``<run>_leaky``
   siblings, plus named time-split ``<stem>`` / ``<stem>_embargo`` model
   directories), which is the before-and-after picture of the label leak.
+* ``ranked_index`` — every fold prediction of a configuration's runs ranked
+  within its month, for a plugin's track record across forecast dates
+  (``plugin_track``) and the top-N of a fold (``fold_top_n``).
 """
 
 from __future__ import annotations
@@ -396,3 +399,114 @@ def time_split_leakage_pairs(
             }
         )
     return pairs
+
+
+# ---------------------------------------------------------------------------
+# Per-plugin track record and per-fold top-N across a run's fold predictions
+# ---------------------------------------------------------------------------
+
+
+def _read_prediction_records(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8", newline="") as fh:
+        for rec in csv.DictReader(fh):
+            try:
+                rows.append(
+                    {
+                        "plugin_id": str(rec["plugin_id"]),
+                        "month": str(rec["month"]),
+                        "y_true": int(float(rec["y_true"])),
+                        "y_prob": float(rec["y_prob"]),
+                    }
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+    return rows
+
+
+def _run_signature(run_dirs: tuple[Path, ...]) -> tuple[tuple[str, int, int], ...]:
+    sig: list[tuple[str, int, int]] = []
+    for run_dir in run_dirs:
+        for fold_dir in _fold_dirs(run_dir):
+            st = (fold_dir / "test_predictions.csv").stat()
+            sig.append((str(fold_dir), st.st_mtime_ns, st.st_size))
+    return tuple(sig)
+
+
+@lru_cache(maxsize=8)
+def _ranked_index_cached(
+    run_dirs: tuple[str, ...], signature: tuple[tuple[str, int, int], ...]
+) -> dict[str, Any]:
+    """
+    Every fold prediction of the given runs, ranked within its month.
+
+    Returns ``{"by_plugin": {plugin_id: [row, ...]}, "by_fold": {fold: [row, ...]}}``
+    where each row carries ``month, fold, run_name, y_prob, y_true, rank, n,
+    percentile``. ``rank`` is 1 for the highest score in that month;
+    ``percentile`` is the share of that month's other plugins scored below.
+    """
+    del signature  # part of the cache key only
+    by_plugin: dict[str, list[dict[str, Any]]] = {}
+    by_fold: dict[str, list[dict[str, Any]]] = {}
+    for run_dir in (Path(d) for d in run_dirs):
+        for fold_dir in _fold_dirs(run_dir):
+            fold = fold_dir.name.removeprefix("fold_")
+            records = _read_prediction_records(fold_dir / "test_predictions.csv")
+            months: dict[str, list[dict[str, Any]]] = {}
+            for rec in records:
+                months.setdefault(rec["month"], []).append(rec)
+            for month_rows in months.values():
+                month_rows.sort(key=lambda r: -r["y_prob"])
+                n = len(month_rows)
+                for rank, rec in enumerate(month_rows, start=1):
+                    row = {
+                        **rec,
+                        "fold": fold,
+                        "run_name": run_dir.name,
+                        "rank": rank,
+                        "n": n,
+                        "percentile": 100.0 * (n - rank) / (n - 1) if n > 1 else 100.0,
+                    }
+                    by_plugin.setdefault(rec["plugin_id"], []).append(row)
+                    by_fold.setdefault(fold, []).append(row)
+    for rows in by_plugin.values():
+        rows.sort(key=lambda r: r["month"])
+    return {"by_plugin": by_plugin, "by_fold": by_fold}
+
+
+def ranked_index(run_dirs: list[Path]) -> dict[str, Any] | None:
+    """Cached month-ranked index over the fold predictions of ``run_dirs``
+    (development run first, then out-of-time). None when nothing is on disk."""
+    existing = tuple(d for d in run_dirs if d.is_dir())
+    if not existing:
+        return None
+    signature = _run_signature(existing)
+    if not signature:
+        return None
+    return _ranked_index_cached(tuple(str(d.resolve()) for d in existing), signature)
+
+
+def plugin_track(index: dict[str, Any], plugin_id: str) -> list[dict[str, Any]]:
+    """Month-ordered ranked rows for one plugin (empty when never scored)."""
+    return list(index.get("by_plugin", {}).get(plugin_id, []))
+
+
+def fold_top_n(index: dict[str, Any], fold: str, n_top: int = 25) -> list[dict[str, Any]]:
+    """
+    The top ``n_top`` plugins of a fold by their best month score, one row per
+    plugin (a two-month fold scores each plugin twice; the higher score and
+    its month are kept). ``y_true`` is 1 when either month's label was
+    positive. Rows carry ``rank`` re-numbered 1..n_top within the fold.
+    """
+    best: dict[str, dict[str, Any]] = {}
+    for row in index.get("by_fold", {}).get(fold, []):
+        pid = row["plugin_id"]
+        current = best.get(pid)
+        if current is None or row["y_prob"] > current["y_prob"]:
+            best[pid] = dict(row, y_true=max(row["y_true"], (current or row)["y_true"]))
+        elif row["y_true"] and not current["y_true"]:
+            current["y_true"] = 1
+    ordered = sorted(best.values(), key=lambda r: (-r["y_prob"], r["plugin_id"]))[:n_top]
+    for i, row in enumerate(ordered, start=1):
+        row["rank"] = i
+    return ordered

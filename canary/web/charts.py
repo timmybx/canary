@@ -426,3 +426,85 @@ def svg_paired_bars(
             out.append(_text(left + w + 6, y + bar_h - 4, _fmt(v, digits), size=11, fill=_TEXT))
     out.append("</svg>")
     return "".join(out)
+
+
+# ---------------------------------------------------------------------------
+# One plugin's percentile rank across every forecast date
+# ---------------------------------------------------------------------------
+
+
+def svg_plugin_track(
+    rows: list[dict[str, Any]],
+    *,
+    boundary_month: str,
+    width: int = 560,
+    height: int = 260,
+) -> str:
+    """
+    Strip chart of a plugin's percentile rank per scored month. Each row is
+    ``{"month", "percentile", "rank", "n", "y_true", "y_prob", "window"}``;
+    months after ``boundary_month`` sit in the shaded holdout region. Months
+    an advisory followed within the label window are drawn as filled warning
+    markers, others as accent markers.
+    """
+    rows = [r for r in rows if r.get("month") and r.get("percentile") is not None]
+    if not rows:
+        return ""
+    months = sorted({str(r["month"]) for r in rows})
+    left, right, top, bottom = 46, 20, 26, 62
+    plot_w = width - left - right
+    plot_h = height - top - bottom
+
+    def x_of(month: str) -> float:
+        return left + (months.index(month) + 0.5) * plot_w / len(months)
+
+    def y_of(pct: float) -> float:
+        return top + (100 - pct) / 100 * plot_h
+
+    out = [_svg_open(width, height, "Percentile rank of this plugin at every forecast date")]
+    holdout = [m for m in months if m > boundary_month]
+    if holdout and len(holdout) < len(months):
+        first_hold = x_of(holdout[0])
+        last_dev = x_of(months[months.index(holdout[0]) - 1])
+        bx = (first_hold + last_dev) / 2
+        out.append(
+            f'<rect x="{bx:.1f}" y="{top}" width="{left + plot_w - bx:.1f}" height="{plot_h}" '
+            'fill="rgba(141,240,188,.07)"/>'
+        )
+        out.append(_line(bx, top, bx, top + plot_h, "var(--good)", stroke_dasharray="4 4"))
+        out.append(_text(bx + 6, top - 8, "out-of-time holdout", size=11, fill="var(--good)"))
+    for pct in (0, 25, 50, 75, 100):
+        y = y_of(pct)
+        out.append(_line(left, y, left + plot_w, y, _LINE, stroke_width="1"))
+        out.append(_text(left - 8, y + 4, f"{pct}", size=11, text_anchor="end"))
+    out.append(_line(left, y_of(80), left + plot_w, y_of(80), _MUTED, stroke_dasharray="6 4"))
+    out.append(_text(left + plot_w - 4, y_of(80) - 5, "top 20%", size=11, text_anchor="end"))
+    step = max(1, math.ceil(len(months) / 9))
+    labelled = [i for i in range(len(months)) if i % step == 0]
+    if len(months) - 1 - labelled[-1] >= step / 2:
+        labelled.append(len(months) - 1)
+    for i in labelled:
+        out.append(
+            _text(x_of(months[i]), top + plot_h + 18, months[i], size=10, text_anchor="middle")
+        )
+    pts = [(x_of(str(r["month"])), y_of(float(r["percentile"]))) for r in rows]
+    if len(pts) > 1:
+        out.append(_polyline(pts, "rgba(111,177,255,.5)", 1.5))
+    for r, (x, y) in zip(rows, pts, strict=True):
+        hit = bool(r.get("y_true"))
+        color = STORED_COLOR if hit else EMBARGOED_COLOR
+        radius = 5.5 if hit else 3.5
+        outcome = "advisory followed within 180 days" if hit else "no advisory within 180 days"
+        out.append(
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius}" fill="{color}" stroke="var(--bg)" '
+            f'stroke-width="1.5"><title>{_esc(r["month"])} · rank {_esc(r.get("rank"))} of '
+            f"{_esc(r.get('n'))} · {float(r['percentile']):.0f}th percentile · "
+            f"score {_fmt(r.get('y_prob'))}\n{outcome}</title></circle>"
+        )
+    ly = height - 10
+    out.append(f'<circle cx="{left + 6}" cy="{ly - 4}" r="5.5" fill="{STORED_COLOR}"/>')
+    out.append(_text(left + 18, ly, "advisory followed within 180 days", size=11, fill=_TEXT))
+    out.append(f'<circle cx="{left + 236}" cy="{ly - 4}" r="3.5" fill="{EMBARGOED_COLOR}"/>')
+    out.append(_text(left + 248, ly, "no advisory in window", size=11, fill=_TEXT))
+    out.append("</svg>")
+    return "".join(out)

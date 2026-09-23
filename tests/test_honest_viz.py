@@ -287,7 +287,8 @@ def test_honest_tab_renders_charts_when_viz_is_supplied_and_tables_without() -> 
     assert "The turning point" in rich and "Every fold, one criterion" in rich
     assert "Activity-recency clocks · Logistic Regression" in rich
     # The gain headline is computed from the curve, not hard-coded.
-    assert "would have caught 100% of the advisories" in rich
+    assert "would have caught 100% of the advisories that followed" in rich
+    assert "(by fold: 100%)" in rich
 
 
 def test_load_honest_viz_reads_oot_curves_and_pairs(tmp_path: Path, monkeypatch: Any) -> None:
@@ -316,3 +317,131 @@ def test_load_honest_viz_reads_oot_curves_and_pairs(tmp_path: Path, monkeypatch:
     assert viz["pairs"] == []
     page = webapp.render_page({"active_tab": "honest"})
     assert "Advisories caught vs plugins reviewed" in page
+
+
+# ---------------------------------------------------------------------------
+# Ranked index: plugin track record and per-fold top-N
+# ---------------------------------------------------------------------------
+
+
+def test_ranked_index_ranks_within_month_and_tracks_a_plugin(tmp_path: Path) -> None:
+    dev = tmp_path / "dev"
+    oot = tmp_path / "oot"
+    _write_fold(dev, "2025-05", [("a", 0, 0.9), ("b", 1, 0.5), ("c", 0, 0.1)])
+    _write_fold(oot, "2025-07", [("a", 1, 0.2), ("b", 0, 0.8), ("c", 0, 0.7)])
+    index = honest_viz.ranked_index([dev, oot, tmp_path / "missing"])
+    assert index is not None
+
+    track = honest_viz.plugin_track(index, "a")
+    assert [(r["month"], r["rank"], r["n"]) for r in track] == [
+        ("2025-05", 1, 3),
+        ("2025-07", 3, 3),
+    ]
+    assert track[0]["percentile"] == 100.0 and track[1]["percentile"] == 0.0
+    assert track[1]["fold"] == "2025-07" and track[1]["run_name"] == "oot"
+    assert honest_viz.plugin_track(index, "nobody") == []
+    assert honest_viz.ranked_index([tmp_path / "missing"]) is None
+
+
+def test_fold_top_n_keeps_each_plugin_once_with_its_best_month(tmp_path: Path) -> None:
+    run = tmp_path / "oot"
+    _write_fold(
+        run,
+        "2025-11",
+        [("a", 0, 0.9), ("b", 0, 0.3)]  # November
+        + [("a", 1, 0.6), ("b", 0, 0.8)],  # December (rows carry their own month below)
+    )
+    # Give the second pair a December month so the fold has two months.
+    path = run / "fold_2025-11" / "test_predictions.csv"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    lines[3] = lines[3].replace("2025-11", "2025-12")
+    lines[4] = lines[4].replace("2025-11", "2025-12")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    index = honest_viz.ranked_index([run])
+    assert index is not None
+    top = honest_viz.fold_top_n(index, "2025-11", n_top=25)
+
+    # "a" is kept once, at its November score, but its December label counts.
+    assert [(r["plugin_id"], r["month"], r["y_prob"], r["y_true"]) for r in top] == [
+        ("a", "2025-11", 0.9, 1),
+        ("b", "2025-12", 0.8, 0),
+    ]
+    assert [r["rank"] for r in top] == [1, 2]
+    assert honest_viz.fold_top_n(index, "2099-01") == []
+
+
+def test_plugin_track_and_honest_case_study_loaders(tmp_path: Path, monkeypatch: Any) -> None:
+    rolling = tmp_path / "rolling"
+    advisories = tmp_path / "advisories"
+    rolling.mkdir()
+    advisories.mkdir()
+    dev = _rolling_payload(
+        embargo=True, prefixes=["ghclock_"], model="logistic", folds=[("2025-05", 0.7, 1)]
+    )
+    oot = _rolling_payload(
+        embargo=True, prefixes=["ghclock_"], model="logistic", folds=[("2025-07", 0.65, 1)]
+    )
+    oot["folds"][0].update(test_row_count=3, label_as_of_month="2025-08", test_end_month="2025-08")
+    for name, payload in (("dev_run", dev), ("oot_run", oot)):
+        (rolling / name).mkdir()
+        (rolling / name / "rolling_backtest.json").write_text(json.dumps(payload), encoding="utf-8")
+    _write_fold(rolling / "dev_run", "2025-05", [("a", 0, 0.9), ("b", 0, 0.5), ("c", 0, 0.1)])
+    _write_fold(rolling / "oot_run", "2025-07", [("a", 1, 0.9), ("b", 0, 0.5), ("c", 0, 0.1)])
+    (advisories / "a.advisories.real.jsonl").write_text(
+        json.dumps(
+            {
+                "published_date": "2025-09-03",
+                "url": "https://example.test/adv",
+                "security_warning_ids": ["SECURITY-1"],
+                "severity_summary": {"max_severity_label": "medium", "max_cvss_base_score": 5.0},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(webapp, "ROLLING_RESULTS_ROOT", rolling)
+    monkeypatch.setattr(webapp, "ADVISORY_DATA_ROOT", advisories)
+
+    track = webapp._load_plugin_track("a")
+    assert track is not None
+    assert track["run_names"] == ["dev_run", "oot_run"]
+    assert [r["window"] for r in track["rows"]] == ["development", "out_of_time"]
+    assert track["rows"][1]["adv_id"] == "SECURITY-1"
+    assert track["n_positive"] == 1 and track["holdout_mean_percentile"] == 100.0
+    assert webapp._load_plugin_track("nobody") is None
+
+    view = webapp._load_honest_case_study({"oot_run": "not-a-run"})
+    assert view is not None
+    assert view["run"]["run_name"] == "oot_run"  # unknown names fall back to the first run
+    fold = view["folds"][0]
+    assert fold["fold"] == "2025-07" and fold["base_rate"] == 1 / 3
+    assert [r["plugin_id"] for r in fold["confirmed_rows"]] == ["a"]
+    assert fold["confirmed_rows"][0]["adv_date"] == "2025-09-03"
+    assert [r["plugin_id"] for r in fold["unconfirmed_rows"]] == ["b", "c"]
+
+    # The Case-study tab shows the holdout view by default and the plugin's
+    # score page carries its track record.
+    page = webapp.render_page({"active_tab": "casestudy", "model_out_dir": "", "oot_run": ""})
+    assert "Top-25 per holdout fold vs. what followed" in page and "SECURITY-1" in page
+    score_result = {
+        "plugin": "a",
+        "ml": None,
+        "reasons": [],
+        "features": {},
+        "pretty_features": "{}",
+        "pretty_json": "{}",
+    }
+    page = webapp.render_page({"active_tab": "score", "plugin": "a"}, score_result=score_result)
+    assert "Where a ranked before each window" in page and "top 0.00%" in page
+
+
+def test_svg_plugin_track_marks_hits_and_holdout() -> None:
+    rows = [
+        {"month": "2025-05", "percentile": 80.0, "rank": 2, "n": 5, "y_true": 0, "y_prob": 0.4},
+        {"month": "2025-07", "percentile": 100.0, "rank": 1, "n": 5, "y_true": 1, "y_prob": 0.9},
+    ]
+    svg = charts.svg_plugin_track(rows, boundary_month="2025-06")
+    assert svg.count("<circle") == 4  # two points + two legend swatches
+    assert "out-of-time holdout" in svg and "advisory followed within 180 days" in svg
+    assert charts.svg_plugin_track([], boundary_month="2025-06") == ""

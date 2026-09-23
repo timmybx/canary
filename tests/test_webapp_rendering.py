@@ -321,7 +321,12 @@ def test_render_page_about_tab_exercises_about_content():
     assert "Jenkins Security Advisories" in html
 
 
-def test_render_page_case_study_tab_without_model_selected():
+def test_render_page_case_study_tab_without_model_selected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # With no recorded out-of-time run to show, the tab falls back to the
+    # historical model picker's empty state.
+    monkeypatch.setattr(webapp, "ROLLING_RESULTS_ROOT", tmp_path / "no-rolling-results")
     html = render_page({"active_tab": "casestudy", "model_out_dir": ""}, model_dir_options=[])
     assert "Validated predictions" in html
     assert "Select a model to view results" in html

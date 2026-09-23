@@ -761,6 +761,7 @@ def _render_score_section(
     ai_result: str | None = None,
     ai_error: str | None = None,
     rate_limited: bool = False,
+    plugin_track: dict[str, Any] | None = None,
 ) -> str:
     # ── Left column: form card ────────────────────────────────────────────────
     form_card = "".join(
@@ -835,7 +836,11 @@ def _render_score_section(
                 "</section>"
             )
 
-        # ── Risk context card SECOND (supporting signals) ─────────────────────
+        # ── Honest track record (rolling-backtest ranks) ─────────────────────
+        if plugin_track:
+            output_parts.append(_render_plugin_track_card(plugin_track))
+
+        # ── Risk context card (supporting signals) ───────────────────────────
         reasons_html = "".join(f"<li>{_escape(r)}</li>" for r in score_result["reasons"])
         output_parts.append(
             '<section class="card">'
@@ -869,6 +874,98 @@ def _render_score_section(
     left_col = '<div class="score-output">' + form_card + "</div>"
 
     return '<div class="grid--score">' + left_col + right_col + "</div>"
+
+
+def _top_share(percentile: float) -> str:
+    """'top 0.5%' style label for a percentile rank (100 = highest score)."""
+    share = max(0.0, 100.0 - percentile)
+    if share < 1:
+        return f"{share:.2f}%"
+    return f"{share:.1f}%" if share < 10 else f"{share:.0f}%"
+
+
+def _render_plugin_track_card(track: dict[str, Any]) -> str:
+    """
+    Score-tab card: the plugin's percentile rank at every forecast date the
+    champion configuration was scored on under the label embargo, with the
+    holdout months tabulated. The rows come from recorded rolling-backtest
+    predictions, so nothing here is re-scored for the page.
+    """
+    rows = track.get("rows") or []
+    if not rows:
+        return ""
+    label = _honest_config_text(track)
+    svg = charts.svg_plugin_track(rows, boundary_month=str(track.get("boundary_month") or ""))
+    holdout = [r for r in rows if r.get("window") == "out_of_time"]
+    n_pos = int(track.get("n_positive") or 0)
+    mean_pct = float(track.get("mean_percentile") or 0.0)
+    hold_pct = track.get("holdout_mean_percentile")
+    summary = (
+        f"Scored at {len(rows)} forecast dates; on average in the top "
+        f"{_top_share(mean_pct)} of plugins"
+        + (
+            f" (top {_top_share(float(hold_pct))} across the holdout)"
+            if hold_pct is not None
+            else ""
+        )
+        + ". "
+        + (
+            f"An advisory followed within 180 days of {n_pos} of those dates."
+            if n_pos
+            else "No advisory followed any of those dates within 180 days."
+        )
+    )
+
+    def _row(r: dict[str, Any]) -> str:
+        if r.get("y_true"):
+            if r.get("adv_id") and r.get("adv_url"):
+                outcome = (
+                    f'<a href="{_escape(r["adv_url"])}" target="_blank" rel="noopener noreferrer" '
+                    f'style="color:var(--warn)">{_escape(r["adv_id"])}</a>'
+                    f" <span style='color:var(--muted)'>{_escape(r.get('adv_date') or '')}</span>"
+                )
+            else:
+                outcome = "<span style='color:var(--warn)'>advisory within 180 days</span>"
+        else:
+            outcome = "<span style='color:var(--muted)'>none within 180 days</span>"
+        return (
+            "<tr>"
+            f"<td style='padding:.35rem .6rem;white-space:nowrap'>{_escape(r['month'])}</td>"
+            f"<td style='padding:.35rem .6rem;text-align:right'>{float(r['y_prob']):.1%}</td>"
+            f"<td style='padding:.35rem .6rem;text-align:right;white-space:nowrap'>"
+            f"{_escape(r['rank'])} of {int(r['n']):,}</td>"
+            f"<td style='padding:.35rem .6rem;text-align:right;white-space:nowrap'>"
+            f"top {_top_share(float(r['percentile']))}</td>"
+            f"<td style='padding:.35rem .6rem;white-space:nowrap'>{outcome}</td>"
+            "</tr>"
+        )
+
+    table = ""
+    if holdout:
+        table = (
+            "<table style='width:100%;border-collapse:collapse;font-size:.88rem;margin-top:.6rem'>"
+            "<thead><tr>"
+            "<th style='text-align:left;padding:.35rem .6rem'>Holdout month</th>"
+            f"<th style='text-align:right;padding:.35rem .6rem'>{_tip('Score')}</th>"
+            "<th style='text-align:right;padding:.35rem .6rem'>Rank</th>"
+            "<th style='text-align:right;padding:.35rem .6rem'>Share of panel</th>"
+            "<th style='text-align:left;padding:.35rem .6rem'>What followed</th>"
+            "</tr></thead>"
+            f"<tbody>{''.join(_row(r) for r in holdout)}</tbody></table>"
+        )
+    return (
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">Honest track record</p>'
+        f"<h2>Where {_escape(track.get('plugin_id'))} ranked before each window</h2>"
+        f'<p class="kicker">{_escape(label)}, embargoed rolling backtest: the rank this plugin '
+        "held among every scored plugin at each forecast date, using only what was knowable "
+        "then. Shaded months are the pre-registered holdout.</p>"
+        '</div><span class="pill pill--good">Recorded, not re-scored</span></div>'
+        f"<p style='color:var(--muted);font-size:.9rem;margin:.2rem 0 .6rem'>{_escape(summary)}</p>"
+        f"{svg}{table}"
+        "</section>"
+    )
 
 
 def _metric_value(value: Any, *, digits: int = 3) -> str:
@@ -3329,10 +3426,17 @@ def _render_honest_holdout_curves_card(curve_sets: list[dict[str, Any]]) -> str:
     at_20 = lookup.get(0.2)
     headline = ""
     if at_20 is not None:
+        per_fold = []
+        for f in first.get("folds") or []:
+            g = f.get("gain") or {}
+            fold_lookup = dict(zip(g.get("fractions") or [], g.get("captured") or [], strict=True))
+            if 0.2 in fold_lookup:
+                per_fold.append(f"{round(fold_lookup[0.2] * 100)}%")
+        per_fold_str = f" (by fold: {', '.join(per_fold)})" if per_fold else ""
         headline = (
-            f"Reviewing the top 20% of plugins by score in each holdout fold would have caught "
-            f"{round(at_20 * 100)}% of the advisories that followed, against a base rate of "
-            f"{first.get('base_rate', 0) * 100:.1f}%. "
+            f"Reviewing the top 20% of plugins by score would have caught {round(at_20 * 100)}% "
+            f"of the advisories that followed across the holdout folds{per_fold_str}, against a "
+            f"base rate of {first.get('base_rate', 0) * 100:.1f}%. "
         )
     n_pos = f"{first.get('n_positive') or 0:,}"
     n_rows = f"{first.get('n_rows') or 0:,}"
@@ -4246,6 +4350,171 @@ def _render_ml_tab(
 # ---------------------------------------------------------------------------
 
 
+def _render_honest_case_study(view: dict[str, Any]) -> str:
+    """
+    Right column of the Case-study tab for a recorded out-of-time run: one
+    panel per holdout fold with its top-25 plugins split into confirmed and
+    unconfirmed, the fold's precision at 25 and lift over its base rate. The
+    small hit counts are the honest picture and are shown as such.
+    """
+    run = view.get("run") or {}
+    label = _honest_config_text(run)
+    if not view.get("pred_exists"):
+        return (
+            '<section class="card">'
+            '<div class="card__header"><div>'
+            '<p class="eyebrow">Out-of-time outcomes</p>'
+            "<h2>No fold predictions found</h2>"
+            "</div></div>"
+            "<p class='muted' style='padding:.6rem 0'>The run directory "
+            f"<code>{_escape(run.get('run_name'))}</code> has no <code>fold_*/test_predictions.csv</code>.</p>"
+            "</section>"
+        )
+
+    def _sev_color(sev: str) -> str:
+        s_ = sev.lower()
+        return (
+            "#e05c5c"
+            if s_ in ("high", "critical")
+            else ("#e6a01e" if s_ == "medium" else "var(--muted)")
+        )
+
+    def _row(r: dict[str, Any]) -> str:
+        plugin_cell = (
+            f'<a href="/?tab=score&plugin={_escape(r["plugin_id"])}" '
+            f'style="color:var(--accent);text-decoration:none"><code>{_escape(r["plugin_id"])}</code></a>'
+        )
+        if r["confirmed"]:
+            sev = (
+                f'<span style="color:{_sev_color(r["adv_sev"])};font-weight:600">{_escape(r["adv_sev"])}'
+                + (f" ({r['adv_cvss']:.1f})" if r.get("adv_cvss") is not None else "")
+                + "</span>"
+                if r.get("adv_sev")
+                else "<span style='color:var(--muted)'>label only</span>"
+            )
+            adv = (
+                f'<a href="{_escape(r["adv_url"])}" target="_blank" rel="noopener noreferrer" '
+                f'style="color:var(--accent);font-size:.82rem">{_escape(r["sec_ids"][0])}</a>'
+                if r.get("adv_url") and r.get("sec_ids")
+                else "<span style='color:var(--muted)'>—</span>"
+            )
+            lead = f"{r['days_to_adv']} days" if r.get("days_to_adv") is not None else "—"
+            outcome = (
+                "<td style='padding:.4rem .6rem;text-align:center'><span style='color:#5ce0a0;font-weight:700'>&#x2713;</span></td>"
+                f"<td style='padding:.4rem .6rem'>{sev}</td>"
+                f"<td style='padding:.4rem .6rem;font-size:.82rem'>{_escape(r.get('adv_date') or '')}</td>"
+                f"<td style='padding:.4rem .6rem;font-size:.82rem;color:var(--muted)'>{lead}</td>"
+                f"<td style='padding:.4rem .6rem'>{adv}</td>"
+            )
+        else:
+            outcome = (
+                "<td style='padding:.4rem .6rem;text-align:center'><span style='color:var(--muted)'>–</span></td>"
+                "<td colspan='4' style='padding:.4rem .6rem;color:var(--muted);font-size:.82rem;font-style:italic'>"
+                "no advisory in the 180-day window</td>"
+            )
+        return (
+            "<tr>"
+            f"<td style='padding:.4rem .6rem;text-align:right;color:var(--muted);font-size:.82rem'>{r['rank']}</td>"
+            f"<td style='padding:.4rem .6rem'>{plugin_cell}</td>"
+            f"<td style='padding:.4rem .6rem;font-size:.82rem;color:var(--muted)'>{_escape(r.get('month') or '')}</td>"
+            f"<td style='padding:.4rem .6rem;text-align:right'><strong>{r['score']:.1%}</strong></td>"
+            f"{outcome}</tr>"
+        )
+
+    thead = (
+        "<thead><tr>"
+        + "".join(
+            f"<th style='text-align:{a};padding:.4rem .6rem;color:var(--muted);font-size:.8rem;font-weight:600'>{h}</th>"
+            for h, a in [
+                ("#", "right"),
+                ("Plugin", "left"),
+                ("Scored", "left"),
+                ("Score", "right"),
+                ("Confirmed", "center"),
+                ("Severity", "left"),
+                ("Advisory date", "left"),
+                ("Lead time", "left"),
+                ("Advisory", "left"),
+            ]
+        )
+        + "</tr></thead>"
+    )
+
+    panels: list[str] = []
+    total_hits = total_rows = 0
+    for fold in view.get("folds") or []:
+        confirmed = fold["confirmed_rows"]
+        unconfirmed = fold["unconfirmed_rows"]
+        n_total = len(confirmed) + len(unconfirmed)
+        total_hits += len(confirmed)
+        total_rows += n_total
+        prec = len(confirmed) / n_total if n_total else 0.0
+        base = float(fold.get("base_rate") or 0.0)
+        lift = prec / base if base else 0.0
+        head = (
+            "<div style='margin:.2rem 0 .6rem;padding:.6rem .9rem;background:rgba(141,240,188,.07);"
+            "border:1px solid rgba(141,240,188,.25);border-radius:10px;font-size:.9rem'>"
+            f"<strong>Scored:</strong> {_escape(fold['fold'])} and {_escape(fold['test_end_month'])}"
+            f" &nbsp;|&nbsp; <strong>Labels known as of:</strong> {_escape(fold.get('label_as_of_month') or '—')}"
+            f" &nbsp;|&nbsp; <strong>Fold ROC-AUC:</strong> {_fmt_metric(fold.get('roc_auc'), 3)}"
+            f" &nbsp;|&nbsp; <strong>Top-{n_total} precision:</strong> {len(confirmed)}/{n_total} ({prec:.0%})"
+            f" &nbsp;|&nbsp; <strong>Base rate:</strong> {base:.1%} ({lift:.1f}&#215;)"
+            "</div>"
+        )
+        confirmed_html = (
+            "<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse'>"
+            + thead
+            + "<tbody>"
+            + "".join(_row(r) for r in confirmed)
+            + "</tbody></table></div>"
+            if confirmed
+            else "<p style='color:var(--muted);font-size:.9rem'>None of the top "
+            f"{n_total} received an advisory inside the window.</p>"
+        )
+        unconfirmed_html = (
+            f"<details style='margin-top:.5rem'><summary style='cursor:pointer;color:var(--muted);"
+            f"font-size:.9rem'>The other {len(unconfirmed)} of the top {n_total}</summary>"
+            "<div style='overflow-x:auto;margin-top:.4rem'><table style='width:100%;border-collapse:collapse'>"
+            + thead
+            + "<tbody>"
+            + "".join(_row(r) for r in unconfirmed)
+            + "</tbody></table></div></details>"
+            if unconfirmed
+            else ""
+        )
+        panels.append(
+            f"<div class='panel' style='margin-top:.8rem'><h4>Holdout fold {_escape(fold['fold'])}"
+            f" <span style='color:#5ce0a0'>({len(confirmed)} of {n_total} confirmed)</span></h4>"
+            + head
+            + confirmed_html
+            + unconfirmed_html
+            + "</div>"
+        )
+    overall = (
+        f"Across the holdout, {total_hits} of the {total_rows} top-25 slots were followed by an "
+        "advisory within 180 days. That is the honest precision at 25 for this configuration: "
+        "a ranking signal with real lift over the base rate, not an operational triage list."
+    )
+    return (
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">Out-of-time outcomes</p>'
+        f"<h2>Top-25 per holdout fold vs. what followed</h2>"
+        f'<p class="kicker">{_escape(label)} · <code>{_escape(run.get("run_name"))}</code>. '
+        "Each plugin's best month inside the fold is shown; training labels were rebuilt from "
+        "advisories known before the fold's forecast date, and the folds were run once.</p>"
+        "</div>"
+        '<span class="pill pill--good">Pre-registered</span></div>'
+        f"<p style='color:var(--muted);font-size:.9rem;margin:.2rem 0 .4rem'>{_escape(overall)}</p>"
+        + "".join(panels)
+        + "<p style='font-size:.78rem;color:var(--muted);margin-top:.8rem'>Advisory details come "
+        "from the local Jenkins advisory dataset; a confirmed row without details is one whose "
+        "stored label was positive. Lead time = days from the scored month to publication. "
+        "Plugin names link to their score page, which shows the plugin's rank at every forecast "
+        "date.</p></section>"
+    )
+
+
 def _render_case_study_tab(
     values: dict[str, Any],
     model_dir_options: list[str],
@@ -4253,6 +4522,7 @@ def _render_case_study_tab(
     cs_ai_result: str | None = None,
     cs_ai_error: str | None = None,
     cs_rate_limited: bool = False,
+    honest_view: dict[str, Any] | None = None,
 ) -> str:
     """
     Dynamic case study tab — shows top-ranked test predictions alongside
@@ -4268,31 +4538,59 @@ def _render_case_study_tab(
     _load_case_study_view and passed in as *cs_view* (None = no model selected).
     """
 
-    # ── Left column: model picker ─────────────────────────────────────────────
+    # ── Left column: out-of-time run picker, then the historical model picker ─
+    oot_picker = ""
+    if honest_view and honest_view.get("runs"):
+        current = str((honest_view.get("run") or {}).get("run_name") or "")
+        options = "".join(
+            f'<option value="{_escape(r.get("run_name"))}"'
+            f"{' selected' if r.get('run_name') == current else ''}>"
+            f"{_escape(_honest_config_text(r))}</option>"
+            for r in honest_view["runs"]
+        )
+        oot_picker = (
+            '<form method="get" action="/" style="margin-bottom:1rem">'
+            '<input type="hidden" name="tab" value="casestudy">'
+            '<label for="pick-oot-run" style="font-size:.85rem;font-weight:600;color:var(--muted);'
+            'display:block;margin-bottom:.3rem">Pre-registered out-of-time run</label>'
+            f'<select id="pick-oot-run" name="oot_run">{options}</select>'
+            '<div style="margin-top:.9rem"><button type="submit">Show holdout outcomes</button></div>'
+            "</form>"
+        )
     selector_card = "".join(
         [
             '<section class="card" style="align-self:start">',
             '<div class="card__header"><div>',
             '<p class="eyebrow">Case study</p>',
             "<h2>Validated predictions</h2>",
-            '<p class="kicker">Choose a model to see how its top-ranked predictions ',
-            "compared against advisories subsequently published by Jenkins. "
-            "Confirmed rows show plugins CANARY flagged that received a real advisory "
-            "within the 6-month prediction window. Unconfirmed rows are CANARY's "
-            "current forward-looking recommendations.</p>",
+            '<p class="kicker">The top-ranked plugins at each forecast date, compared with the '
+            "advisories Jenkins published in the 180 days that followed. Confirmed rows are "
+            "plugins CANARY flagged that received a real advisory inside the window.</p>",
             '</div><span class="pill pill--muted">Live validation</span></div>',
-            '<form method="get" action="/">',
+            oot_picker,
+            "<details" + (" open" if cs_view is not None else "") + ">"
+            "<summary style='cursor:pointer;color:var(--muted);font-size:.9rem'>Historical "
+            "single-split models (stored labels, diagnostic)</summary>"
+            '<form method="get" action="/" style="margin-top:.6rem">',
             '<input type="hidden" name="tab" value="casestudy">',
             _render_model_picker(values, model_dir_options),
             '<div style="margin-top:.9rem">',
             '<button type="submit">Load predictions</button>',
             "</div>",
-            "</form>",
+            "</form></details>",
             "</section>",
         ]
     )
 
-    # ── Right column: no model selected yet ───────────────────────────────────
+    # ── The out-of-time case study is the default view; it needs the full
+    #    width for its nine-column tables, so the picker sits above it. ───────
+    if cs_view is None and honest_view is not None:
+        return (
+            '<div class="score-output">'
+            + selector_card
+            + _render_honest_case_study(honest_view)
+            + "</div>"
+        )
     if cs_view is None:
         right_col = (
             '<section class="card">'
