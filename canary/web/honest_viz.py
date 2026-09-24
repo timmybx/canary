@@ -154,6 +154,27 @@ def timeline_series(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return series
 
 
+def run_series(
+    run: dict[str, Any], *, ecosystem: str = "", window: str = "development"
+) -> dict[str, Any]:
+    """
+    One timeline series for a single rolling run, in the shape
+    ``timeline_series`` produces (``include_prefixes``, ``model_name``,
+    ``run_names``, ``points``). Used where runs from different ecosystems are
+    drawn on one chart, so the pairing by configuration does not apply.
+    """
+    pooled = run.get("pooled") or {}
+    return {
+        "ecosystem": ecosystem,
+        "include_prefixes": list(run.get("include_prefixes") or []),
+        "in_path": str(run.get("in_path") or ""),
+        "model_name": str(run.get("model_name") or ""),
+        "run_names": [str(run.get("run_name") or "")],
+        "pooled_roc_auc": pooled.get("roc_auc"),
+        "points": _fold_points(run, window),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Gain and ROC curves from fold-level predictions
 # ---------------------------------------------------------------------------

@@ -204,12 +204,13 @@ def svg_gain(
     callouts: Sequence[float] = (0.10, 0.20, 0.30),
     width: int = 560,
     height: int = 400,
+    unit: str = "plugin",
 ) -> str:
     """
     Gain curves. Each series is ``{"label", "fractions", "captured"}``.
     ``fold_curves`` (same shape, drawn thin and unlabelled) show fold-to-fold
     spread behind the first series. Callouts annotate the first series at
-    the given review fractions.
+    the given review fractions. ``unit`` names the reviewed thing on the axis.
     """
     series = [s for s in series if s.get("fractions") and s.get("captured")]
     if not series:
@@ -224,7 +225,7 @@ def svg_gain(
     def y_of(c: float) -> float:
         return top + (1 - c) * plot_h
 
-    out = [_svg_open(width, height, "Cumulative gain: advisories caught vs plugins reviewed")]
+    out = [_svg_open(width, height, f"Cumulative gain: advisories caught vs {unit}s reviewed")]
     for k in range(0, 11, 2):
         f = k / 10
         out.append(_line(x_of(f), top, x_of(f), top + plot_h, _LINE, stroke_width="1"))
@@ -270,7 +271,7 @@ def svg_gain(
         _text(
             left + plot_w / 2,
             top + plot_h + 34,
-            "share of plugins reviewed",
+            f"share of {unit}s reviewed",
             size=11,
             text_anchor="middle",
         )

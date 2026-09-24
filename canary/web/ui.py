@@ -990,25 +990,34 @@ def _top_share(percentile: float) -> str:
     return f"{share:.1f}%" if share < 10 else f"{share:.0f}%"
 
 
-def _render_plugin_track_card(track: dict[str, Any]) -> str:
+def _render_plugin_track_card(
+    track: dict[str, Any],
+    *,
+    unit: str = "plugin",
+    table: str = "holdout",
+    extra_html: str = "",
+) -> str:
     """
     Score-tab card: the plugin's percentile rank at every forecast date the
     champion configuration was scored on under the label embargo, with the
     holdout months tabulated. The rows come from recorded rolling-backtest
-    predictions, so nothing here is re-scored for the page.
+    predictions, so nothing here is re-scored for the page. ``unit`` names
+    the scored thing ("plugin" or "package"); ``table`` tabulates the
+    holdout months or, for a run without a holdout, every month ("all").
     """
     rows = track.get("rows") or []
     if not rows:
         return ""
     label = _honest_config_text(track)
-    svg = charts.svg_plugin_track(rows, boundary_month=str(track.get("boundary_month") or ""))
+    boundary = str(track.get("boundary_month") or "")
+    svg = charts.svg_plugin_track(rows, boundary_month=boundary)
     holdout = [r for r in rows if r.get("window") == "out_of_time"]
     n_pos = int(track.get("n_positive") or 0)
     mean_pct = float(track.get("mean_percentile") or 0.0)
     hold_pct = track.get("holdout_mean_percentile")
     summary = (
         f"Scored at {len(rows)} forecast dates; on average in the top "
-        f"{_top_share(mean_pct)} of plugins"
+        f"{_top_share(mean_pct)} of {unit}s"
         + (
             f" (top {_top_share(float(hold_pct))} across the holdout)"
             if hold_pct is not None
@@ -1046,30 +1055,33 @@ def _render_plugin_track_card(track: dict[str, Any]) -> str:
             "</tr>"
         )
 
-    table = ""
-    if holdout:
-        table = (
+    table_rows = rows if table == "all" else holdout
+    table_html = ""
+    if table_rows:
+        table_html = (
             "<table style='width:100%;border-collapse:collapse;font-size:.88rem;margin-top:.6rem'>"
             "<thead><tr>"
-            "<th style='text-align:left;padding:.35rem .6rem'>Holdout month</th>"
+            f"<th style='text-align:left;padding:.35rem .6rem'>"
+            f"{'Forecast date' if table == 'all' else 'Holdout month'}</th>"
             f"<th style='text-align:right;padding:.35rem .6rem'>{_tip('Score')}</th>"
             "<th style='text-align:right;padding:.35rem .6rem'>Rank</th>"
             "<th style='text-align:right;padding:.35rem .6rem'>Share of panel</th>"
             "<th style='text-align:left;padding:.35rem .6rem'>What followed</th>"
             "</tr></thead>"
-            f"<tbody>{''.join(_row(r) for r in holdout)}</tbody></table>"
+            f"<tbody>{''.join(_row(r) for r in table_rows)}</tbody></table>"
         )
+    shading = " Shaded months are the pre-registered holdout." if boundary else ""
     return (
         '<section class="card">'
         '<div class="card__header"><div>'
         '<p class="eyebrow">Honest track record</p>'
         f"<h2>Where {_escape(track.get('plugin_id'))} ranked before each window</h2>"
-        f'<p class="kicker">{_escape(label)}, embargoed rolling backtest: the rank this plugin '
-        "held among every scored plugin at each forecast date, using only what was knowable "
-        "then. Shaded months are the pre-registered holdout.</p>"
+        f'<p class="kicker">{_escape(label)}, embargoed rolling backtest: the rank this '
+        f"{_escape(unit)} held among every scored {_escape(unit)} at each forecast date, using "
+        f"only what was knowable then.{shading}</p>"
         '</div><span class="pill pill--good">Recorded, not re-scored</span></div>'
         f"<p style='color:var(--muted);font-size:.9rem;margin:.2rem 0 .6rem'>{_escape(summary)}</p>"
-        f"{svg}{table}"
+        f"{extra_html}{svg}{table_html}"
         "</section>"
     )
 
@@ -3440,9 +3452,16 @@ def _honest_config_text(run: dict[str, Any]) -> str:
     return f"{families} · {model_label}"
 
 
-def _render_honest_leakage_card(pairs: list[dict[str, Any]]) -> str:
+def _render_honest_leakage_card(
+    pairs: list[dict[str, Any]],
+    *,
+    eyebrow: str = "The turning point",
+    title: str = "Same features, same test months, honest labels",
+    intro: str = "",
+) -> str:
     """Before-and-after of the label leak: the same configuration on the same
-    test data, scored with stored labels and with the embargo applied."""
+    test data, scored with stored labels and with the embargo applied.
+    ``intro`` is trusted HTML placed before the standard explanation."""
     if not pairs:
         return ""
 
@@ -3466,9 +3485,9 @@ def _render_honest_leakage_card(pairs: list[dict[str, Any]]) -> str:
     ap_svg = charts.svg_paired_bars(_items("average_precision"), metric_label="Average precision")
     return (
         "<div class='card' style='margin-bottom:1rem'>"
-        "<p class='eyebrow'>The turning point</p>"
-        "<h3 style='margin:.1rem 0 .4rem'>Same features, same test months, honest labels</h3>"
-        "<p style='color:var(--muted);font-size:.92rem;margin:0 0 .8rem'>Each pair is one "
+        f"<p class='eyebrow'>{_escape(eyebrow)}</p>"
+        f"<h3 style='margin:.1rem 0 .4rem'>{_escape(title)}</h3>"
+        f"<p style='color:var(--muted);font-size:.92rem;margin:0 0 .8rem'>{intro}Each pair is one "
         "configuration scored twice on identical test data. <em>Stored labels</em> let a training "
         "label be set by an advisory published inside the test window; <em>embargoed</em> rebuilds "
         "every training label from advisories known before the fold's forecast date. The gap is "
@@ -3509,10 +3528,11 @@ def _render_honest_timeline_card(viz: dict[str, Any]) -> str:
 
 
 def _render_honest_holdout_curves_card(
-    curve_sets: list[dict[str, Any]], *, window_word: str = "holdout"
+    curve_sets: list[dict[str, Any]], *, window_word: str = "holdout", unit: str = "plugin"
 ) -> str:
     """Cumulative gain and ROC curves over a run's fold predictions
-    (``window_word`` names the folds in the prose: "holdout" or "development")."""
+    (``window_word`` names the folds in the prose: "holdout" or "development";
+    ``unit`` the scored thing: "plugin" or "package")."""
     curve_sets = [c for c in curve_sets if (c.get("curves") or {}).get("pooled", {}).get("gain")]
     if not curve_sets:
         return ""
@@ -3538,7 +3558,7 @@ def _render_honest_holdout_curves_card(
         for f in first.get("folds") or []
         if f.get("roc")
     ]
-    gain_svg = charts.svg_gain(gain_series, fold_curves=fold_curves)
+    gain_svg = charts.svg_gain(gain_series, fold_curves=fold_curves, unit=unit)
     roc_svg = charts.svg_roc(roc_folds)
     lookup = dict(zip(gain_series[0]["fractions"], gain_series[0]["captured"], strict=True))
     at_20 = lookup.get(0.2)
@@ -3552,7 +3572,7 @@ def _render_honest_holdout_curves_card(
                 per_fold.append(f"{round(fold_lookup[0.2] * 100)}%")
         per_fold_str = f" (by fold: {', '.join(per_fold)})" if per_fold else ""
         headline = (
-            f"Reviewing the top 20% of plugins by score would have caught {round(at_20 * 100)}% "
+            f"Reviewing the top 20% of {unit}s by score would have caught {round(at_20 * 100)}% "
             f"of the advisories that followed across the {window_word} folds{per_fold_str}, "
             "against a "
             f"base rate of {first.get('base_rate', 0) * 100:.1f}%. "
@@ -3562,11 +3582,11 @@ def _render_honest_holdout_curves_card(
     return (
         "<div class='card' style='margin-bottom:1rem'>"
         f"<p class='eyebrow'>What the {_escape(window_word)} ranking looks like</p>"
-        "<h3 style='margin:.1rem 0 .4rem'>Advisories caught vs plugins reviewed"
+        f"<h3 style='margin:.1rem 0 .4rem'>Advisories caught vs {_escape(unit)}s reviewed"
         f"{', out-of-time' if window_word == 'holdout' else ''}</h3>"
         f"<p style='color:var(--muted);font-size:.92rem;margin:0 0 .8rem'>{_escape(headline)}"
         f"The thick line is the pooled ranking over every {_escape(window_word)} fold; thin lines "
-        f"are the individual folds ({_escape(n_rows)} plugin-months, {_escape(n_pos)} advisory "
+        f"are the individual folds ({_escape(n_rows)} {_escape(unit)}-months, {_escape(n_pos)} advisory "
         "outcomes). The dashed diagonal is random order. Right: the ROC curve of each fold for "
         "the first configuration.</p>"
         "<div class='two-up' style='align-items:flex-start'>"
@@ -3823,8 +3843,6 @@ def _render_about_tab() -> str:
         "<li>Click the <strong>Score a plugin</strong> tab.</li>"
         "<li>Type a Jenkins plugin name in the <strong>Plugin ID</strong> field "
         "(autocomplete is populated from the live registry).</li>"
-        "<li>Optionally select an <strong>ML model</strong> from the dropdown "
-        "to add a probabilistic score alongside the heuristic one.</li>"
         "<li>Click <strong>Score plugin</strong>.</li>"
         "<li>Review the score, its feature drivers, and the plugin's <strong>honest track "
         "record</strong>: where it ranked at every past forecast date and whether an advisory "
@@ -3914,7 +3932,9 @@ def _render_about_tab() -> str:
         "</div></div>"
         '<ul style="margin:.6rem 0 0;padding-left:1.4rem;line-height:2;font-size:.95rem">'
         "<li>CANARY is scoped to the <strong>Jenkins plugin ecosystem</strong> only — "
-        "it does not score npm, PyPI, Maven, or other package registries.</li>"
+        "it does not score npm, PyPI, Maven, or other package registries. The "
+        "<strong>PyPI cross-check</strong> tab replicates the validation protocol on PyPI to "
+        "test whether the method travels; it is not a PyPI risk model.</li>"
         "<li>Scores reflect <strong>near-term advisory likelihood</strong>, not exploitability "
         "or severity in your specific environment.</li>"
         "<li>A low score does not mean a plugin is safe — it means CANARY sees no strong "
@@ -4897,25 +4917,43 @@ def _case_study_eyebrow(window_word: str) -> str:
     }.get(window_word, "Outcomes")
 
 
-def _case_study_method(window_word: str) -> str:
+def _case_study_method(window_word: str, unit: str = "plugin") -> str:
     if window_word in ("holdout", "development"):
         return (
-            "Each plugin's best month inside the fold is shown; training labels were rebuilt "
+            f"Each {unit}'s best month inside the fold is shown; training labels were rebuilt "
             "from advisories known before the fold's forecast date, and the folds were run once."
         )
     return (
-        "Each plugin's best month inside the test window is shown. Unless this model is an "
+        f"Each {unit}'s best month inside the test window is shown. Unless this model is an "
         "embargoed retrain, its training labels could be set by advisories published inside "
         "the test window, which inflates what you see here."
     )
 
 
-def _render_honest_case_study(view: dict[str, Any], *, window_word: str = "holdout") -> str:
+_JENKINS_CASE_STUDY_NOTE = (
+    "Advisory details come from the local Jenkins advisory dataset; a confirmed row without "
+    "details is one whose stored label was positive. Lead time = days from the scored month to "
+    "publication. Plugin names link to their score page, which shows the plugin's rank at every "
+    "forecast date."
+)
+
+
+def _render_honest_case_study(
+    view: dict[str, Any],
+    *,
+    window_word: str = "holdout",
+    unit: str = "plugin",
+    href_template: str = "/?tab=score&plugin={id}",
+    source_note: str = _JENKINS_CASE_STUDY_NOTE,
+) -> str:
     """
     Right column of the Case-study tab for a recorded out-of-time run: one
     panel per holdout fold with its top-25 plugins split into confirmed and
     unconfirmed, the fold's precision at 25 and lift over its base rate. The
-    small hit counts are the honest picture and are shown as such.
+    small hit counts are the honest picture and are shown as such. ``unit``
+    names the scored thing, ``href_template`` builds each name's link from
+    its ``{id}`` and ``source_note`` is the footnote on where the advisory
+    details came from.
     """
     run = view.get("run") or {}
     label = _honest_config_text(run)
@@ -4940,8 +4978,9 @@ def _render_honest_case_study(view: dict[str, Any], *, window_word: str = "holdo
         )
 
     def _row(r: dict[str, Any]) -> str:
+        href = href_template.format(id=_escape(r["plugin_id"]))
         plugin_cell = (
-            f'<a href="/?tab=score&plugin={_escape(r["plugin_id"])}" '
+            f'<a href="{href}" '
             f'style="color:var(--accent);text-decoration:none"><code>{_escape(r["plugin_id"])}</code></a>'
         )
         if r["confirmed"]:
@@ -4987,7 +5026,7 @@ def _render_honest_case_study(view: dict[str, Any], *, window_word: str = "holdo
             f"<th style='text-align:{a};padding:.4rem .6rem;color:var(--muted);font-size:.8rem;font-weight:600'>{h}</th>"
             for h, a in [
                 ("#", "right"),
-                ("Plugin", "left"),
+                (unit.capitalize(), "left"),
                 ("Scored", "left"),
                 ("Score", "right"),
                 ("Confirmed", "center"),
@@ -5063,16 +5102,13 @@ def _render_honest_case_study(view: dict[str, Any], *, window_word: str = "holdo
         f'<p class="eyebrow">{_escape(_case_study_eyebrow(window_word))}</p>'
         f"<h2>Top-25 per {_escape(window_word)} fold vs. what followed</h2>"
         f'<p class="kicker">{_escape(label)} · <code>{_escape(run.get("run_name"))}</code>. '
-        f"{_escape(_case_study_method(window_word))}</p>"
+        f"{_escape(_case_study_method(window_word, unit))}</p>"
         "</div>"
         f'<span class="pill pill--good">{_case_study_pill(window_word)}</span></div>'
         f"<p style='color:var(--muted);font-size:.9rem;margin:.2rem 0 .4rem'>{_escape(overall)}</p>"
         + "".join(panels)
-        + "<p style='font-size:.78rem;color:var(--muted);margin-top:.8rem'>Advisory details come "
-        "from the local Jenkins advisory dataset; a confirmed row without details is one whose "
-        "stored label was positive. Lead time = days from the scored month to publication. "
-        "Plugin names link to their score page, which shows the plugin's rank at every forecast "
-        "date.</p></section>"
+        + f"<p style='font-size:.78rem;color:var(--muted);margin-top:.8rem'>{_escape(source_note)}"
+        "</p></section>"
     )
 
 
@@ -5423,4 +5459,286 @@ def _render_case_study_tab(
         + right_html
         + "</div>"
         + "</div>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# PyPI cross-check tab
+# ---------------------------------------------------------------------------
+
+_PYPI_CASE_STUDY_NOTE = (
+    "Advisory details come from OSV's PyPI advisory database (PYSEC and GHSA records); a "
+    "confirmed row without details is one whose stored label was positive. Lead time = days "
+    "from the scored month to publication. Package names link to their look-up on this tab."
+)
+_PYPI_LABEL = "Advisory history"
+
+
+def _pypi_with_label(item: dict[str, Any]) -> dict[str, Any]:
+    """The PyPI study has one feature family; name it without the Jenkins
+    panel wording the family tips use."""
+    return dict(item, label=_PYPI_LABEL)
+
+
+def _fmt_int(value: Any) -> str:
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _render_pypi_intro_card(view: dict[str, Any]) -> str:
+    run = view["run"]
+    twin = view.get("twin")
+    pooled = run.get("pooled") or {}
+    twin_roc = ((twin or {}).get("pooled") or {}).get("roc_auc")
+    base = view.get("base_rate")
+    label_css = (
+        "font-size:.85rem;font-weight:600;color:var(--muted);display:block;margin:.6rem 0 .3rem"
+    )
+    sel_css = 'style="width:100%;max-width:100%"'
+    run_opts = "".join(
+        f'<option value="{_escape(r.get("run_name"))}"{" selected" if r is run else ""}>'
+        f"{_escape(_honest_config_text(_pypi_with_label(r)))} · pooled ROC-AUC "
+        f"{_fmt_metric((r.get('pooled') or {}).get('roc_auc'), 3)}</option>"
+        for r in view["runs"]
+    )
+    fold_opts = "".join(
+        f'<option value="{_escape(m)}"{" selected" if m == view["fold"] else ""}>'
+        f"Fold {_escape(m)}</option>"
+        for m in view["fold_months"]
+    ) + (
+        f'<option value="all"{" selected" if view["fold"] == "all" else ""}>'
+        f"All {len(view['fold_months'])} folds</option>"
+    )
+    metrics = (
+        "<div class='metrics-row'>"
+        f"<div class='metric'><span class='metric__label'>Packages in the panel</span>"
+        f"<span class='metric__value'>{_fmt_int(view.get('n_universe'))}</span>"
+        "<span class='metric__hint'>download-ranked, with a resolvable GitHub repository</span></div>"
+        f"<div class='metric'><span class='metric__label'>Package-months scored</span>"
+        f"<span class='metric__value'>{_fmt_int(view.get('n_rows'))}</span>"
+        f"<span class='metric__hint'>{view.get('n_folds')} embargoed folds, "
+        f"{_escape(view.get('start'))} to {_escape(view.get('end'))}</span></div>"
+        f"<div class='metric'><span class='metric__label'>Advisory outcomes</span>"
+        f"<span class='metric__value'>{_fmt_int(view.get('n_positive'))}</span>"
+        f"<span class='metric__hint'>base rate {base * 100:.2f}%</span></div>"
+        if base is not None
+        else f"<div class='metric'><span class='metric__label'>Advisory outcomes</span>"
+        f"<span class='metric__value'>{_fmt_int(view.get('n_positive'))}</span></div>"
+    )
+    metrics += (
+        f"<div class='metric'><span class='metric__label'>{_tip('Pooled ROC-AUC')}, PyPI</span>"
+        f"<span class='metric__value metric__value--good'>{_fmt_metric(pooled.get('roc_auc'), 3)}</span>"
+        f"<span class='metric__hint'>{_escape(_honest_config_text(_pypi_with_label(run)))}</span></div>"
+    )
+    if twin_roc is not None:
+        same_model = next(
+            (r for r in view["runs"] if r.get("model_name") == (twin or {}).get("model_name")),
+            None,
+        )
+        same_model_note = (
+            f"; PyPI with the same model: "
+            f"{_fmt_metric((same_model.get('pooled') or {}).get('roc_auc'), 3)}"
+            if same_model is not None and same_model is not run
+            else ""
+        )
+        metrics += (
+            f"<div class='metric'><span class='metric__label'>Same features, Jenkins</span>"
+            f"<span class='metric__value metric__value--warn'>{_fmt_metric(twin_roc, 3)}</span>"
+            f"<span class='metric__hint'>{_escape(_honest_config_text(_pypi_with_label(twin or {})))}"
+            f"{_escape(same_model_note)}</span></div>"
+        )
+    metrics += "</div>"
+    return (
+        '<section class="card" style="margin-bottom:1rem">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">PyPI cross-check</p>'
+        "<h2>Does the method travel? The same protocol on a second ecosystem</h2>"
+        '<p class="kicker">Every number on this tab comes from the embargoed rolling backtest '
+        "re-run on PyPI: the download-ranked packages with a GitHub repository, OSV advisories "
+        "as the outcome, and only each package's own advisory history as input. Same folds, "
+        "same 180-day horizon, same label embargo at every forecast date.</p>"
+        '</div><span class="pill pill--good">Embargoed labels at every fold</span></div>'
+        f"{metrics}"
+        '<form method="get" action="/" style="display:grid;grid-template-columns:'
+        'repeat(auto-fit,minmax(240px,1fr));gap:.6rem 1rem;align-items:end;margin-top:.8rem">'
+        '<input type="hidden" name="tab" value="pypi">'
+        f'<div><label for="pypi-run" style="{label_css}">Configuration</label>'
+        f'<select id="pypi-run" name="pypi_run" {sel_css}>{run_opts}</select></div>'
+        f'<div><label for="pypi-fold" style="{label_css}">Case-study fold</label>'
+        f'<select id="pypi-fold" name="pypi_fold" {sel_css}>{fold_opts}</select></div>'
+        f'<div><label for="pypi-package" style="{label_css}">Look up a package</label>'
+        f'<input id="pypi-package" name="package" type="text" value="{_escape(view.get("package"))}" '
+        'placeholder="e.g. vllm, langchain, urllib3" style="width:100%;max-width:100%"></div>'
+        '<div><button type="submit" style="margin-top:.6rem">Show</button></div>'
+        "</form>"
+        "<p style='color:var(--muted);font-size:.82rem;margin:.6rem 0 0'>The package look-up "
+        "shows where a package ranked at every forecast date and the OSV advisories that "
+        "followed; the fold picker applies to the case study at the bottom. Try "
+        "<a href='/?tab=pypi&package=vllm' style='color:var(--accent)'>vllm</a> for what "
+        "advisory history cannot do: a package sits at the bottom of the ranking until its first "
+        "advisory, then near the top.</p>"
+        "</section>"
+    )
+
+
+def _render_pypi_timeline_card(view: dict[str, Any]) -> str:
+    series = [
+        dict(
+            s,
+            label=f"{s.get('ecosystem') or ''} · {_honest_config_text(_pypi_with_label(s))}",
+        )
+        for s in view.get("timeline") or []
+    ]
+    svg = charts.svg_timeline(
+        series,
+        criterion=float(view.get("criterion") or 0.55),
+        boundary_month="9999-99",
+        width=1140,
+    )
+    if not svg:
+        return ""
+    return (
+        "<div class='card' style='margin-bottom:1rem'>"
+        "<p class='eyebrow'>The verdict inverts</p>"
+        "<h3 style='margin:.1rem 0 .4rem'>ROC-AUC per fold, PyPI beside Jenkins, "
+        "advisory history only</h3>"
+        "<p style='color:var(--muted);font-size:.92rem;margin:0 0 .8rem'>The same three "
+        "advisory-history inputs (advisories to date, CVEs to date, worst CVSS to date) scored "
+        "at the same thirteen forecast dates. On PyPI they clear the pre-registered criterion "
+        "by a wide margin in every fold; on Jenkins the same inputs hover around the criterion "
+        "and touch chance in some folds. Hover a point for the fold's outcome count.</p>"
+        f"{svg}</div>"
+    )
+
+
+def _render_pypi_track(view: dict[str, Any]) -> str:
+    package = str(view.get("package") or "")
+    if not package:
+        return ""
+    track = view.get("track")
+    if not track:
+        return (
+            '<section class="card" style="margin-bottom:1rem">'
+            '<div class="card__header"><div>'
+            '<p class="eyebrow">Package look-up</p>'
+            f"<h2><code>{_escape(package)}</code> was not scored</h2>"
+            "</div></div>"
+            "<p class='muted' style='padding:.6rem 0'>The PyPI panel covers the download-ranked "
+            "packages with a resolvable GitHub repository, by their PyPI name in lower case. "
+            "Try one of the names in the case study below.</p></section>"
+        )
+    facts: list[str] = []
+    if track.get("downloads_rank") is not None:
+        facts.append(f"Download rank #{_fmt_int(track['downloads_rank'])} on PyPI")
+    if track.get("monthly_downloads") is not None:
+        facts.append(f"{_fmt_int(track['monthly_downloads'])} downloads a month")
+    n_adv = int(track.get("n_advisories_total") or 0)
+    facts.append(f"{n_adv} OSV advisor{'y' if n_adv == 1 else 'ies'} on record")
+    links = (
+        f'<a href="{_escape(track.get("pypi_url"))}" target="_blank" rel="noopener noreferrer" '
+        'style="color:var(--accent)">PyPI</a>'
+    )
+    if track.get("github_url"):
+        links += (
+            f' · <a href="{_escape(track["github_url"])}" target="_blank" '
+            'rel="noopener noreferrer" style="color:var(--accent)">GitHub</a>'
+        )
+    extra = f"<p style='font-size:.88rem;margin:0 0 .6rem'>{_escape('; '.join(facts))}. {links}</p>"
+    return (
+        '<div style="margin-bottom:1rem">'
+        + _render_plugin_track_card(
+            _pypi_with_label(track), unit="package", table="all", extra_html=extra
+        )
+        + "</div>"
+    )
+
+
+def _render_pypi_reading_card(view: dict[str, Any]) -> str:
+    run = view["run"]
+    twin = view.get("twin")
+    pooled_roc = _fmt_metric((run.get("pooled") or {}).get("roc_auc"), 3)
+    twin_roc = _fmt_metric(((twin or {}).get("pooled") or {}).get("roc_auc"), 3)
+    return (
+        "<div class='card' style='margin-bottom:1rem'>"
+        "<p class='eyebrow'>How to read this</p>"
+        "<h3 style='margin:.1rem 0 .4rem'>The mechanism replicates; the verdict on the "
+        "features does not</h3>"
+        "<p style='color:var(--muted);font-size:.92rem;margin:0 0 .6rem'>Two things travel "
+        "from Jenkins to PyPI unchanged: the label leak, which inflates stored-label results in "
+        "both ecosystems by a similar margin, and the embargoed protocol that removes it. What "
+        "does not travel is the verdict on any one feature family. A package's own advisory "
+        f"history is a strong signal on PyPI (pooled ROC-AUC {pooled_roc}) and barely clears the "
+        f"criterion on Jenkins ({twin_roc}). The likely reason is how advisories arrive: on PyPI "
+        "they recur within the same widely used packages, while Jenkins advisories often come in "
+        "ecosystem-wide batches that reach plugins with no prior record. Either way, a signal "
+        "has to be re-validated in each ecosystem, which is why CANARY's contribution is the "
+        "validation method rather than a feature list.</p>"
+        "<p style='color:var(--muted);font-size:.88rem;margin:0'>Scope of the cross-check: "
+        "advisory-history inputs only (no activity clocks, contributor dynamics or install "
+        "base were collected for PyPI); a download-ranked universe rather than a complete "
+        "registry; and a monitoring setting, so the ranking is among packages the model has "
+        "seen before, with no group split. Read the PyPI numbers as evidence that the protocol "
+        "transfers, not as a PyPI risk model.</p>"
+        "</div>"
+    )
+
+
+def _render_pypi_tab(view: dict[str, Any] | None) -> str:
+    """
+    The PyPI cross-check tab: the study's design and headline numbers with a
+    configuration, fold and package picker; the leak replicated on PyPI
+    beside its Jenkins twin; the per-fold ROC timeline of both ecosystems;
+    the gain and ROC curves of the chosen PyPI run; the looked-up package's
+    track record; the per-fold top-25 case study against OSV advisories; and
+    the reading guide with the study's scope.
+    """
+    if view is None:
+        return (
+            '<section class="card">'
+            '<div class="card__header"><div>'
+            '<p class="eyebrow">PyPI cross-check</p>'
+            "<h2>No PyPI results found</h2>"
+            "</div></div>"
+            "<p class='muted' style='padding:.6rem 0'>Run the PyPI pipeline "
+            "(<code>crossval/pypi/</code>) so that "
+            "<code>data/pypi/processed/results/rolling_backtest/</code> holds an embargoed run, "
+            "then refresh this page.</p></section>"
+        )
+    run = view["run"]
+    pairs = [_pypi_with_label(p) for p in view.get("pairs") or []]
+    leak = _render_honest_leakage_card(
+        pairs,
+        eyebrow="The leak replicates",
+        title="Stored labels inflate PyPI results the same way they inflated Jenkins",
+        intro=(
+            "The PyPI advisory-history run was scored twice, with stored labels and under the "
+            "embargo, exactly as the Jenkins runs were; the Jenkins pair with the same inputs is "
+            "drawn beside it. "
+        ),
+    )
+    curves = ""
+    if view.get("curves"):
+        curves = _render_honest_holdout_curves_card(
+            [{"run": _pypi_with_label(run), "curves": view["curves"]}],
+            window_word="development",
+            unit="package",
+        )
+    case_view = dict(view["case_study"], run=_pypi_with_label(run))
+    case_study = _render_honest_case_study(
+        case_view,
+        window_word="development",
+        unit="package",
+        href_template="/?tab=pypi&package={id}",
+        source_note=_PYPI_CASE_STUDY_NOTE,
+    )
+    return (
+        _render_pypi_intro_card(view)
+        + _render_pypi_track(view)
+        + leak
+        + _render_pypi_timeline_card(view)
+        + curves
+        + case_study
+        + _render_pypi_reading_card(view)
     )

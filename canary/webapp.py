@@ -9,6 +9,7 @@ import os
 import re
 import time as _time
 import urllib.parse
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -73,6 +74,7 @@ from canary.web.ui import (
     _render_model_badge,  # noqa: F401
     _render_model_picker,  # noqa: F401
     _render_operational_panel,  # noqa: F401
+    _render_pypi_tab,  # noqa: F401
     _render_ranking_row,  # noqa: F401
     _render_score_section,  # noqa: F401
     _score_payload,  # noqa: F401
@@ -101,6 +103,13 @@ H2_ROC_CRITERION = 0.55
 # (tools/run_monthly_ablation_experiments.sh --embargo) are charted as the
 # before-and-after of the label leak. Only listed stems are drawn.
 PYPI_ROLLING_RESULTS_ROOT = Path("data/pypi/processed/results/rolling_backtest").resolve()
+# The PyPI cross-check's inputs (crossval/pypi/): OSV advisories for the
+# download-ranked package universe, and the universe itself. The Jenkins run
+# named here is the PyPI study's twin — the same advisory-history features
+# under the same protocol — drawn beside the PyPI runs on the PyPI tab.
+PYPI_ADVISORIES_PATH = Path("data/pypi/raw/advisories.jsonl").resolve()
+PYPI_UNIVERSE_PATH = Path("data/pypi/raw/package_universe.jsonl").resolve()
+JENKINS_ADVISORY_ONLY_RUN = "advisory_only_xgb"
 # The frozen champion applied to the newest panel month (tools/latest_forecast.py).
 LATEST_FORECAST_PATH = Path("data/processed/results/latest_forecast.json").resolve()
 HONEST_VIZ_TIME_SPLIT_STEMS: dict[str, str] = {
@@ -108,7 +117,7 @@ HONEST_VIZ_TIME_SPLIT_STEMS: dict[str, str] = {
 }
 ADVISORY_DATA_ROOT = Path("data/raw/advisories").resolve()
 MODEL_OUTPUTS_ROOT_PARTS = Path("data/processed/models").parts
-VALID_TABS = frozenset({"score", "ml", "about", "casestudy", "honest", "explore"})
+VALID_TABS = frozenset({"score", "ml", "about", "casestudy", "honest", "explore", "pypi"})
 MODEL_OUTPUT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 DEFAULTS: dict[str, Any] = {
@@ -123,6 +132,9 @@ DEFAULTS: dict[str, Any] = {
     "layer": "",
     "run": "",
     "fold": "",
+    "package": "",
+    "pypi_run": "",
+    "pypi_fold": "",
 }
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -508,6 +520,10 @@ def _advisories_in_window(
     return [r for r in records if after_date < (r.get("published_date") or "") <= before_date]
 
 
+# (id, after_date, before_date) -> advisory records published inside the window.
+AdvisoryLookup = Callable[[str, str, str], list[dict[str, Any]]]
+
+
 def _label_window_end(obs_month: str) -> str:
     """Last day of the 180-day label window that opens at ``obs_month``
     (``YYYY-MM``): the end of the sixth month after it. Empty on bad input."""
@@ -526,19 +542,25 @@ def _label_window_end(obs_month: str) -> str:
 
 
 def _enrich_prediction_row(
-    row: dict[str, Any], rank: int, obs_date: str, window_end: str
+    row: dict[str, Any],
+    rank: int,
+    obs_date: str,
+    window_end: str,
+    lookup: AdvisoryLookup | None = None,
 ) -> dict[str, Any]:
     """
     One case-study row: the prediction joined with the highest-severity
     advisory published for the plugin inside (obs_date, window_end]. A row
     is confirmed when such an advisory exists or the stored label is
     positive (the label can be positive when the local advisory files are
-    incomplete).
+    incomplete). ``lookup`` finds the advisories for an id inside a window;
+    the Jenkins advisory files are the default.
     """
     from datetime import datetime as _dt
 
+    lookup = lookup or _advisories_in_window
     pid = row["plugin_id"]
-    advisories = _advisories_in_window(pid, obs_date, window_end) if obs_date and window_end else []
+    advisories = lookup(pid, obs_date, window_end) if obs_date and window_end else []
     confirmed = bool(advisories) or row["y_true"] == 1
     adv_date = adv_sev = adv_url = ""
     adv_cvss: float | None = None
@@ -837,13 +859,32 @@ def _load_plugin_track(plugin_id: str) -> dict[str, Any] | None:
     rows = honest_viz.plugin_track(index, plugin_id)
     if not rows:
         return None
+    return _track_payload(plugin_id, rows, lead, boundary_month=OOT_BOUNDARY_MONTH)
+
+
+def _track_payload(
+    plugin_id: str,
+    rows: list[dict[str, Any]],
+    lead: dict[str, Any],
+    *,
+    boundary_month: str,
+    lookup: AdvisoryLookup | None = None,
+) -> dict[str, Any]:
+    """
+    Annotate month-ranked rows with their window and the first advisory that
+    followed a positive month, and summarise them for the track-record card.
+    An empty ``boundary_month`` means every month is a development fold.
+    """
+    lookup = lookup or _advisories_in_window
     for row in rows:
-        row["window"] = "out_of_time" if row["month"] > OOT_BOUNDARY_MONTH else "development"
+        row["window"] = (
+            "out_of_time" if boundary_month and row["month"] > boundary_month else "development"
+        )
         row["adv_date"] = ""
         row["adv_id"] = ""
         row["adv_url"] = ""
         if row["y_true"]:
-            hits = _advisories_in_window(plugin_id, row["month"], _label_window_end(row["month"]))
+            hits = lookup(plugin_id, row["month"], _label_window_end(row["month"]))
             if hits:
                 first = min(hits, key=lambda a: a.get("published_date") or "")
                 row["adv_date"] = first.get("published_date", "")
@@ -853,10 +894,11 @@ def _load_plugin_track(plugin_id: str) -> dict[str, Any] | None:
     holdout = [r for r in rows if r["window"] == "out_of_time"]
     return {
         "plugin_id": plugin_id,
-        "include_prefixes": lead["include_prefixes"],
-        "model_name": lead["model_name"],
-        "run_names": lead["run_names"],
-        "boundary_month": OOT_BOUNDARY_MONTH,
+        "include_prefixes": lead.get("include_prefixes"),
+        "in_path": lead.get("in_path", ""),
+        "model_name": lead.get("model_name"),
+        "run_names": lead.get("run_names"),
+        "boundary_month": boundary_month,
         "rows": rows,
         "n_months": len(rows),
         "n_positive": sum(r["y_true"] for r in rows),
@@ -867,12 +909,20 @@ def _load_plugin_track(plugin_id: str) -> dict[str, Any] | None:
     }
 
 
-def _case_study_folds(run: dict[str, Any], only_fold: str | None = None) -> list[dict[str, Any]]:
+def _case_study_folds(
+    run: dict[str, Any],
+    only_fold: str | None = None,
+    *,
+    root: Path | None = None,
+    lookup: AdvisoryLookup | None = None,
+) -> list[dict[str, Any]]:
     """
     Per-fold case-study panels for a rolling run: the top-25 plugins of each
     fold (or of ``only_fold``) joined with the advisories that followed.
+    ``root`` is the results root the run lives under (Jenkins by default) and
+    ``lookup`` the ecosystem's advisory lookup.
     """
-    run_dir = ROLLING_RESULTS_ROOT / str(run["run_name"])
+    run_dir = (ROLLING_RESULTS_ROOT if root is None else root) / str(run["run_name"])
     index = honest_viz.ranked_index([run_dir])
     folds: list[dict[str, Any]] = []
     if index is None:
@@ -885,7 +935,9 @@ def _case_study_folds(run: dict[str, Any], only_fold: str | None = None) -> list
         if not top:
             continue
         enriched = [
-            _enrich_prediction_row(row, row["rank"], row["month"], _label_window_end(row["month"]))
+            _enrich_prediction_row(
+                row, row["rank"], row["month"], _label_window_end(row["month"]), lookup
+            )
             for row in top
         ]
         n_pos = int(fold_meta.get("test_positive_count") or 0)
@@ -1175,6 +1227,213 @@ def _load_honest_case_study(values: dict[str, Any]) -> dict[str, Any] | None:
     return {"run": run, "runs": oot_runs, "folds": folds, "pred_exists": bool(folds)}
 
 
+# ---------------------------------------------------------------------------
+# PyPI cross-check tab: the same protocol on a second ecosystem
+# ---------------------------------------------------------------------------
+
+
+def _osv_advisory_record(rec: dict[str, Any]) -> dict[str, Any]:
+    """An OSV advisory line (crossval/pypi) in the shape the case-study
+    enrichment reads from the Jenkins advisory files."""
+    adv_id = str(rec.get("advisory_id") or "")
+    cvss = rec.get("cvss")
+    return {
+        "published_date": str(rec.get("published_date") or "")[:10],
+        "url": f"https://osv.dev/vulnerability/{adv_id}" if adv_id else "",
+        "security_warning_ids": [adv_id] if adv_id else [],
+        "cve_ids": [str(c) for c in rec.get("cve_ids") or []],
+        "severity_summary": {
+            "max_severity_label": str(rec.get("severity") or ""),
+            "max_cvss_base_score": float(cvss) if isinstance(cvss, int | float) else None,
+        },
+    }
+
+
+def _file_key(path: Path) -> tuple[str, int, int] | None:
+    """(path, mtime, size) cache key for a file, None when it is missing."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return str(path), st.st_mtime_ns, st.st_size
+
+
+def _iter_jsonl_records(path: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(rec, dict):
+                    records.append(rec)
+    except OSError:
+        return []
+    return records
+
+
+@lru_cache(maxsize=2)
+def _pypi_advisory_index_cached(
+    path: str, mtime_ns: int, size: int
+) -> dict[str, list[dict[str, Any]]]:
+    del mtime_ns, size  # part of the cache key only
+    index: dict[str, list[dict[str, Any]]] = {}
+    for rec in _iter_jsonl_records(Path(path)):
+        pid = str(rec.get("package_id") or "")
+        if pid:
+            index.setdefault(pid, []).append(_osv_advisory_record(rec))
+    for records in index.values():
+        records.sort(key=lambda r: r["published_date"])
+    return index
+
+
+def _pypi_advisory_index() -> dict[str, list[dict[str, Any]]]:
+    """OSV advisories per PyPI package, date-ordered (empty when absent)."""
+    key = _file_key(PYPI_ADVISORIES_PATH)
+    return _pypi_advisory_index_cached(*key) if key else {}
+
+
+def _pypi_advisories_in_window(
+    package_id: str, after_date: str, before_date: str
+) -> list[dict[str, Any]]:
+    """PyPI counterpart of ``_advisories_in_window``: OSV advisories for the
+    package published inside (after_date, before_date]."""
+    return [
+        r
+        for r in _pypi_advisory_index().get(package_id, [])
+        if after_date < r["published_date"] <= before_date
+    ]
+
+
+@lru_cache(maxsize=2)
+def _pypi_universe_cached(path: str, mtime_ns: int, size: int) -> dict[str, dict[str, Any]]:
+    del mtime_ns, size  # part of the cache key only
+    universe: dict[str, dict[str, Any]] = {}
+    for rec in _iter_jsonl_records(Path(path)):
+        pid = str(rec.get("package_id") or "")
+        if pid:
+            universe[pid] = {
+                "github_url": str(rec.get("github_url") or ""),
+                "downloads_rank": rec.get("downloads_rank"),
+                "monthly_downloads": rec.get("monthly_downloads"),
+            }
+    return universe
+
+
+def _pypi_universe() -> dict[str, dict[str, Any]]:
+    """The download-ranked package universe the PyPI panel was built from."""
+    key = _file_key(PYPI_UNIVERSE_PATH)
+    return _pypi_universe_cached(*key) if key else {}
+
+
+def _pypi_primary_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [r for r in runs if r.get("embargo") and not r.get("sensitivity")]
+
+
+def _load_pypi_package_track(run: dict[str, Any], package_id: str) -> dict[str, Any] | None:
+    """A PyPI package's rank at every fold of ``run``, with the OSV advisory
+    that followed each positive month; None when it was never scored."""
+    index = honest_viz.ranked_index([PYPI_ROLLING_RESULTS_ROOT / str(run["run_name"])])
+    if index is None:
+        return None
+    rows = honest_viz.plugin_track(index, package_id)
+    if not rows:
+        return None
+    lead = {
+        "include_prefixes": list(run.get("include_prefixes") or []),
+        "in_path": str(run.get("in_path") or ""),
+        "model_name": str(run.get("model_name") or ""),
+        "run_names": [str(run.get("run_name") or "")],
+    }
+    track = _track_payload(
+        package_id, rows, lead, boundary_month="", lookup=_pypi_advisories_in_window
+    )
+    track.update(_pypi_universe().get(package_id) or {})
+    track["n_advisories_total"] = len(_pypi_advisory_index().get(package_id, []))
+    track["pypi_url"] = f"https://pypi.org/project/{urllib.parse.quote(package_id)}/"
+    return track
+
+
+def _load_pypi_view(values: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Everything the PyPI tab renders: the embargoed PyPI runs with the chosen
+    one's curves and per-fold case study, the Jenkins advisory-only twin for
+    the side-by-side timeline, the stored-vs-embargoed pairs of both
+    ecosystems, and the looked-up package's track record. ``pypi_run``
+    selects the run by directory name, ``pypi_fold`` the case-study fold
+    (``all`` for every fold; the newest fold by default) and ``package`` the
+    package to look up. None when no embargoed PyPI run exists.
+    """
+    runs = _pypi_primary_runs(_load_rolling_backtests(PYPI_ROLLING_RESULTS_ROOT))
+    if not runs:
+        return None
+    wanted = str(values.get("pypi_run") or "")
+    run = next((r for r in runs if r.get("run_name") == wanted), runs[0])
+    run_dir = PYPI_ROLLING_RESULTS_ROOT / str(run["run_name"])
+
+    fold_months = [
+        str(f.get("test_start_month") or "")
+        for f in run.get("folds") or []
+        if isinstance(f, dict) and f.get("test_start_month")
+    ]
+    fold_wanted = str(values.get("pypi_fold") or "")
+    if fold_wanted == "all":
+        fold: str | None = None
+    elif fold_wanted in fold_months:
+        fold = fold_wanted
+    else:
+        fold = fold_months[-1] if fold_months else None
+    case_study = _case_study_folds(
+        run, fold, root=PYPI_ROLLING_RESULTS_ROOT, lookup=_pypi_advisories_in_window
+    )
+
+    twin = next(
+        (r for r in _load_rolling_backtests() if r.get("run_name") == JENKINS_ADVISORY_ONLY_RUN),
+        None,
+    )
+    timeline = [honest_viz.run_series(r, ecosystem="PyPI") for r in runs]
+    if twin is not None:
+        timeline.append(honest_viz.run_series(twin, ecosystem="Jenkins"))
+    pairs = honest_viz.rolling_leakage_pairs(PYPI_ROLLING_RESULTS_ROOT, "PyPI") + [
+        p
+        for p in honest_viz.rolling_leakage_pairs(ROLLING_RESULTS_ROOT, "Jenkins")
+        if p.get("run_name") == JENKINS_ADVISORY_ONLY_RUN
+    ]
+
+    package = str(values.get("package") or "").strip().lower()
+    track = _load_pypi_package_track(run, package) if package else None
+    advisory_index = _pypi_advisory_index()
+    pooled = run.get("pooled") or {}
+    return {
+        "run": run,
+        "runs": runs,
+        "twin": twin,
+        "fold": fold if fold is not None else "all",
+        "fold_months": fold_months,
+        "case_study": {"run": run, "folds": case_study, "pred_exists": bool(case_study)},
+        "curves": honest_viz.load_curves(run_dir),
+        "timeline": timeline,
+        "pairs": pairs,
+        "criterion": H2_ROC_CRITERION,
+        "package": package,
+        "track": track,
+        "n_universe": len(_pypi_universe()),
+        "n_packages_with_advisory": len(advisory_index),
+        "n_advisories": sum(len(v) for v in advisory_index.values()),
+        "n_rows": pooled.get("n_rows"),
+        "n_positive": pooled.get("n_positive"),
+        "base_rate": pooled.get("base_rate"),
+        "n_folds": len(fold_months),
+        "start": str(run.get("start") or ""),
+        "end": str(run.get("end") or ""),
+    }
+
+
 def _load_case_study_view(values: dict[str, Any]) -> dict[str, Any] | None:
     """
     Assemble everything the case-study tab renders: model metrics, the
@@ -1240,6 +1499,7 @@ def render_page(
         ("honest", "Results", "The leak, the embargoed backtests, the holdout"),
         ("score", "Score a plugin", "Score, rationale and honest track record"),
         ("explore", "Explore", "Metrics, feature drivers and case study, by validation layer"),
+        ("pypi", "PyPI cross-check", "The same protocol on a second ecosystem"),
         ("about", "About", "What CANARY is and how its numbers were validated"),
     ]
     tab_links = "".join(
@@ -1272,6 +1532,8 @@ def render_page(
         active_panel_html = _render_explore_tab(
             values, _load_explore_view(values, model_dir_options), model_dir_options
         )
+    elif active_tab == "pypi":
+        active_panel_html = _render_pypi_tab(_load_pypi_view(values))
     elif active_tab == "casestudy":
         # Legacy Layer 1 case study (stored-label single-split models); the
         # honest case study lives on the Explore tab.
@@ -1579,6 +1841,9 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
             "layer": query.get("layer", [""])[-1],
             "run": query.get("run", [""])[-1],
             "fold": query.get("fold", [""])[-1],
+            "package": query.get("package", [""])[-1],
+            "pypi_run": query.get("pypi_run", [""])[-1],
+            "pypi_fold": query.get("pypi_fold", [""])[-1],
         }
     )
     _get_explain = query.get("explain", [""])[-1] == "1"

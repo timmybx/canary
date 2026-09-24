@@ -669,3 +669,145 @@ def test_explore_single_split_layers_read_model_directories(
     assert "Browse all 2 historical configurations" in page
     assert "Top-25 per time split fold vs. what followed" in page
     assert "stored labels" in page
+
+
+# ---------------------------------------------------------------------------
+# PyPI cross-check tab
+# ---------------------------------------------------------------------------
+
+
+def test_osv_records_take_the_jenkins_advisory_shape() -> None:
+    rec = webapp._osv_advisory_record(
+        {
+            "advisory_id": "PYSEC-2025-1",
+            "package_id": "pkg",
+            "published_date": "2025-09-03T00:00:00",
+            "cve_ids": ["CVE-2025-1"],
+            "cvss": 7.5,
+            "severity": "HIGH",
+        }
+    )
+    assert rec["published_date"] == "2025-09-03"
+    assert rec["url"] == "https://osv.dev/vulnerability/PYSEC-2025-1"
+    assert rec["security_warning_ids"] == ["PYSEC-2025-1"]
+    assert rec["severity_summary"] == {"max_severity_label": "HIGH", "max_cvss_base_score": 7.5}
+    bare = webapp._osv_advisory_record({"advisory_id": "", "cvss": None})
+    assert bare["url"] == "" and bare["security_warning_ids"] == []
+    assert bare["severity_summary"]["max_cvss_base_score"] is None
+
+
+def test_pypi_view_joins_osv_advisories_and_renders(tmp_path: Path, monkeypatch: Any) -> None:
+    pypi = tmp_path / "pypi"
+    jenkins = tmp_path / "jenkins"
+    pypi.mkdir()
+    jenkins.mkdir()
+    honest = _rolling_payload(
+        embargo=True,
+        prefixes=["advisory_"],
+        model="logistic",
+        folds=[("2025-03", 0.8, 1), ("2025-05", 0.75, 1)],
+    )
+    honest.update(
+        in_path="data/pypi/processed/monthly_labeled.jsonl", start="2025-03", end="2025-05"
+    )
+    for fold in honest["folds"]:
+        fold.update(test_row_count=3, label_as_of_month="2025-06")
+    honest["pooled"].update(n_rows=6, base_rate=1 / 3)
+    leaky = dict(honest, embargo=False, pooled=dict(honest["pooled"], roc_auc=0.9))
+    twin = _rolling_payload(
+        embargo=True, prefixes=None, model="xgboost", folds=[("2025-03", 0.55, 2)]
+    )
+    twin["in_path"] = "data/processed/features/plugins.monthly.labeled.advisory_only.jsonl"
+    twin_leaky = dict(twin, embargo=False, pooled=dict(twin["pooled"], roc_auc=0.6))
+    for root, name, payload in (
+        (pypi, "advisory_only_logistic", honest),
+        (pypi, "advisory_only_logistic_leaky", leaky),
+        (jenkins, "advisory_only_xgb", twin),
+        (jenkins, "advisory_only_xgb_leaky", twin_leaky),
+    ):
+        (root / name).mkdir()
+        (root / name / "rolling_backtest.json").write_text(json.dumps(payload), encoding="utf-8")
+    _write_fold(
+        pypi / "advisory_only_logistic",
+        "2025-03",
+        [("django", 0, 0.9), ("flask", 0, 0.5), ("numpy", 0, 0.1)],
+    )
+    _write_fold(
+        pypi / "advisory_only_logistic",
+        "2025-05",
+        [("django", 1, 0.9), ("flask", 0, 0.5), ("numpy", 0, 0.1)],
+    )
+    (tmp_path / "advisories.jsonl").write_text(
+        json.dumps(
+            {
+                "advisory_id": "PYSEC-2025-9",
+                "package_id": "django",
+                "published_date": "2025-07-02",
+                "cve_ids": ["CVE-2025-9"],
+                "cvss": 9.8,
+                "severity": "CRITICAL",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {"advisory_id": "PYSEC-2020-1", "package_id": "django", "published_date": "2020-01-01"}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "universe.jsonl").write_text(
+        json.dumps(
+            {
+                "package_id": "django",
+                "github_url": "https://github.com/django/django",
+                "downloads_rank": 12,
+                "monthly_downloads": 1000,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(webapp, "PYPI_ROLLING_RESULTS_ROOT", pypi)
+    monkeypatch.setattr(webapp, "ROLLING_RESULTS_ROOT", jenkins)
+    monkeypatch.setattr(webapp, "PYPI_ADVISORIES_PATH", tmp_path / "advisories.jsonl")
+    monkeypatch.setattr(webapp, "PYPI_UNIVERSE_PATH", tmp_path / "universe.jsonl")
+
+    view = webapp._load_pypi_view({"pypi_run": "nope", "pypi_fold": "", "package": " Django "})
+    assert view is not None
+    assert view["run"]["run_name"] == "advisory_only_logistic"  # leaky sibling is not a choice
+    assert view["fold"] == "2025-05"  # newest fold by default
+    assert view["twin"]["run_name"] == "advisory_only_xgb"
+    assert [s["ecosystem"] for s in view["timeline"]] == ["PyPI", "Jenkins"]
+    assert [p["ecosystem"] for p in view["pairs"]] == ["PyPI", "Jenkins"]
+    assert view["n_universe"] == 1 and view["n_advisories"] == 2
+    fold = view["case_study"]["folds"][0]
+    assert fold["fold"] == "2025-05"
+    hit = fold["confirmed_rows"][0]
+    assert hit["plugin_id"] == "django" and hit["sec_ids"] == ["PYSEC-2025-9"]
+    assert hit["adv_url"] == "https://osv.dev/vulnerability/PYSEC-2025-9"
+    assert hit["adv_sev"] == "Critical" and hit["adv_cvss"] == 9.8
+    track = view["track"]
+    assert track is not None and view["package"] == "django"
+    assert [r["window"] for r in track["rows"]] == ["development", "development"]
+    assert track["rows"][1]["adv_id"] == "PYSEC-2025-9"
+    assert track["downloads_rank"] == 12 and track["n_advisories_total"] == 2
+    assert track["pypi_url"] == "https://pypi.org/project/django/"
+
+    all_folds = webapp._load_pypi_view({"pypi_fold": "all"})
+    assert all_folds is not None
+    assert [f["fold"] for f in all_folds["case_study"]["folds"]] == ["2025-03", "2025-05"]
+    assert all_folds["track"] is None
+
+    page = webapp.render_page({"active_tab": "pypi", "package": "django"})
+    assert "Does the method travel?" in page
+    assert "Where django ranked before each window" in page
+    assert "Download rank #12 on PyPI" in page
+    assert "PYSEC-2025-9" in page and "Advisory history (base panel)" not in page
+    assert "Advisories caught vs packages reviewed" in page
+    assert 'href="/?tab=pypi&package=django"' in page
+    missing = webapp.render_page({"active_tab": "pypi", "package": "nothing"})
+    assert "<code>nothing</code> was not scored" in missing
+
+    monkeypatch.setattr(webapp, "PYPI_ROLLING_RESULTS_ROOT", tmp_path / "none")
+    assert webapp._load_pypi_view({}) is None
+    assert "No PyPI results found" in webapp.render_page({"active_tab": "pypi"})
