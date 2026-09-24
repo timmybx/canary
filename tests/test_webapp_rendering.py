@@ -452,7 +452,7 @@ def test_render_operational_panel_includes_headline_and_callouts():
     )
     assert "Operational scenario analysis" in html
     assert "group-time split" in html
-    assert "Key finding" in html
+    assert "As recorded for this split" in html
     assert "50% recall" in html
     # Without component_level data the deduplicated block is absent.
     assert "Component-level precision" not in html

@@ -587,6 +587,85 @@ def test_explore_view_validates_layer_run_and_fold(tmp_path: Path, monkeypatch: 
     assert "What moved the score, and how consistently" in page
     assert "Top-25 per holdout fold vs. what followed" in page
 
+    # With no rolling runs and no model directories there is nothing to explore.
     monkeypatch.setattr(webapp, "ROLLING_RESULTS_ROOT", tmp_path / "none")
+    monkeypatch.setattr(webapp, "_discover_model_output_dirs", lambda: [])
     assert webapp._load_explore_view({}) is None
-    assert "No rolling-backtest results found" in webapp.render_page({"active_tab": "explore"})
+    assert "No results found" in webapp.render_page({"active_tab": "explore"})
+
+
+def test_explore_single_split_layers_read_model_directories(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    models = tmp_path / "models"
+    rolling = tmp_path / "rolling"
+    models.mkdir()
+    rolling.mkdir()
+    monkeypatch.setattr(webapp, "ROLLING_RESULTS_ROOT", rolling)
+    monkeypatch.setattr(webapp, "MODEL_OUTPUTS_ROOT", models)
+    monkeypatch.setattr(webapp, "ADVISORY_DATA_ROOT", tmp_path / "advisories")
+
+    def _model(stem: str, **extra: Any) -> None:
+        d = models / stem
+        d.mkdir()
+        metrics = {
+            "model_name": "xgboost",
+            "roc_auc": 0.9,
+            "average_precision": 0.5,
+            "test_row_count": 4,
+            "test_positive_count": 1,
+            "test_start_month": "2025-05",
+            "split_strategy": "gt" if stem.endswith("_gt") else "time",
+            "feature_count": 2,
+            "ranking_metrics": {"precision_at_10": 0.25},
+            "top_positive_features": [],
+            "top_negative_features": [{"feature": "f", "mean_abs_shap": 0.4, "mean_shap": -0.1}],
+            **extra,
+        }
+        (d / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
+        with (d / "test_predictions.csv").open("w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=["plugin_id", "month", "y_true", "y_prob"])
+            w.writeheader()
+            for pid, y, prob in (("a", 1, 0.9), ("b", 0, 0.2)):
+                w.writerow({"plugin_id": pid, "month": "2025-05", "y_true": y, "y_prob": prob})
+
+    _model("xgb_6m_advisory_swh_no_window_time")
+    _model("xgb_6m_advisory_swh_gt_embargo", label_as_of_month="2025-06")
+    _model("rf_6m_swh_only_time")
+    options = [
+        str(Path(*webapp.MODEL_OUTPUTS_ROOT_PARTS, stem))
+        for stem in (
+            "xgb_6m_advisory_swh_no_window_time",
+            "xgb_6m_advisory_swh_gt_embargo",
+            "rf_6m_swh_only_time",
+        )
+    ]
+
+    # With no rolling runs, the single-split layers are all there is, group first.
+    view = webapp._load_explore_view({}, options)
+    assert view is not None
+    assert [lyr["key"] for lyr in view["layers"]] == ["group", "time"]
+    assert view["layer"]["key"] == "group"
+    assert view["single"]["stem"] == "xgb_6m_advisory_swh_gt_embargo"
+    assert view["single"]["embargoed"] is True
+
+    # A curated run name selects within the layer; the drivers and case study come from disk.
+    view = webapp._load_explore_view({"layer": "time"}, options)
+    assert view is not None and view["single"]["stem"] == "xgb_6m_advisory_swh_no_window_time"
+    assert view["single"]["drivers"]["kind"] == "shap"
+    assert view["single"]["drivers"]["drivers"][0]["feature"] == "f"
+    fold = view["single"]["case_study"][0]
+    assert fold["fold"] == "2025-05" and [r["plugin_id"] for r in fold["confirmed_rows"]] == ["a"]
+
+    # A valid model directory overrides the layer and reaches non-curated models;
+    # a path outside the models root is ignored.
+    view = webapp._load_explore_view({"layer": "group", "model_out_dir": options[2]}, options)
+    assert view is not None and view["layer"]["key"] == "time"
+    assert view["single"]["stem"] == "rf_6m_swh_only_time"
+    view = webapp._load_explore_view({"model_out_dir": "../../etc/passwd"}, options)
+    assert view is not None and view["layer"]["key"] == "group"
+
+    page = webapp.render_page({"active_tab": "explore", "layer": "time"}, model_dir_options=options)
+    assert "Browse all 2 historical configurations" in page
+    assert "Top-25 per time split fold vs. what followed" in page
+    assert "stored labels" in page

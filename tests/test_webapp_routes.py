@@ -68,9 +68,10 @@ def test_index_serves_console_with_all_tabs():
     assert status == "200 OK"
     assert headers["Content-Type"] == "text/html; charset=utf-8"
     assert "CANARY Web Console" in text
-    for tab in ("score", "ml", "about", "honest", "explore"):
+    for tab in ("score", "about", "honest", "explore"):
         assert f'data-tab-link="{tab}"' in text
-    # The legacy Layer 1 case study is reachable but not in the navigation.
+    # The legacy Layer 1 viewer and case study are reachable but not in the navigation.
+    assert 'data-tab-link="ml"' not in text
     assert 'data-tab-link="casestudy"' not in text
 
 

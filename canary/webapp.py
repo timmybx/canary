@@ -857,9 +857,9 @@ def _case_study_folds(run: dict[str, Any], only_fold: str | None = None) -> list
     return folds
 
 
-# The Explore tab's layers, in picker order. Each maps to the rolling runs
-# whose fold windows sit in that part of the protocol. (Time-split and
-# group-split single models are the Layer 1 tab for now.)
+# The Explore tab's layers, in picker order: (key, label, source, blurb).
+# Source "out_of_time" / "development" selects rolling runs by fold window;
+# "time" / "gt" select single-split model directories by their name suffix.
 EXPLORE_LAYERS: tuple[tuple[str, str, str, str], ...] = (
     (
         "holdout",
@@ -875,7 +875,122 @@ EXPLORE_LAYERS: tuple[tuple[str, str, str, str], ...] = (
         "Thirteen forecast dates from 2023 to 2025, training labels rebuilt at each one. "
         "The sweep the champion was chosen on.",
     ),
+    (
+        "group",
+        "Layer 2 · Group time split (stored labels)",
+        "gt",
+        "One cut in time with whole plugins withheld from training: the cold-start question. "
+        "Stored labels, so a training label can be set by an advisory inside the test window.",
+    ),
+    (
+        "time",
+        "Layer 1 · Chronological time split (stored labels)",
+        "time",
+        "One training/test cut where the same plugins appear on both sides. Where the project "
+        "started, and where the label leak was found: the official configuration's ROC-AUC 0.93 "
+        "falls to 0.48 once the labels are rebuilt.",
+    ),
 )
+# Curated single-split configurations per layer (directory stem, label).
+# Only stems that exist on disk are offered; every other model directory is
+# reachable through the "all historical configurations" picker.
+EXPLORE_SINGLE_SPLIT_STEMS: dict[str, tuple[tuple[str, str], ...]] = {
+    "time": (
+        ("xgb_6m_advisory_swh_no_window_time", "Official reporting configuration (stored labels)"),
+        ("xgb_6m_advisory_swh_no_window_time_embargo", "Official configuration, embargoed retrain"),
+        ("xgb_6m_advisory_only_time", "Advisory history only (stored labels)"),
+        ("xgb_6m_advisory_only_time_embargo", "Advisory history only, embargoed retrain"),
+        ("logistic_6m_full_cleaned", "All features, logistic (stored labels)"),
+    ),
+    "group": (
+        ("xgb_6m_advisory_swh_gt", "Advisory + Software Heritage, XGBoost (stored labels)"),
+        ("xgb_6m_advisory_swh_gt_embargo", "Advisory + Software Heritage, embargoed retrain"),
+        (
+            "xgb_6m_advisory_swh_no_window_gt_embargo",
+            "Official configuration, group split, embargoed retrain",
+        ),
+        ("xgb_6m_advisory_only_gt", "Advisory history only (stored labels)"),
+        ("xgb_6m_advisory_only_gt_embargo", "Advisory history only, embargoed retrain"),
+        ("logistic_6m_full_cleaned_gt", "All features, logistic (stored labels)"),
+    ),
+}
+
+
+def _single_split_layer_of(stem: str) -> str:
+    """Which single-split layer a model directory stem belongs to."""
+    return "group" if stem.endswith("_gt") or stem.endswith("_gt_embargo") else "time"
+
+
+def _single_split_view(model_out_dir: str) -> dict[str, Any] | None:
+    """
+    The Explore panels for one single-split model directory: its metrics,
+    precision-at-k scenarios, feature-selection result, single-model feature
+    drivers and the top-25 case study. None when the directory has no
+    metrics.json.
+    """
+    metrics = _load_model_metrics(model_out_dir)
+    if not metrics:
+        return None
+    stem = Path(model_out_dir).name
+    entries = list(metrics.get("top_positive_features") or []) + list(
+        metrics.get("top_negative_features") or []
+    )
+    drivers: list[dict[str, Any]] = []
+    kind = ""
+    for entry in entries:
+        if not isinstance(entry, dict) or not entry.get("feature"):
+            continue
+        if "coefficient" in entry:
+            kind = kind or "coefficient"
+            signed = float(entry["coefficient"])
+            magnitude = abs(signed)
+        elif "mean_abs_shap" in entry:
+            kind = kind or "shap"
+            magnitude = float(entry["mean_abs_shap"])
+            signed = float(entry.get("mean_shap", 0.0) or 0.0)
+        else:
+            continue
+        drivers.append(
+            {
+                "feature": str(entry["feature"]),
+                "n_present": 1,
+                "mean_signed": signed,
+                "mean_magnitude": magnitude,
+                "n_positive": int(signed > 0),
+                "n_negative": int(signed < 0),
+            }
+        )
+    drivers.sort(key=lambda d: -d["mean_magnitude"])
+    obs_date, window_end, confirmed, unconfirmed = _load_cs_prediction_rows(model_out_dir, metrics)
+    n_pos = int(metrics.get("test_positive_count") or 0)
+    n_rows = int(metrics.get("test_row_count") or 0)
+    case_study = (
+        [
+            {
+                "fold": obs_date,
+                "test_end_month": str(metrics.get("test_end_month") or obs_date),
+                "label_as_of_month": str(metrics.get("label_as_of_month") or ""),
+                "roc_auc": metrics.get("roc_auc"),
+                "n_positive": n_pos,
+                "n_rows": n_rows,
+                "base_rate": n_pos / n_rows if n_rows else 0.0,
+                "confirmed_rows": confirmed,
+                "unconfirmed_rows": unconfirmed,
+            }
+        ]
+        if confirmed or unconfirmed
+        else []
+    )
+    return {
+        "model_out_dir": model_out_dir,
+        "stem": stem,
+        "metrics": metrics,
+        "embargoed": bool(metrics.get("label_as_of_month")),
+        "pk": _load_precision_at_k(model_out_dir),
+        "fs": _load_feature_selection(model_out_dir),
+        "drivers": {"kind": kind, "n_folds": 1, "drivers": drivers} if drivers else None,
+        "case_study": case_study,
+    }
 
 
 def _primary_runs(runs: list[dict[str, Any]], window_kind: str) -> list[dict[str, Any]]:
@@ -886,25 +1001,96 @@ def _primary_runs(runs: list[dict[str, Any]], window_kind: str) -> list[dict[str
     ]
 
 
-def _load_explore_view(values: dict[str, Any]) -> dict[str, Any] | None:
+def _load_explore_view(
+    values: dict[str, Any], model_dir_options: list[str] | None = None
+) -> dict[str, Any] | None:
     """
     Everything the Explore tab renders for one layer, configuration and fold
-    choice: the run payload, its fold-aggregated feature drivers, its gain
-    and ROC curves, and the per-fold case-study panels. ``layer``, ``run``
-    and ``fold`` come from the query and are validated against what exists
-    on disk (an unknown value falls back to the first choice). None when no
-    rolling run exists at all.
+    choice. Rolling layers (holdout, development sweep) carry the run
+    payload, fold-aggregated drivers, curves and per-fold case study;
+    single-split layers (group, time) carry the model directory's metrics,
+    scenarios, feature selection, drivers and case study. ``layer``, ``run``,
+    ``fold`` and ``model_out_dir`` come from the query and are validated
+    against what exists on disk (an unknown value falls back to the first
+    choice; a valid ``model_out_dir`` selects its own layer). None when no
+    result of any kind exists.
     """
     runs = _load_rolling_backtests()
-    layers = []
-    for key, label, window_kind, blurb in EXPLORE_LAYERS:
-        layer_runs = _primary_runs(runs, window_kind)
-        if layer_runs:
-            layers.append({"key": key, "label": label, "blurb": blurb, "runs": layer_runs})
+    model_dirs = model_dir_options or _discover_model_output_dirs()
+    stems_on_disk = {Path(d).name for d in model_dirs}
+    layers: list[dict[str, Any]] = []
+    for key, label, source, blurb in EXPLORE_LAYERS:
+        if source in ("out_of_time", "development"):
+            layer_runs = _primary_runs(runs, source)
+            if layer_runs:
+                layers.append(
+                    {
+                        "key": key,
+                        "label": label,
+                        "blurb": blurb,
+                        "kind": "rolling",
+                        "runs": layer_runs,
+                    }
+                )
+        else:
+            curated = [
+                {
+                    "stem": stem,
+                    "label": lbl,
+                    "model_out_dir": str(Path(*MODEL_OUTPUTS_ROOT_PARTS, stem)),
+                }
+                for stem, lbl in EXPLORE_SINGLE_SPLIT_STEMS.get(key, ())
+                if stem in stems_on_disk
+            ]
+            any_models = any(_single_split_layer_of(Path(d).name) == key for d in model_dirs)
+            if curated or any_models:
+                layers.append(
+                    {
+                        "key": key,
+                        "label": label,
+                        "blurb": blurb,
+                        "kind": "single",
+                        "models": curated,
+                        "all_models": [
+                            d for d in model_dirs if _single_split_layer_of(Path(d).name) == key
+                        ],
+                    }
+                )
     if not layers:
         return None
-    wanted_layer = str(values.get("layer") or "")
+
+    # A valid model directory in the query wins and implies its layer.
+    chosen_model = ""
+    raw_model = str(values.get("model_out_dir") or "")
+    if raw_model:
+        try:
+            normalized = _normalize_model_output_dir(raw_model)
+        except ValueError:
+            normalized = ""
+        if normalized and normalized in set(model_dirs):
+            chosen_model = normalized
+    wanted_layer = (
+        _single_split_layer_of(Path(chosen_model).name)
+        if chosen_model
+        else str(values.get("layer") or "")
+    )
     layer = next((lyr for lyr in layers if lyr["key"] == wanted_layer), layers[0])
+    base = {"layers": layers, "layer": layer}
+
+    if layer["kind"] == "single":
+        if not chosen_model:
+            wanted_run = str(values.get("run") or "")
+            pick = next((m for m in layer["models"] if m["stem"] == wanted_run), None)
+            if pick is None:
+                pick = layer["models"][0] if layer["models"] else None
+            chosen_model = (
+                pick["model_out_dir"]
+                if pick
+                else (layer["all_models"][0] if layer["all_models"] else "")
+            )
+        single = _single_split_view(chosen_model) if chosen_model else None
+        return {**base, "single": single, "run": None, "fold": "", "fold_months": []}
+
     wanted_run = str(values.get("run") or "")
     run = next((r for r in layer["runs"] if r.get("run_name") == wanted_run), layer["runs"][0])
     fold_months = [str(f.get("test_start_month") or "") for f in run.get("folds") or []]
@@ -912,8 +1098,8 @@ def _load_explore_view(values: dict[str, Any]) -> dict[str, Any] | None:
     fold = wanted_fold if wanted_fold in fold_months else ""
     run_dir = ROLLING_RESULTS_ROOT / str(run["run_name"])
     return {
-        "layers": layers,
-        "layer": layer,
+        **base,
+        "single": None,
         "run": run,
         "fold": fold,
         "fold_months": fold_months,
@@ -1004,8 +1190,7 @@ def render_page(
     tabs = [
         ("honest", "Results", "The leak, the embargoed backtests, the holdout"),
         ("score", "Score a plugin", "Score, rationale and honest track record"),
-        ("explore", "Explore", "Metrics, feature drivers and case study by validation layer"),
-        ("ml", "Layer 1 diagnostics", "Time-split models on stored labels"),
+        ("explore", "Explore", "Metrics, feature drivers and case study, by validation layer"),
         ("about", "About", "What CANARY is and how its numbers were validated"),
     ]
     tab_links = "".join(
@@ -1032,7 +1217,9 @@ def render_page(
         honest_runs = _load_rolling_backtests()
         active_panel_html = _render_honest_tab(honest_runs, viz=_load_honest_viz(honest_runs))
     elif active_tab == "explore":
-        active_panel_html = _render_explore_tab(values, _load_explore_view(values))
+        active_panel_html = _render_explore_tab(
+            values, _load_explore_view(values, model_dir_options), model_dir_options
+        )
     elif active_tab == "casestudy":
         # Legacy Layer 1 case study (stored-label single-split models); the
         # honest case study lives on the Explore tab.
@@ -1084,7 +1271,9 @@ def render_page(
           </div>
         </div>
         <p class="hero__copy">
-          A lightweight web UI for scoring Jenkins plugins and exploring ML-based advisory risk.
+          Security-advisory forecasting for Jenkins plugins from public signals, evaluated
+          honestly: four validation layers, one pre-registered criterion, and every number
+          on this site traceable to the layer that produced it.
         </p>
       </div>
     </header>

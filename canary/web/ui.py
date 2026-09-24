@@ -2315,8 +2315,12 @@ def _render_operational_panel(pk: dict[str, Any]) -> str:
         f'<p style="font-size:.84rem;color:var(--muted);margin:.4rem 0 .9rem">'
         f"Based on {n_test:,} plugin-month test observations, {n_pos} positive observations, "
         f"base rate {base_rate * 100:.2f}% &mdash; evaluated under <strong>{split_label}</strong>. "
-        f"Time-split results represent continuous monitoring of a known plugin inventory."
-        f"</p>"
+        + (
+            "Time-split results represent continuous monitoring of a known plugin inventory."
+            if split == "time"
+            else "Group-time results represent scoring plugins the model never trained on."
+        )
+        + "</p>"
     )
 
     # Component-level (deduplicated) precision — the primary triage view.
@@ -2439,7 +2443,7 @@ def _render_operational_panel(pk: dict[str, Any]) -> str:
             '<div style="margin-bottom:.75rem;padding:.7rem .9rem;'
             "background:rgba(82,196,26,.08);border:1px solid rgba(82,196,26,.25);"
             'border-radius:10px;font-size:.9rem">'
-            f"<strong>Key finding:</strong> reviewing the top "
+            f"<strong>As recorded for this split:</strong> reviewing the top "
             f"<strong>{best['k']}</strong> highest-scored plugins "
             f"({best['k'] / n_test * 100:.1f}% of the ecosystem) identifies "
             f"<strong>{best['true_positives']} of {n_pos}</strong> future advisory "
@@ -4450,47 +4454,137 @@ _LAYER1_BANNER = (
 # ---------------------------------------------------------------------------
 
 
-def _render_explore_picker(view: dict[str, Any]) -> str:
+def _render_explore_picker(view: dict[str, Any], model_dir_options: list[str]) -> str:
     layer = view["layer"]
-    run = view["run"]
+    single = view.get("single")
     layer_opts = "".join(
         f'<option value="{_escape(lyr["key"])}"{" selected" if lyr is layer else ""}>'
         f"{_escape(lyr['label'])}</option>"
         for lyr in view["layers"]
     )
-    run_opts = "".join(
-        f'<option value="{_escape(r.get("run_name"))}"{" selected" if r is run else ""}>'
-        f"{_escape(_honest_config_text(r))}</option>"
-        for r in layer["runs"]
-    )
-    fold_opts = '<option value="">All folds</option>' + "".join(
-        f'<option value="{_escape(m)}"{" selected" if m == view["fold"] else ""}>'
-        f"Fold {_escape(m)}</option>"
-        for m in view["fold_months"]
-    )
     label_css = (
         "font-size:.85rem;font-weight:600;color:var(--muted);display:block;margin:.6rem 0 .3rem"
     )
+    sel_css = 'style="width:100%;max-width:100%"'
+    if layer["kind"] == "rolling":
+        run = view["run"]
+        config_opts = "".join(
+            f'<option value="{_escape(r.get("run_name"))}"{" selected" if r is run else ""}>'
+            f"{_escape(_honest_config_text(r))}</option>"
+            for r in layer["runs"]
+        )
+        fold_opts = '<option value="">All folds</option>' + "".join(
+            f'<option value="{_escape(m)}"{" selected" if m == view["fold"] else ""}>'
+            f"Fold {_escape(m)}</option>"
+            for m in view["fold_months"]
+        )
+        third = (
+            f'<div><label for="pick-fold" style="{label_css}">Fold</label>'
+            f'<select id="pick-fold" name="fold" {sel_css}>{fold_opts}</select></div>'
+        )
+        note = (
+            "Changing the layer reloads the configuration list; the fold filter applies to "
+            "the case study below."
+        )
+        expander = ""
+        pill = '<span class="pill pill--good">Embargoed labels at every fold</span>'
+    else:
+        current_stem = (single or {}).get("stem", "")
+        curated = layer.get("models") or []
+        config_opts = "".join(
+            f'<option value="{_escape(m["stem"])}"{" selected" if m["stem"] == current_stem else ""}>'
+            f"{_escape(m['label'])}</option>"
+            for m in curated
+        )
+        if current_stem and current_stem not in {m["stem"] for m in curated}:
+            config_opts += (
+                f'<option value="{_escape(current_stem)}" selected>{_escape(current_stem)}</option>'
+            )
+        third = ""
+        note = (
+            "The configurations listed are the ones the praxis reports. Every other model "
+            "directory in the historical sweep is reachable below."
+        )
+        picker_values = {"model_out_dir": (single or {}).get("model_out_dir", "")}
+        expander = (
+            "<details style='margin-top:.8rem'>"
+            "<summary style='cursor:pointer;color:var(--muted);font-size:.9rem'>Browse all "
+            f"{len(layer.get('all_models') or [])} historical configurations of this layer "
+            "(algorithm × feature set × split)</summary>"
+            '<form method="get" action="/">'
+            '<input type="hidden" name="tab" value="explore">'
+            + _render_model_picker(picker_values, model_dir_options)
+            + '<div style="margin-top:.6rem"><button type="submit">Show this model</button></div>'
+            "</form></details>"
+        )
+        pill = '<span class="pill pill--warn">Stored labels · diagnostic</span>'
     return (
         '<section class="card" style="margin-bottom:1rem">'
         '<div class="card__header"><div>'
         '<p class="eyebrow">Explore</p>'
         "<h2>Pick a validation layer and a configuration</h2>"
         f'<p class="kicker">{_escape(layer["blurb"])}</p>'
-        '</div><span class="pill pill--good">Embargoed labels at every fold</span></div>'
+        f"</div>{pill}</div>"
         '<form method="get" action="/" style="display:grid;grid-template-columns:'
         'repeat(auto-fit,minmax(240px,1fr));gap:.6rem 1rem;align-items:end">'
         '<input type="hidden" name="tab" value="explore">'
         f'<div><label for="pick-layer" style="{label_css}">Validation layer</label>'
-        f'<select id="pick-layer" name="layer" style="width:100%;max-width:100%" onchange="this.form.submit()">{layer_opts}</select></div>'
+        f'<select id="pick-layer" name="layer" {sel_css} onchange="this.form.submit()">'
+        f"{layer_opts}</select></div>"
         f'<div><label for="pick-run" style="{label_css}">Configuration</label>'
-        f'<select id="pick-run" name="run" style="width:100%;max-width:100%">{run_opts}</select></div>'
-        f'<div><label for="pick-fold" style="{label_css}">Fold</label>'
-        f'<select id="pick-fold" name="fold" style="width:100%;max-width:100%">{fold_opts}</select></div>'
+        f'<select id="pick-run" name="run" {sel_css}>{config_opts}</select></div>'
+        f"{third}"
         '<div><button type="submit" style="margin-top:.6rem">Show</button></div>'
         "</form>"
-        "<p style='color:var(--muted);font-size:.82rem;margin:.6rem 0 0'>Changing the layer "
-        "reloads the configuration list; the fold filter applies to the case study below.</p>"
+        f"<p style='color:var(--muted);font-size:.82rem;margin:.6rem 0 0'>{_escape(note)}</p>"
+        f"{expander}"
+        "</section>"
+    )
+
+
+def _render_explore_single_metrics_card(single: dict[str, Any]) -> str:
+    """Readable metrics for one single-split model directory."""
+    m = single["metrics"]
+    n_pos = int(m.get("test_positive_count") or 0)
+    n_rows = int(m.get("test_row_count") or 0)
+    base_rate = n_pos / n_rows if n_rows else 0.0
+    ap = _float_or_none(m.get("average_precision"))
+    lift = (ap / base_rate) if (ap is not None and base_rate > 0) else None
+    label_pill = (
+        '<span class="pill pill--good">embargoed retrain</span>'
+        if single.get("embargoed")
+        else '<span class="pill pill--warn">stored labels</span>'
+    )
+    split = str(m.get("split_strategy") or "")
+    window = (
+        f"test from {_escape(m.get('test_start_month'))}"
+        + (f" to {_escape(m['test_end_month'])}" if m.get("test_end_month") else "")
+        + (
+            f", labels as of {_escape(m['label_as_of_month'])}"
+            if m.get("label_as_of_month")
+            else ""
+        )
+    )
+    ranking = m.get("ranking_metrics") or {}
+    return (
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">Readable metrics</p>'
+        f"<h2><code>{_escape(single['stem'])}</code></h2>"
+        f'<p class="kicker">{_render_model_badge(str(m.get("model_name") or ""))} '
+        f"{_escape(_SPLIT_LABELS.get(split, split))}, {window}; {n_rows:,} test rows, "
+        f"{n_pos:,} advisory outcomes ({base_rate:.1%} base rate), "
+        f"{_escape(m.get('feature_count'))} features.</p>"
+        f"</div>{label_pill}</div>"
+        "<div class='metrics-row'>"
+        f"<div class='metric'><span class='metric__label'>{_tip('ROC-AUC', 'ROC AUC')}</span>"
+        f"<span class='metric__value'>{_fmt_metric(m.get('roc_auc'), 3)}</span></div>"
+        f"<div class='metric'><span class='metric__label'>{_tip('Avg precision', 'Average Precision')}</span>"
+        f"<span class='metric__value'>{_fmt_metric(ap)}</span></div>"
+        f"<div class='metric'><span class='metric__label'>{_tip('Lift over base rate', 'AP lift')}</span>"
+        f"<span class='metric__value'>{_fmt_metric(lift, 2)}×</span></div>"
+        "</div>"
+        f"<div style='margin-top:.8rem'>{_render_ranking_row(ranking, base_rate)}</div>"
         "</section>"
     )
 
@@ -4551,14 +4645,20 @@ def _render_explore_drivers_card(view: dict[str, Any]) -> str:
             agree = max(int(d["n_positive"]), int(d["n_negative"]))
             direction = (
                 f"<span style='color:{color}'>{'raises' if signed > 0 else 'lowers'} risk</span>"
-                f" <span style='color:var(--muted);font-size:.82rem'>in {agree} of {d['n_present']} folds</span>"
             )
+            if n_folds > 1:
+                direction += (
+                    f" <span style='color:var(--muted);font-size:.82rem'>in {agree} of "
+                    f"{d['n_present']} folds</span>"
+                )
             value = f"{signed:+.2f}"
         else:
             color = "var(--accent)"
             direction = (
                 f"<span style='color:var(--muted);font-size:.82rem'>present in {d['n_present']} of "
                 f"{n_folds} folds</span>"
+                if n_folds > 1
+                else "<span style='color:var(--muted);font-size:.82rem'>magnitude only</span>"
             )
             value = f"{mag:.3f}"
         return (
@@ -4571,7 +4671,14 @@ def _render_explore_drivers_card(view: dict[str, Any]) -> str:
             "</tr>"
         )
 
-    if is_linear:
+    single = n_folds <= 1
+    if is_linear and single:
+        blurb = (
+            "Logistic-regression coefficients on standardized features for this one split; "
+            "the bar is the magnitude. Features are hover-documented."
+        )
+        value_head = "Coefficient"
+    elif is_linear:
         blurb = (
             f"Logistic-regression coefficients on standardized features, averaged over the "
             f"{n_folds} folds; the bar is the mean magnitude and the last column says how many "
@@ -4579,6 +4686,13 @@ def _render_explore_drivers_card(view: dict[str, Any]) -> str:
             "signal. Features are hover-documented."
         )
         value_head = "Mean coefficient"
+    elif single:
+        blurb = (
+            "Mean |SHAP| per feature for this one split: how much each feature moved "
+            "predictions, not which way. For tree models the signed mean SHAP over a panel that "
+            "is mostly zeros is an averaging artifact, so direction is deliberately not shown."
+        )
+        value_head = "Mean |SHAP|"
     else:
         blurb = (
             f"Mean |SHAP| per feature, averaged over the {n_folds} folds: how much each feature "
@@ -4611,24 +4725,69 @@ def _render_explore_drivers_card(view: dict[str, Any]) -> str:
     )
 
 
-def _render_explore_tab(values: dict[str, Any], view: dict[str, Any] | None) -> str:
+def _render_explore_tab(
+    values: dict[str, Any],
+    view: dict[str, Any] | None,
+    model_dir_options: list[str] | None = None,
+) -> str:
     """
-    The Explore tab: a layer + configuration + fold picker, then the panels
-    the historical model viewer used to offer, computed from the embargoed
-    rolling runs: readable metrics with the per-fold table, feature drivers
-    aggregated across folds, gain and ROC curves, and the case study of each
-    fold's top-25 against the advisories that followed.
+    The Explore tab: a layer + configuration (+ fold) picker, then the panels
+    the historical model viewer used to offer. Rolling layers show readable
+    metrics with the per-fold table, feature drivers aggregated across
+    folds, gain and ROC curves, and the case study of each fold's top-25
+    against the advisories that followed. Single-split layers show the model
+    directory's metrics and top-K precision, its operational scenarios and
+    feature-selection result where recorded, its drivers, and its case study.
     """
     del values  # the picker state comes from the validated view
+    model_dir_options = model_dir_options or []
     if view is None:
         return (
             '<section class="card">'
             '<div class="card__header"><div>'
             '<p class="eyebrow">Explore</p>'
-            "<h2>No rolling-backtest results found</h2>"
+            "<h2>No results found</h2>"
             "</div></div>"
             "<p class='muted' style='padding:.6rem 0'>Run <code>tools/rolling_backtest.py</code> "
-            "and refresh this page.</p></section>"
+            "or train a model, then refresh this page.</p></section>"
+        )
+    picker = _render_explore_picker(view, model_dir_options)
+    if view["layer"]["kind"] == "single":
+        single = view.get("single")
+        if not single:
+            return picker + (
+                "<section class='card'><p class='muted' style='padding:.6rem 0'>No model "
+                "directory with a <code>metrics.json</code> is available for this layer.</p></section>"
+            )
+        window_word = "group split" if view["layer"]["key"] == "group" else "time split"
+        pk = single.get("pk")
+        fs = single.get("fs")
+        extras = ""
+        if pk:
+            extras += '<section class="card">' + _render_operational_panel(pk) + "</section>"
+        if fs:
+            extras += _render_feature_selection_panel(fs)
+        case_view = {
+            "run": {
+                "run_name": single["stem"],
+                "label": single["stem"],
+                "model_name": single["metrics"].get("model_name"),
+            },
+            "folds": single.get("case_study") or [],
+            "pred_exists": bool(single.get("case_study")),
+        }
+        return (
+            picker
+            + '<div class="grid--score" style="margin-bottom:1rem">'
+            + _render_explore_single_metrics_card(single)
+            + _render_explore_drivers_card(single)
+            + "</div>"
+            + (
+                f'<div class="score-output" style="margin-bottom:1rem">{extras}</div>'
+                if extras
+                else ""
+            )
+            + _render_honest_case_study(case_view, window_word=window_word)
         )
     run = view["run"]
     window_word = "holdout" if view["layer"]["key"] == "holdout" else "development"
@@ -4643,13 +4802,42 @@ def _render_explore_tab(values: dict[str, Any], view: dict[str, Any] | None) -> 
         "pred_exists": bool(view.get("case_study")),
     }
     return (
-        _render_explore_picker(view)
+        picker
         + '<div class="grid--score" style="margin-bottom:1rem">'
         + _render_explore_metrics_card(view)
         + _render_explore_drivers_card(view)
         + "</div>"
         + curves_card
         + _render_honest_case_study(case_view, window_word=window_word)
+    )
+
+
+def _case_study_pill(window_word: str) -> str:
+    return {
+        "holdout": "Pre-registered",
+        "development": "Embargoed",
+    }.get(window_word, "Stored labels unless marked embargoed")
+
+
+def _case_study_eyebrow(window_word: str) -> str:
+    return {
+        "holdout": "Out-of-time outcomes",
+        "development": "Development-fold outcomes",
+        "time split": "Layer 1 outcomes",
+        "group split": "Layer 2 outcomes",
+    }.get(window_word, "Outcomes")
+
+
+def _case_study_method(window_word: str) -> str:
+    if window_word in ("holdout", "development"):
+        return (
+            "Each plugin's best month inside the fold is shown; training labels were rebuilt "
+            "from advisories known before the fold's forecast date, and the folds were run once."
+        )
+    return (
+        "Each plugin's best month inside the test window is shown. Unless this model is an "
+        "embargoed retrain, its training labels could be set by advisories published inside "
+        "the test window, which inflates what you see here."
     )
 
 
@@ -4803,13 +4991,12 @@ def _render_honest_case_study(view: dict[str, Any], *, window_word: str = "holdo
     return (
         '<section class="card">'
         '<div class="card__header"><div>'
-        f'<p class="eyebrow">{"Out-of-time outcomes" if window_word == "holdout" else "Development-fold outcomes"}</p>'
+        f'<p class="eyebrow">{_escape(_case_study_eyebrow(window_word))}</p>'
         f"<h2>Top-25 per {_escape(window_word)} fold vs. what followed</h2>"
         f'<p class="kicker">{_escape(label)} · <code>{_escape(run.get("run_name"))}</code>. '
-        "Each plugin's best month inside the fold is shown; training labels were rebuilt from "
-        "advisories known before the fold's forecast date, and the folds were run once.</p>"
+        f"{_escape(_case_study_method(window_word))}</p>"
         "</div>"
-        f'<span class="pill pill--good">{"Pre-registered" if window_word == "holdout" else "Embargoed"}</span></div>'
+        f'<span class="pill pill--good">{_case_study_pill(window_word)}</span></div>'
         f"<p style='color:var(--muted);font-size:.9rem;margin:.2rem 0 .4rem'>{_escape(overall)}</p>"
         + "".join(panels)
         + "<p style='font-size:.78rem;color:var(--muted);margin-top:.8rem'>Advisory details come "
