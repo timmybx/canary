@@ -571,3 +571,89 @@ def family_ladder(runs: list[dict[str, Any]], ecosystem: str) -> list[dict[str, 
             top["champion"] = True
             singles.insert(0, top)
     return singles
+
+
+# ---------------------------------------------------------------------------
+# Feature drivers aggregated across a run's folds
+# ---------------------------------------------------------------------------
+
+
+def _drivers_signature(run_dir: Path) -> tuple[tuple[str, int, int], ...]:
+    sig: list[tuple[str, int, int]] = []
+    for fold_dir in sorted(run_dir.glob("fold_*")):
+        path = fold_dir / "metrics.json"
+        if path.is_file():
+            st = path.stat()
+            sig.append((fold_dir.name, st.st_mtime_ns, st.st_size))
+    return tuple(sig)
+
+
+@lru_cache(maxsize=16)
+def _fold_drivers_cached(
+    run_dir: str, signature: tuple[tuple[str, int, int], ...]
+) -> dict[str, Any]:
+    del signature  # part of the cache key only
+    root = Path(run_dir)
+    per_feature: dict[str, dict[str, Any]] = {}
+    kind = ""
+    n_folds = 0
+    for fold_dir in sorted(root.glob("fold_*")):
+        metrics = _read_json(fold_dir / "metrics.json")
+        if not metrics:
+            continue
+        n_folds += 1
+        entries = list(metrics.get("top_positive_features") or []) + list(
+            metrics.get("top_negative_features") or []
+        )
+        for entry in entries:
+            if not isinstance(entry, dict) or not entry.get("feature"):
+                continue
+            name = str(entry["feature"])
+            if "coefficient" in entry:
+                kind = kind or "coefficient"
+                signed = float(entry["coefficient"])
+                magnitude = abs(signed)
+            elif "mean_abs_shap" in entry:
+                kind = kind or "shap"
+                magnitude = float(entry["mean_abs_shap"])
+                signed = float(entry.get("mean_shap", 0.0) or 0.0)
+            else:
+                continue
+            slot = per_feature.setdefault(name, {"feature": name, "signed": [], "magnitude": []})
+            slot["signed"].append(signed)
+            slot["magnitude"].append(magnitude)
+    drivers: list[dict[str, Any]] = []
+    for slot in per_feature.values():
+        n = len(slot["magnitude"])
+        drivers.append(
+            {
+                "feature": slot["feature"],
+                "n_present": n,
+                "mean_signed": sum(slot["signed"]) / n,
+                "mean_magnitude": sum(slot["magnitude"]) / n,
+                "n_positive": sum(1 for v in slot["signed"] if v > 0),
+                "n_negative": sum(1 for v in slot["signed"] if v < 0),
+            }
+        )
+    drivers.sort(key=lambda d: -d["mean_magnitude"])
+    return {"kind": kind, "n_folds": n_folds, "drivers": drivers}
+
+
+def fold_drivers(run_dir: Path) -> dict[str, Any] | None:
+    """
+    Feature drivers of a rolling run aggregated over its folds, from each
+    fold's ``metrics.json`` (``top_positive_features`` /
+    ``top_negative_features``). ``kind`` is ``"coefficient"`` for linear
+    models (signed, direction meaningful) or ``"shap"`` for tree models
+    (mean |SHAP| as magnitude; the signed mean is kept but is an average
+    over a zero-heavy panel and should not be read as direction). Each
+    driver carries the number of folds it appeared in and how many of those
+    had a positive or negative sign. None when no fold metrics exist.
+    """
+    if not run_dir.is_dir():
+        return None
+    signature = _drivers_signature(run_dir)
+    if not signature:
+        return None
+    payload = _fold_drivers_cached(str(run_dir.resolve()), signature)
+    return payload if payload["drivers"] else None

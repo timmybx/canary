@@ -3410,8 +3410,11 @@ def _render_honest_timeline_card(viz: dict[str, Any]) -> str:
     )
 
 
-def _render_honest_holdout_curves_card(curve_sets: list[dict[str, Any]]) -> str:
-    """Cumulative gain and ROC curves on the out-of-time predictions."""
+def _render_honest_holdout_curves_card(
+    curve_sets: list[dict[str, Any]], *, window_word: str = "holdout"
+) -> str:
+    """Cumulative gain and ROC curves over a run's fold predictions
+    (``window_word`` names the folds in the prose: "holdout" or "development")."""
     curve_sets = [c for c in curve_sets if (c.get("curves") or {}).get("pooled", {}).get("gain")]
     if not curve_sets:
         return ""
@@ -3452,20 +3455,22 @@ def _render_honest_holdout_curves_card(curve_sets: list[dict[str, Any]]) -> str:
         per_fold_str = f" (by fold: {', '.join(per_fold)})" if per_fold else ""
         headline = (
             f"Reviewing the top 20% of plugins by score would have caught {round(at_20 * 100)}% "
-            f"of the advisories that followed across the holdout folds{per_fold_str}, against a "
+            f"of the advisories that followed across the {window_word} folds{per_fold_str}, "
+            "against a "
             f"base rate of {first.get('base_rate', 0) * 100:.1f}%. "
         )
     n_pos = f"{first.get('n_positive') or 0:,}"
     n_rows = f"{first.get('n_rows') or 0:,}"
     return (
         "<div class='card' style='margin-bottom:1rem'>"
-        "<p class='eyebrow'>What the holdout ranking looks like</p>"
-        "<h3 style='margin:.1rem 0 .4rem'>Advisories caught vs plugins reviewed, out-of-time</h3>"
+        f"<p class='eyebrow'>What the {_escape(window_word)} ranking looks like</p>"
+        "<h3 style='margin:.1rem 0 .4rem'>Advisories caught vs plugins reviewed"
+        f"{', out-of-time' if window_word == 'holdout' else ''}</h3>"
         f"<p style='color:var(--muted);font-size:.92rem;margin:0 0 .8rem'>{_escape(headline)}"
-        "The thick line is the pooled ranking over every holdout fold; thin lines are the "
-        f"individual folds ({_escape(n_rows)} plugin-months, {_escape(n_pos)} advisory outcomes). "
-        "The dashed diagonal is random order. Right: the ROC curve of each holdout fold for the "
-        "first configuration.</p>"
+        f"The thick line is the pooled ranking over every {_escape(window_word)} fold; thin lines "
+        f"are the individual folds ({_escape(n_rows)} plugin-months, {_escape(n_pos)} advisory "
+        "outcomes). The dashed diagonal is random order. Right: the ROC curve of each fold for "
+        "the first configuration.</p>"
         "<div class='two-up' style='align-items:flex-start'>"
         f"<div style='flex:3 1 420px;min-width:300px'>{gain_svg}</div>"
         f"<div style='flex:2 1 300px;min-width:260px'>{roc_svg}</div>"
@@ -3689,30 +3694,31 @@ def _render_about_tab() -> str:
         f"<td style='padding:.4rem .75rem;font-size:.88rem;color:var(--muted)'>{desc}</td></tr>"
         for sig, desc in [
             (
-                "Days since last commit",
-                "How long ago the repository was last updated — stale repos carry higher risk.",
+                "Activity-recency clocks",
+                "Days since the last human push, any push, release, pull request, review, "
+                "issue and tag, from GitHub Archive events. The strongest honest family.",
             ),
             (
-                "Archive age",
-                "How long the plugin has been publicly archived — older projects tend to be better-hardened.",
+                "Contributor dynamics",
+                "Active, new and departed contributors over trailing windows; how "
+                "concentrated the work is. Recent human attention raises advisory risk; "
+                "bot-only activity does not.",
             ),
             (
-                "Release recency",
-                "Time since the last published release — infrequent releases correlate with elevated risk.",
-            ),
-            (
-                "Security-fix commit count",
-                "Commits whose messages reference security fixes — a positive maintenance signal.",
+                "Install base",
+                "Jenkins install statistics: how many instances run the plugin and how "
+                "that is trending.",
             ),
             (
                 "Advisory history",
-                "Number and recency of previously published Jenkins security advisories.",
+                "Previous Jenkins advisories. Below chance as a forward signal in Jenkins, "
+                "strong in PyPI: ecosystem specific.",
             ),
             (
-                "Governance artifacts",
-                "Presence of SECURITY.md, Dependabot config, changelog, and CI workflows.",
+                "Governance and maintenance context",
+                "SECURITY.md, Dependabot, changelog, CI workflows and dependency advisories, "
+                "shown as supporting signals beside the score.",
             ),
-            ("Dependency risk", "Whether the plugin's dependencies have known advisories."),
         ]
     )
 
@@ -3742,14 +3748,15 @@ def _render_about_tab() -> str:
         "<h2>Score a plugin in 30 seconds</h2>"
         "</div></div>"
         '<ol style="margin:.6rem 0 0;padding-left:1.4rem;line-height:2;font-size:.95rem">'
-        "<li>Click the <strong>Scoring</strong> tab.</li>"
+        "<li>Click the <strong>Score a plugin</strong> tab.</li>"
         "<li>Type a Jenkins plugin name in the <strong>Plugin ID</strong> field "
         "(autocomplete is populated from the live registry).</li>"
         "<li>Optionally select an <strong>ML model</strong> from the dropdown "
         "to add a probabilistic score alongside the heuristic one.</li>"
         "<li>Click <strong>Score plugin</strong>.</li>"
-        "<li>Review the heuristic score, ML advisory probability, and SHAP-based "
-        "feature drivers. Use <strong>Explain now (AI)</strong> for a plain-English summary.</li>"
+        "<li>Review the score, its feature drivers, and the plugin's <strong>honest track "
+        "record</strong>: where it ranked at every past forecast date and whether an advisory "
+        "followed. Use <strong>Explain now (AI)</strong> for a plain-English summary.</li>"
         "</ol>"
         "</section>"
         # ── Score meanings ────────────────────────────────────────────────────
@@ -3780,8 +3787,11 @@ def _render_about_tab() -> str:
         "</div></div>"
         '<p style="margin-top:.4rem;font-size:.9rem;color:var(--muted)">'
         "CANARY uses only publicly observable data — no private telemetry or credentials "
-        "are required. The most predictive signals come from Software Heritage archival "
-        "data and GitHub Archive event history.</p>"
+        "are required. Under honest evaluation the signals that carry forward are about "
+        "<em>recency of human attention</em>: activity clocks and contributor dynamics from "
+        "GitHub Archive events, and the plugin's install base. Repository-snapshot and "
+        "advisory-history signals, which looked strongest under the original protocol, did "
+        "not survive the label embargo in Jenkins.</p>"
         '<table style="width:100%;border-collapse:collapse;margin-top:.8rem">'
         "<thead><tr>"
         "<th style='text-align:left;padding:.4rem .75rem;color:var(--muted);font-size:.85rem'>Signal</th>"
@@ -3790,26 +3800,38 @@ def _render_about_tab() -> str:
         f"<tbody>{signal_rows}</tbody>"
         "</table>"
         "</section>"
-        # ── ML models ─────────────────────────────────────────────────────────
+        # ── Validation layers ─────────────────────────────────────────────────
         '<section class="card">'
         '<div class="card__header"><div>'
-        '<p class="eyebrow">Machine learning tab</p>'
-        "<h2>Exploring model results</h2>"
+        '<p class="eyebrow">How the numbers were validated</p>'
+        "<h2>Four layers, one criterion</h2>"
         "</div></div>"
         '<p style="margin-top:.6rem;line-height:1.7;font-size:.95rem">'
-        "The <strong>Machine learning</strong> tab lets you explore pre-computed results "
-        "across 64 model configurations. Use the three dropdowns to select an algorithm "
-        "(XGBoost, LightGBM, Random Forest, Logistic Regression), a feature set "
-        "(from advisory-history-only up to all 154 features), and an evaluation strategy "
-        "(time split or group-time split). "
-        "Where available, a <strong>feature selection panel</strong> shows which features "
-        "are most important and whether a compact subset can match full-model performance.</p>"
+        "Every number on this site comes from one of four evaluation layers, and the tabs are "
+        "organized around them. The pre-registered success criterion is the same at every "
+        "layer: pooled ROC-AUC of at least 0.55 with training labels rebuilt from advisories "
+        "known before each forecast date (the <em>label embargo</em>). 0.50 is chance.</p>"
+        '<ol style="margin:.6rem 0 0;padding-left:1.4rem;line-height:1.9;font-size:.95rem">'
+        "<li><strong>Layer 1, chronological time split.</strong> One training/test cut with "
+        "stored labels. This is where the project started and where a label leak inflated "
+        "the headline (ROC-AUC 0.93 that fell to 0.48 once the labels were rebuilt). Kept on "
+        "the <strong>Layer 1 diagnostics</strong> tab as the historical record.</li>"
+        "<li><strong>Layer 2, group time split.</strong> Whole plugins withheld from training, "
+        "the cold-start question. Also a Layer 1-era, stored-label result.</li>"
+        "<li><strong>Layer 3, embargoed rolling backtest.</strong> Thirteen forecast dates "
+        "from 2023 to 2025, training labels rebuilt at each one; the sweep on which the "
+        "configurations were chosen. On the <strong>Results</strong> and <strong>Explore</strong> "
+        "tabs.</li>"
+        "<li><strong>Layer 4, pre-registered out-of-time holdout.</strong> Three later forecast "
+        "dates whose months had not been collected when the configurations and the criterion "
+        "were frozen; each run once, the first recorded run is the result. The official test, "
+        "on the <strong>Results</strong> and <strong>Explore</strong> tabs.</li>"
+        "</ol>"
         '<p style="margin-top:.6rem;line-height:1.7;font-size:.95rem">'
-        "<strong>Time split</strong> evaluates models where the same plugins appear in "
-        "both training and testing — a continuous monitoring scenario. "
-        "<strong>Group-time split</strong> withholds entire plugins from training, testing "
-        "whether the model generalises to previously unseen plugins. The group-time design "
-        "is the more conservative and realistic evaluation of the two.</p>"
+        "The honest result is <strong>weak but measurable discrimination</strong>: the champion "
+        "configuration held ROC-AUC 0.670 on the holdout, and reviewing the top fifth of plugins "
+        "by score would have caught about half the advisories that followed. That is a triage "
+        "signal, not proof that a component is vulnerable.</p>"
         "</section>"
         # ── Limitations ───────────────────────────────────────────────────────
         '<section class="card">'
@@ -4423,7 +4445,215 @@ _LAYER1_BANNER = (
 # ---------------------------------------------------------------------------
 
 
-def _render_honest_case_study(view: dict[str, Any]) -> str:
+# ---------------------------------------------------------------------------
+# Explore tab: one layer, one configuration, the panels people ask for
+# ---------------------------------------------------------------------------
+
+
+def _render_explore_picker(view: dict[str, Any]) -> str:
+    layer = view["layer"]
+    run = view["run"]
+    layer_opts = "".join(
+        f'<option value="{_escape(lyr["key"])}"{" selected" if lyr is layer else ""}>'
+        f"{_escape(lyr['label'])}</option>"
+        for lyr in view["layers"]
+    )
+    run_opts = "".join(
+        f'<option value="{_escape(r.get("run_name"))}"{" selected" if r is run else ""}>'
+        f"{_escape(_honest_config_text(r))}</option>"
+        for r in layer["runs"]
+    )
+    fold_opts = '<option value="">All folds</option>' + "".join(
+        f'<option value="{_escape(m)}"{" selected" if m == view["fold"] else ""}>'
+        f"Fold {_escape(m)}</option>"
+        for m in view["fold_months"]
+    )
+    label_css = (
+        "font-size:.85rem;font-weight:600;color:var(--muted);display:block;margin:.6rem 0 .3rem"
+    )
+    return (
+        '<section class="card" style="margin-bottom:1rem">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">Explore</p>'
+        "<h2>Pick a validation layer and a configuration</h2>"
+        f'<p class="kicker">{_escape(layer["blurb"])}</p>'
+        '</div><span class="pill pill--good">Embargoed labels at every fold</span></div>'
+        '<form method="get" action="/" style="display:grid;grid-template-columns:'
+        'repeat(auto-fit,minmax(240px,1fr));gap:.6rem 1rem;align-items:end">'
+        '<input type="hidden" name="tab" value="explore">'
+        f'<div><label for="pick-layer" style="{label_css}">Validation layer</label>'
+        f'<select id="pick-layer" name="layer" style="width:100%;max-width:100%" onchange="this.form.submit()">{layer_opts}</select></div>'
+        f'<div><label for="pick-run" style="{label_css}">Configuration</label>'
+        f'<select id="pick-run" name="run" style="width:100%;max-width:100%">{run_opts}</select></div>'
+        f'<div><label for="pick-fold" style="{label_css}">Fold</label>'
+        f'<select id="pick-fold" name="fold" style="width:100%;max-width:100%">{fold_opts}</select></div>'
+        '<div><button type="submit" style="margin-top:.6rem">Show</button></div>'
+        "</form>"
+        "<p style='color:var(--muted);font-size:.82rem;margin:.6rem 0 0'>Changing the layer "
+        "reloads the configuration list; the fold filter applies to the case study below.</p>"
+        "</section>"
+    )
+
+
+def _render_explore_metrics_card(view: dict[str, Any]) -> str:
+    run = view["run"]
+    pooled = run.get("pooled") or {}
+    summary = run.get("summary") or {}
+    roc = summary.get("roc_auc") or {}
+    n_rows = f"{summary.get('total_test_rows') or 0:,}"
+    n_pos = f"{summary.get('total_test_positives') or 0:,}"
+    return (
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">Readable metrics</p>'
+        f"<h2>{_honest_run_label_html(run)} "
+        f"<span style='color:var(--muted);font-weight:normal'>({_honest_model_html(run.get('model_name'))})</span></h2>"
+        f'<p class="kicker"><code>{_escape(run.get("run_name"))}</code> · '
+        f"{_escape(summary.get('fold_count'))} folds, {_escape(n_rows)} test rows, "
+        f"{_escape(n_pos)} advisory outcomes; pooled metrics combine every fold's predictions.</p>"
+        "</div></div>"
+        "<div class='metrics-row'>"
+        f"<div class='metric'><span class='metric__label'>{_tip('Pooled ROC-AUC')}</span>"
+        f"<span class='metric__value'>{_fmt_metric(pooled.get('roc_auc'), 3)}</span></div>"
+        f"<div class='metric'><span class='metric__label'>{_tip('Pooled avg precision', 'Pooled AP')}</span>"
+        f"<span class='metric__value'>{_fmt_metric(pooled.get('average_precision'))}</span></div>"
+        f"<div class='metric'><span class='metric__label'>{_tip('Lift over base rate', 'AP lift')}</span>"
+        f"<span class='metric__value'>{_fmt_metric(pooled.get('ap_lift_over_base_rate'), 2)}×</span></div>"
+        f"<div class='metric'><span class='metric__label'>{_tip('Fold ROC range')}</span>"
+        f"<span class='metric__value'>{_fmt_metric(roc.get('min'), 3)} – {_fmt_metric(roc.get('max'), 3)}</span></div>"
+        "</div>" + _render_honest_fold_table(run) + "</section>"
+    )
+
+
+def _render_explore_drivers_card(view: dict[str, Any]) -> str:
+    drivers = view.get("drivers")
+    if not drivers:
+        return ""
+    kind = str(drivers.get("kind") or "")
+    n_folds = int(drivers.get("n_folds") or 0)
+    rows = drivers.get("drivers") or []
+    max_mag = max((float(d["mean_magnitude"]) for d in rows), default=0.0) or 1.0
+    is_linear = kind == "coefficient"
+
+    def _row(d: dict[str, Any]) -> str:
+        feat = str(d["feature"])
+        tip = _FEATURE_TIPS.get(feat, "")
+        name = (
+            f'<span class="tip tip--below" data-tip="{_escape(tip)}"><code>{_escape(feat)}</code></span>'
+            if tip
+            else f"<code>{_escape(feat)}</code>"
+        )
+        mag = float(d["mean_magnitude"])
+        width = round(100 * mag / max_mag)
+        if is_linear:
+            signed = float(d["mean_signed"])
+            color = "var(--warn)" if signed > 0 else "var(--accent)"
+            agree = max(int(d["n_positive"]), int(d["n_negative"]))
+            direction = (
+                f"<span style='color:{color}'>{'raises' if signed > 0 else 'lowers'} risk</span>"
+                f" <span style='color:var(--muted);font-size:.82rem'>in {agree} of {d['n_present']} folds</span>"
+            )
+            value = f"{signed:+.2f}"
+        else:
+            color = "var(--accent)"
+            direction = (
+                f"<span style='color:var(--muted);font-size:.82rem'>present in {d['n_present']} of "
+                f"{n_folds} folds</span>"
+            )
+            value = f"{mag:.3f}"
+        return (
+            "<tr>"
+            f"<td style='padding:.35rem .6rem'>{name}</td>"
+            f"<td style='padding:.35rem .6rem;width:34%'><span style='display:inline-block;height:10px;"
+            f"width:{width}%;background:{color};border-radius:4px;vertical-align:middle'></span></td>"
+            f"<td style='padding:.35rem .6rem;text-align:right;white-space:nowrap'>{value}</td>"
+            f"<td style='padding:.35rem .6rem;white-space:nowrap'>{direction}</td>"
+            "</tr>"
+        )
+
+    if is_linear:
+        blurb = (
+            f"Logistic-regression coefficients on standardized features, averaged over the "
+            f"{n_folds} folds; the bar is the mean magnitude and the last column says how many "
+            "folds agreed on the sign. A driver that flips sign between folds is not a stable "
+            "signal. Features are hover-documented."
+        )
+        value_head = "Mean coefficient"
+    else:
+        blurb = (
+            f"Mean |SHAP| per feature, averaged over the {n_folds} folds: how much each feature "
+            "moved predictions, not which way. For tree models the signed mean SHAP over a panel "
+            "that is mostly zeros is an averaging artifact, so direction is deliberately not shown."
+        )
+        value_head = "Mean |SHAP|"
+    return (
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        '<p class="eyebrow">Feature drivers</p>'
+        "<h2>What moved the score, and how consistently</h2>"
+        f'<p class="kicker">{_escape(blurb)}</p>'
+        "</div></div>"
+        "<table style='width:100%;border-collapse:collapse;font-size:.9rem;margin-top:.4rem'>"
+        "<thead><tr>"
+        "<th style='text-align:left;padding:.35rem .6rem'>Feature</th>"
+        "<th style='text-align:left;padding:.35rem .6rem'>Magnitude</th>"
+        f"<th style='text-align:right;padding:.35rem .6rem'>{_escape(value_head)}</th>"
+        "<th style='text-align:left;padding:.35rem .6rem'>Direction</th>"
+        "</tr></thead>"
+        f"<tbody>{''.join(_row(d) for d in rows[:20])}</tbody></table>"
+        + (
+            f"<p style='color:var(--muted);font-size:.82rem;margin:.5rem 0 0'>Showing the top 20 of "
+            f"{len(rows)} features by mean magnitude.</p>"
+            if len(rows) > 20
+            else ""
+        )
+        + "</section>"
+    )
+
+
+def _render_explore_tab(values: dict[str, Any], view: dict[str, Any] | None) -> str:
+    """
+    The Explore tab: a layer + configuration + fold picker, then the panels
+    the historical model viewer used to offer, computed from the embargoed
+    rolling runs: readable metrics with the per-fold table, feature drivers
+    aggregated across folds, gain and ROC curves, and the case study of each
+    fold's top-25 against the advisories that followed.
+    """
+    del values  # the picker state comes from the validated view
+    if view is None:
+        return (
+            '<section class="card">'
+            '<div class="card__header"><div>'
+            '<p class="eyebrow">Explore</p>'
+            "<h2>No rolling-backtest results found</h2>"
+            "</div></div>"
+            "<p class='muted' style='padding:.6rem 0'>Run <code>tools/rolling_backtest.py</code> "
+            "and refresh this page.</p></section>"
+        )
+    run = view["run"]
+    window_word = "holdout" if view["layer"]["key"] == "holdout" else "development"
+    curves_card = ""
+    if view.get("curves"):
+        curves_card = _render_honest_holdout_curves_card(
+            [{"run": run, "curves": view["curves"]}], window_word=window_word
+        )
+    case_view = {
+        "run": run,
+        "folds": view.get("case_study") or [],
+        "pred_exists": bool(view.get("case_study")),
+    }
+    return (
+        _render_explore_picker(view)
+        + '<div class="grid--score" style="margin-bottom:1rem">'
+        + _render_explore_metrics_card(view)
+        + _render_explore_drivers_card(view)
+        + "</div>"
+        + curves_card
+        + _render_honest_case_study(case_view, window_word=window_word)
+    )
+
+
+def _render_honest_case_study(view: dict[str, Any], *, window_word: str = "holdout") -> str:
     """
     Right column of the Case-study tab for a recorded out-of-time run: one
     panel per holdout fold with its top-25 plugins split into confirmed and
@@ -4556,7 +4786,8 @@ def _render_honest_case_study(view: dict[str, Any]) -> str:
             else ""
         )
         panels.append(
-            f"<div class='panel' style='margin-top:.8rem'><h4>Holdout fold {_escape(fold['fold'])}"
+            f"<div class='panel' style='margin-top:.8rem'><h4>{_escape(window_word.capitalize())} "
+            f"fold {_escape(fold['fold'])}"
             f" <span style='color:#5ce0a0'>({len(confirmed)} of {n_total} confirmed)</span></h4>"
             + head
             + confirmed_html
@@ -4564,20 +4795,21 @@ def _render_honest_case_study(view: dict[str, Any]) -> str:
             + "</div>"
         )
     overall = (
-        f"Across the holdout, {total_hits} of the {total_rows} top-25 slots were followed by an "
-        "advisory within 180 days. That is the honest precision at 25 for this configuration: "
-        "a ranking signal with real lift over the base rate, not an operational triage list."
+        f"Across the {window_word} folds shown, {total_hits} of the {total_rows} top-25 slots "
+        "were followed by an advisory within 180 days. That is the honest precision at 25 for "
+        "this configuration: a ranking signal with real lift over the base rate, not an "
+        "operational triage list."
     )
     return (
         '<section class="card">'
         '<div class="card__header"><div>'
-        '<p class="eyebrow">Out-of-time outcomes</p>'
-        f"<h2>Top-25 per holdout fold vs. what followed</h2>"
+        f'<p class="eyebrow">{"Out-of-time outcomes" if window_word == "holdout" else "Development-fold outcomes"}</p>'
+        f"<h2>Top-25 per {_escape(window_word)} fold vs. what followed</h2>"
         f'<p class="kicker">{_escape(label)} · <code>{_escape(run.get("run_name"))}</code>. '
         "Each plugin's best month inside the fold is shown; training labels were rebuilt from "
         "advisories known before the fold's forecast date, and the folds were run once.</p>"
         "</div>"
-        '<span class="pill pill--good">Pre-registered</span></div>'
+        f'<span class="pill pill--good">{"Pre-registered" if window_word == "holdout" else "Embargoed"}</span></div>'
         f"<p style='color:var(--muted);font-size:.9rem;margin:.2rem 0 .4rem'>{_escape(overall)}</p>"
         + "".join(panels)
         + "<p style='font-size:.78rem;color:var(--muted);margin-top:.8rem'>Advisory details come "

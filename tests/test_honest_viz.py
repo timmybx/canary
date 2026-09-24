@@ -420,9 +420,9 @@ def test_plugin_track_and_honest_case_study_loaders(tmp_path: Path, monkeypatch:
     assert fold["confirmed_rows"][0]["adv_date"] == "2025-09-03"
     assert [r["plugin_id"] for r in fold["unconfirmed_rows"]] == ["b", "c"]
 
-    # The Case-study tab shows the holdout view by default and the plugin's
-    # score page carries its track record.
-    page = webapp.render_page({"active_tab": "casestudy", "model_out_dir": "", "oot_run": ""})
+    # The Explore tab opens on the holdout case study and the plugin's score
+    # page carries its track record.
+    page = webapp.render_page({"active_tab": "explore"})
     assert "Top-25 per holdout fold vs. what followed" in page and "SECURITY-1" in page
     score_result = {
         "plugin": "a",
@@ -502,3 +502,91 @@ def test_svg_family_ladder_anchors_bars_at_chance_and_outlines_shared() -> None:
     assert svg.count('stroke="var(--text)"') == 1
     assert "criterion 0.55" in svg and "chance 0.50" in svg
     assert charts.svg_family_ladder([{"title": "A", "items": []}]) == ""
+
+
+# ---------------------------------------------------------------------------
+# Explore tab: fold-aggregated drivers and the layer/run/fold picker
+# ---------------------------------------------------------------------------
+
+
+def _write_fold_metrics(run_dir: Path, month: str, pos: list[dict], neg: list[dict]) -> None:
+    d = run_dir / f"fold_{month}"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "metrics.json").write_text(
+        json.dumps({"top_positive_features": pos, "top_negative_features": neg}), encoding="utf-8"
+    )
+
+
+def test_fold_drivers_average_coefficients_and_count_sign_agreement(tmp_path: Path) -> None:
+    run = tmp_path / "run"
+    _write_fold_metrics(
+        run,
+        "2025-07",
+        [{"feature": "a", "coefficient": 2.0}],
+        [{"feature": "b", "coefficient": -1.0}],
+    )
+    _write_fold_metrics(
+        run,
+        "2025-09",
+        [{"feature": "b", "coefficient": 0.5}],
+        [{"feature": "a", "coefficient": -1.0}],
+    )
+    out = honest_viz.fold_drivers(run)
+    assert out is not None and out["kind"] == "coefficient" and out["n_folds"] == 2
+    by_name = {d["feature"]: d for d in out["drivers"]}
+    # Sorted by mean magnitude: a (1.5) before b (0.75).
+    assert [d["feature"] for d in out["drivers"]] == ["a", "b"]
+    assert by_name["a"]["mean_signed"] == 0.5 and by_name["a"]["mean_magnitude"] == 1.5
+    assert (by_name["a"]["n_positive"], by_name["a"]["n_negative"]) == (1, 1)
+    assert honest_viz.fold_drivers(tmp_path / "missing") is None
+
+    # Tree models: |SHAP| is the magnitude and the kind says so.
+    tree = tmp_path / "tree"
+    _write_fold_metrics(
+        tree, "2025-07", [], [{"feature": "x", "mean_abs_shap": 0.4, "mean_shap": -0.3}]
+    )
+    out = honest_viz.fold_drivers(tree)
+    assert out is not None and out["kind"] == "shap"
+    assert out["drivers"][0]["mean_magnitude"] == 0.4 and out["drivers"][0]["mean_signed"] == -0.3
+
+
+def test_explore_view_validates_layer_run_and_fold(tmp_path: Path, monkeypatch: Any) -> None:
+    rolling = tmp_path / "rolling"
+    rolling.mkdir()
+    monkeypatch.setattr(webapp, "ROLLING_RESULTS_ROOT", rolling)
+    monkeypatch.setattr(webapp, "ADVISORY_DATA_ROOT", tmp_path / "advisories")
+    dev = _rolling_payload(
+        embargo=True, prefixes=["ghclock_"], model="logistic", folds=[("2025-05", 0.7, 1)]
+    )
+    oot = _rolling_payload(
+        embargo=True, prefixes=["ghclock_"], model="logistic", folds=[("2025-07", 0.65, 1)]
+    )
+    for name, payload in (("dev_run", dev), ("oot_run", oot)):
+        (rolling / name).mkdir()
+        (rolling / name / "rolling_backtest.json").write_text(json.dumps(payload), encoding="utf-8")
+    _write_fold(rolling / "oot_run", "2025-07", [("a", 1, 0.9), ("b", 0, 0.1)])
+    _write_fold_metrics(rolling / "oot_run", "2025-07", [{"feature": "f", "coefficient": 1.0}], [])
+
+    # Defaults: the holdout layer and its first run, all folds.
+    view = webapp._load_explore_view({})
+    assert view is not None
+    assert view["layer"]["key"] == "holdout" and view["run"]["run_name"] == "oot_run"
+    assert view["fold"] == "" and view["fold_months"] == ["2025-07"]
+    assert view["drivers"]["drivers"][0]["feature"] == "f"
+    assert view["curves"]["pooled"]["roc_auc"] == 1.0
+    assert [f["fold"] for f in view["case_study"]] == ["2025-07"]
+
+    # Explicit choices are honored; unknown ones fall back.
+    view = webapp._load_explore_view({"layer": "rolling", "run": "nope", "fold": "2099-01"})
+    assert view is not None
+    assert view["layer"]["key"] == "rolling" and view["run"]["run_name"] == "dev_run"
+    assert view["fold"] == "" and view["drivers"] is None and view["case_study"] == []
+
+    page = webapp.render_page({"active_tab": "explore"})
+    assert "Pick a validation layer and a configuration" in page
+    assert "What moved the score, and how consistently" in page
+    assert "Top-25 per holdout fold vs. what followed" in page
+
+    monkeypatch.setattr(webapp, "ROLLING_RESULTS_ROOT", tmp_path / "none")
+    assert webapp._load_explore_view({}) is None
+    assert "No rolling-backtest results found" in webapp.render_page({"active_tab": "explore"})

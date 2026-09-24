@@ -61,6 +61,7 @@ from canary.web.ui import (
     _render_confusion_matrix,  # noqa: F401
     _render_cs_explain_card,  # noqa: F401
     _render_explain_card,  # noqa: F401
+    _render_explore_tab,  # noqa: F401
     _render_feature_columns_panel,  # noqa: F401
     _render_feature_item,  # noqa: F401
     _render_feature_selection_panel,  # noqa: F401
@@ -105,7 +106,7 @@ HONEST_VIZ_TIME_SPLIT_STEMS: dict[str, str] = {
 }
 ADVISORY_DATA_ROOT = Path("data/raw/advisories").resolve()
 MODEL_OUTPUTS_ROOT_PARTS = Path("data/processed/models").parts
-VALID_TABS = frozenset({"score", "ml", "about", "casestudy", "honest"})
+VALID_TABS = frozenset({"score", "ml", "about", "casestudy", "honest", "explore"})
 MODEL_OUTPUT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 DEFAULTS: dict[str, Any] = {
@@ -117,6 +118,9 @@ DEFAULTS: dict[str, Any] = {
     "model_out_dir": DEFAULT_MODEL_DIR,
     "score_model_dir": DEFAULT_MODEL_DIR,
     "oot_run": "",
+    "layer": "",
+    "run": "",
+    "fold": "",
 }
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -814,13 +818,117 @@ def _load_plugin_track(plugin_id: str) -> dict[str, Any] | None:
     }
 
 
+def _case_study_folds(run: dict[str, Any], only_fold: str | None = None) -> list[dict[str, Any]]:
+    """
+    Per-fold case-study panels for a rolling run: the top-25 plugins of each
+    fold (or of ``only_fold``) joined with the advisories that followed.
+    """
+    run_dir = ROLLING_RESULTS_ROOT / str(run["run_name"])
+    index = honest_viz.ranked_index([run_dir])
+    folds: list[dict[str, Any]] = []
+    if index is None:
+        return folds
+    for fold_meta in run.get("folds") or []:
+        fold = str(fold_meta.get("test_start_month") or "")
+        if only_fold and fold != only_fold:
+            continue
+        top = honest_viz.fold_top_n(index, fold)
+        if not top:
+            continue
+        enriched = [
+            _enrich_prediction_row(row, row["rank"], row["month"], _label_window_end(row["month"]))
+            for row in top
+        ]
+        n_pos = int(fold_meta.get("test_positive_count") or 0)
+        n_rows = int(fold_meta.get("test_row_count") or 0)
+        folds.append(
+            {
+                "fold": fold,
+                "test_end_month": str(fold_meta.get("test_end_month") or fold),
+                "label_as_of_month": str(fold_meta.get("label_as_of_month") or ""),
+                "roc_auc": fold_meta.get("roc_auc"),
+                "n_positive": n_pos,
+                "n_rows": n_rows,
+                "base_rate": n_pos / n_rows if n_rows else 0.0,
+                "confirmed_rows": [r for r in enriched if r["confirmed"]],
+                "unconfirmed_rows": [r for r in enriched if not r["confirmed"]],
+            }
+        )
+    return folds
+
+
+# The Explore tab's layers, in picker order. Each maps to the rolling runs
+# whose fold windows sit in that part of the protocol. (Time-split and
+# group-split single models are the Layer 1 tab for now.)
+EXPLORE_LAYERS: tuple[tuple[str, str, str, str], ...] = (
+    (
+        "holdout",
+        "Layer 4 · Pre-registered out-of-time holdout",
+        "out_of_time",
+        "Configurations frozen before the months were collected, run once. "
+        "The official test: nothing here was chosen after seeing the result.",
+    ),
+    (
+        "rolling",
+        "Layer 3 · Embargoed rolling backtest (development sweep)",
+        "development",
+        "Thirteen forecast dates from 2023 to 2025, training labels rebuilt at each one. "
+        "The sweep the champion was chosen on.",
+    ),
+)
+
+
+def _primary_runs(runs: list[dict[str, Any]], window_kind: str) -> list[dict[str, Any]]:
+    return [
+        r
+        for r in runs
+        if r.get("embargo") and not r.get("sensitivity") and r.get("window_kind") == window_kind
+    ]
+
+
+def _load_explore_view(values: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Everything the Explore tab renders for one layer, configuration and fold
+    choice: the run payload, its fold-aggregated feature drivers, its gain
+    and ROC curves, and the per-fold case-study panels. ``layer``, ``run``
+    and ``fold`` come from the query and are validated against what exists
+    on disk (an unknown value falls back to the first choice). None when no
+    rolling run exists at all.
+    """
+    runs = _load_rolling_backtests()
+    layers = []
+    for key, label, window_kind, blurb in EXPLORE_LAYERS:
+        layer_runs = _primary_runs(runs, window_kind)
+        if layer_runs:
+            layers.append({"key": key, "label": label, "blurb": blurb, "runs": layer_runs})
+    if not layers:
+        return None
+    wanted_layer = str(values.get("layer") or "")
+    layer = next((lyr for lyr in layers if lyr["key"] == wanted_layer), layers[0])
+    wanted_run = str(values.get("run") or "")
+    run = next((r for r in layer["runs"] if r.get("run_name") == wanted_run), layer["runs"][0])
+    fold_months = [str(f.get("test_start_month") or "") for f in run.get("folds") or []]
+    wanted_fold = str(values.get("fold") or "")
+    fold = wanted_fold if wanted_fold in fold_months else ""
+    run_dir = ROLLING_RESULTS_ROOT / str(run["run_name"])
+    return {
+        "layers": layers,
+        "layer": layer,
+        "run": run,
+        "fold": fold,
+        "fold_months": fold_months,
+        "drivers": honest_viz.fold_drivers(run_dir),
+        "curves": honest_viz.load_curves(run_dir),
+        "case_study": _case_study_folds(run, fold or None),
+    }
+
+
 def _load_honest_case_study(values: dict[str, Any]) -> dict[str, Any] | None:
     """
-    The Case-study tab's out-of-time view: the top-25 of each holdout fold of
-    a recorded run, joined with the advisories that followed. ``oot_run`` in
-    the query selects the run by directory name (validated against the
-    discovered runs, never path-joined from user input); the first recorded
-    run is the default. None when no out-of-time run exists.
+    The out-of-time case study: the top-25 of each holdout fold of a recorded
+    run joined with the advisories that followed. ``oot_run`` selects the run
+    by directory name (validated against the discovered runs). None when no
+    out-of-time run exists.
     """
     runs = _load_rolling_backtests()
     oot_runs = _primary_oot_runs(runs)
@@ -828,43 +936,8 @@ def _load_honest_case_study(values: dict[str, Any]) -> dict[str, Any] | None:
         return None
     wanted = str(values.get("oot_run") or "")
     run = next((r for r in oot_runs if r.get("run_name") == wanted), oot_runs[0])
-    run_dir = ROLLING_RESULTS_ROOT / str(run["run_name"])
-    index = honest_viz.ranked_index([run_dir])
-    folds: list[dict[str, Any]] = []
-    if index is not None:
-        for fold_meta in run.get("folds") or []:
-            fold = str(fold_meta.get("test_start_month") or "")
-            top = honest_viz.fold_top_n(index, fold)
-            if not top:
-                continue
-            enriched = [
-                _enrich_prediction_row(
-                    row, row["rank"], row["month"], _label_window_end(row["month"])
-                )
-                for row in top
-            ]
-            n_pos = int(fold_meta.get("test_positive_count") or 0)
-            n_rows = int(fold_meta.get("test_row_count") or 0)
-            base_rate = n_pos / n_rows if n_rows else 0.0
-            folds.append(
-                {
-                    "fold": fold,
-                    "test_end_month": str(fold_meta.get("test_end_month") or fold),
-                    "label_as_of_month": str(fold_meta.get("label_as_of_month") or ""),
-                    "roc_auc": fold_meta.get("roc_auc"),
-                    "n_positive": n_pos,
-                    "n_rows": n_rows,
-                    "base_rate": base_rate,
-                    "confirmed_rows": [r for r in enriched if r["confirmed"]],
-                    "unconfirmed_rows": [r for r in enriched if not r["confirmed"]],
-                }
-            )
-    return {
-        "run": run,
-        "runs": oot_runs,
-        "folds": folds,
-        "pred_exists": bool(folds),
-    }
+    folds = _case_study_folds(run)
+    return {"run": run, "runs": oot_runs, "folds": folds, "pred_exists": bool(folds)}
 
 
 def _load_case_study_view(values: dict[str, Any]) -> dict[str, Any] | None:
@@ -929,11 +1002,11 @@ def render_page(
     if active_tab not in VALID_TABS:
         active_tab = "score"
     tabs = [
-        ("honest", "Honest evaluation", "Embargoed backtests and the pre-registered holdout"),
-        ("score", "Scoring", "Plugin score, rationale and track record"),
-        ("casestudy", "Case study", "Holdout predictions vs. the advisories that followed"),
+        ("honest", "Results", "The leak, the embargoed backtests, the holdout"),
+        ("score", "Score a plugin", "Score, rationale and honest track record"),
+        ("explore", "Explore", "Metrics, feature drivers and case study by validation layer"),
         ("ml", "Layer 1 diagnostics", "Time-split models on stored labels"),
-        ("about", "About", "What is CANARY and how to use it"),
+        ("about", "About", "What CANARY is and how its numbers were validated"),
     ]
     tab_links = "".join(
         f'<a href="/?tab={_escape(tab_key)}" class="tab-link {"is-active" if tab_key == active_tab else ""}" data-tab-link="{_escape(tab_key)}"><strong>{_escape(title)}</strong><span>{_escape(subtitle)}</span></a>'
@@ -958,16 +1031,18 @@ def render_page(
     elif active_tab == "honest":
         honest_runs = _load_rolling_backtests()
         active_panel_html = _render_honest_tab(honest_runs, viz=_load_honest_viz(honest_runs))
+    elif active_tab == "explore":
+        active_panel_html = _render_explore_tab(values, _load_explore_view(values))
     elif active_tab == "casestudy":
-        cs_view = _load_case_study_view(values)
+        # Legacy Layer 1 case study (stored-label single-split models); the
+        # honest case study lives on the Explore tab.
         active_panel_html = _render_case_study_tab(
             values,
             model_dir_options or [],
-            cs_view=cs_view,
+            cs_view=_load_case_study_view(values),
             cs_ai_result=cs_ai_result,
             cs_ai_error=cs_ai_error,
             cs_rate_limited=cs_rate_limited,
-            honest_view=_load_honest_case_study(values) if cs_view is None else None,
         )
     else:
         _ml_dir = values.get("model_out_dir") or ""
@@ -1260,6 +1335,9 @@ def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
             "plugin": query.get("plugin", [""])[-1],
             "score_model_dir": query.get("score_model_dir", [""])[-1],
             "oot_run": query.get("oot_run", [""])[-1],
+            "layer": query.get("layer", [""])[-1],
+            "run": query.get("run", [""])[-1],
+            "fold": query.get("fold", [""])[-1],
         }
     )
     _get_explain = query.get("explain", [""])[-1] == "1"
