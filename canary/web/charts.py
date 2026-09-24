@@ -508,3 +508,107 @@ def svg_plugin_track(
     out.append(_text(left + 248, ly, "no advisory in window", size=11, fill=_TEXT))
     out.append("</svg>")
     return "".join(out)
+
+
+# ---------------------------------------------------------------------------
+# Family ladder: pooled ROC-AUC per feature set, one column per ecosystem
+# ---------------------------------------------------------------------------
+
+
+def svg_family_ladder(
+    columns: list[dict[str, Any]],
+    *,
+    chance: float = 0.5,
+    criterion: float | None = None,
+    width: int = 960,
+) -> str:
+    """
+    Side-by-side horizontal bars anchored at the chance line (bar length is
+    distance from chance, to the right above it and to the left below it).
+    Each column is ``{"title", "items"}`` with items ``{"label", "value",
+    "sublabel", "highlight"}`` already sorted; columns share one x axis from
+    0.4 to 1.0 so the two ecosystems are directly comparable.
+    """
+    columns = [c for c in columns if c.get("items")]
+    if not columns:
+        return ""
+    n_cols = len(columns)
+    gap = 40
+    col_w = (width - gap * (n_cols - 1)) / n_cols
+    label_w = 262
+    bar_left_pad = 8
+    row_h = 30
+    top = 34
+    max_rows = max(len(c["items"]) for c in columns)
+    height = top + row_h * max_rows + 40
+    x_min, x_max = 0.4, 1.0
+    out = [_svg_open(width, height, "Pooled embargoed ROC-AUC per feature set, by ecosystem")]
+    for ci, col in enumerate(columns):
+        x0 = ci * (col_w + gap)
+        bar_x0 = x0 + label_w + bar_left_pad
+        bar_w = col_w - label_w - bar_left_pad - 44
+
+        def x_of(v: float, _bx0: float = bar_x0, _bw: float = bar_w) -> float:
+            v = min(max(v, x_min), x_max)
+            return _bx0 + (v - x_min) / (x_max - x_min) * _bw
+
+        out.append(_text(x0, 18, str(col.get("title", "")), size=13, fill=_TEXT, font_weight="600"))
+        plot_bottom = top + row_h * len(col["items"])
+        for tick in (0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0):
+            x = x_of(tick)
+            out.append(_line(x, top, x, plot_bottom, _LINE, stroke_width="1"))
+            out.append(_text(x, plot_bottom + 14, f"{tick:.1f}", size=10, text_anchor="middle"))
+        xc = x_of(chance)
+        out.append(_line(xc, top - 4, xc, plot_bottom, _MUTED, stroke_dasharray="6 4"))
+        out.append(
+            _text(xc, plot_bottom + 28, f"chance {chance:.2f}", size=10, text_anchor="middle")
+        )
+        if criterion is not None:
+            xk = x_of(criterion)
+            out.append(
+                _line(xk, top - 4, xk, plot_bottom, "var(--accent2)", stroke_dasharray="6 4")
+            )
+            out.append(
+                _text(
+                    xk,
+                    top - 8,
+                    f"criterion {criterion:.2f}",
+                    size=10,
+                    fill="var(--accent2)",
+                    text_anchor="middle",
+                )
+            )
+        for i, it in enumerate(col["items"]):
+            y = top + i * row_h
+            v = float(it["value"])
+            color = (
+                "var(--good)"
+                if criterion is not None and v >= criterion
+                else ("var(--accent)" if v >= chance else "var(--warn)")
+            )
+            out.append(
+                _text(
+                    x0 + label_w - 6,
+                    y + 14,
+                    str(it.get("label", "")),
+                    size=11,
+                    fill=_TEXT,
+                    text_anchor="end",
+                )
+            )
+            if it.get("sublabel"):
+                out.append(
+                    _text(x0 + label_w - 6, y + 25, str(it["sublabel"]), size=9, text_anchor="end")
+                )
+            # Bars grow from the chance line, so length is distance from chance.
+            x_v = x_of(v)
+            bx, w = (xc, x_v - xc) if v >= chance else (x_v, xc - x_v)
+            stroke = ' stroke="var(--text)" stroke-width="2.5"' if it.get("highlight") else ""
+            out.append(
+                f'<rect x="{bx:.1f}" y="{y + 6:.1f}" width="{max(w, 1.0):.1f}" height="16" '
+                f'rx="3" fill="{color}"{stroke}><title>{_esc(it.get("label", ""))}\npooled '
+                f"ROC-AUC {_fmt(v)}</title></rect>"
+            )
+            out.append(_text(max(x_v, xc) + 6, y + 18, _fmt(v), size=11, fill=_TEXT))
+    out.append("</svg>")
+    return "".join(out)

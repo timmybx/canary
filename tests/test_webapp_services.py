@@ -591,3 +591,28 @@ def test_inject_live_commit_signal_prepends_when_no_match(
     result = webapp._inject_live_commit_signal(score_result, "my-plugin")
     assert result["reasons"][0] == "Last commit: May 20, 2026 — live data from GitHub."
     assert "No advisories found." in result["reasons"]
+
+
+def test_offline_mode_skips_live_lookup_and_ai_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    import canary.webapp as webapp
+    from canary.web import services
+
+    monkeypatch.setenv(services.OFFLINE_ENV_VAR, "1")
+    assert services.web_offline()
+
+    def _boom(plugin_id: str) -> str | None:
+        raise AssertionError("network lookup must not run offline")
+
+    monkeypatch.setattr(services, "_fetch_live_commit_date", _boom)
+    result = {"reasons": ["Recent commit activity suggests maintenance."]}
+    assert services._inject_live_commit_signal(result, "git") == result
+
+    with pytest.raises(ValueError, match="Offline mode"):
+        webapp._call_anthropic_explain("prompt")
+
+    page = webapp.render_page({"active_tab": "about"})
+    assert "offline mode" in page
+
+    monkeypatch.setenv(services.OFFLINE_ENV_VAR, "0")
+    assert not services.web_offline()
+    assert "offline mode" not in webapp.render_page({"active_tab": "about"})

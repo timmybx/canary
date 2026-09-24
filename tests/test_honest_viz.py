@@ -445,3 +445,60 @@ def test_svg_plugin_track_marks_hits_and_holdout() -> None:
     assert svg.count("<circle") == 4  # two points + two legend swatches
     assert "out-of-time holdout" in svg and "advisory followed within 180 days" in svg
     assert charts.svg_plugin_track([], boundary_month="2025-06") == ""
+
+
+# ---------------------------------------------------------------------------
+# Family ladder per ecosystem
+# ---------------------------------------------------------------------------
+
+
+def test_family_ladder_keeps_best_model_per_single_family_plus_champion() -> None:
+    def _run(name: str, prefixes: list[str] | None, model: str, roc: float, **extra: Any) -> dict:
+        run = _rolling_payload(
+            embargo=True, prefixes=prefixes, model=model, folds=[("2024-01", roc, 5)]
+        )
+        run.update({"run_name": name, "window_kind": "development", "sensitivity": False, **extra})
+        return run
+
+    runs = [
+        _run("ghclock_only_logistic", ["ghclock_"], "logistic", 0.627),
+        _run("ghclock_only_xgb", ["ghclock_"], "xgboost", 0.621),
+        _run("ghclock_ghdyn_logistic", ["ghclock_", "ghdyn_"], "logistic", 0.638),
+        _run("advhist_only_xgb", ["advhist_"], "xgboost", 0.435),
+        # No prefix filter: the family comes from the pre-filtered dataset name.
+        _run(
+            "advisory_only_xgb",
+            None,
+            "xgboost",
+            0.553,
+            in_path="data/processed/features/plugins.monthly.labeled.advisory_only.jsonl",
+        ),
+        _run("leaky", ["ghclock_"], "logistic", 0.9, embargo=False),
+        _run("oot", ["ghclock_"], "logistic", 0.7, window_kind="out_of_time"),
+    ]
+    ladder = honest_viz.family_ladder(runs, "Jenkins")
+
+    assert [(e["run_name"], e["champion"]) for e in ladder] == [
+        ("ghclock_ghdyn_logistic", True),
+        ("ghclock_only_logistic", False),
+        ("advisory_only_xgb", False),
+        ("advhist_only_xgb", False),
+    ]
+    assert ladder[2]["family"] == ("advisory",)
+
+    # Without a multi-family run that beats the singles, no champion row is added.
+    assert all(not e["champion"] for e in honest_viz.family_ladder(runs[:2] + runs[3:], "J"))
+
+
+def test_svg_family_ladder_anchors_bars_at_chance_and_outlines_shared() -> None:
+    svg = charts.svg_family_ladder(
+        [
+            {"title": "A", "items": [{"label": "x", "value": 0.7, "highlight": True}]},
+            {"title": "B", "items": [{"label": "y", "value": 0.45, "highlight": False}]},
+        ],
+        criterion=0.55,
+    )
+    assert svg.count("<rect") == 2
+    assert svg.count('stroke="var(--text)"') == 1
+    assert "criterion 0.55" in svg and "chance 0.50" in svg
+    assert charts.svg_family_ladder([{"title": "A", "items": []}]) == ""

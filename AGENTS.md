@@ -178,6 +178,7 @@ in source code.
 | `CANARY_WEB_PORT` | `webapp.py` | Web console port (default: `8000`) |
 | `CANARY_WEB_THREADS` | `webapp.py` | Waitress worker thread count for the web console (default: `8`) |
 | `CANARY_WEB_CONNECTION_LIMIT` | `webapp.py` | Waitress connection limit for the web console (default: `200`) |
+| `CANARY_WEB_OFFLINE` | `web/services.py` | `1` makes the web console self-contained: no live GitHub lookup, no in-page AI explanation calls (demo / untrusted network) |
 
 The Athena collector also loads a `.env` file via `python-dotenv` at import
 time — you can place these variables there for local runs.

@@ -26,6 +26,7 @@ from canary.web.services import (
     _inject_live_commit_signal,  # noqa: F401
     _load_plugin_choices,  # noqa: F401
     _load_registry_plugin_choices_cached,  # noqa: F401
+    web_offline,
 )
 from canary.web.ui import (
     _ALGO_LABELS,  # noqa: F401
@@ -292,6 +293,8 @@ def _call_anthropic_explain(prompt: str) -> str:
     import urllib.parse
     import urllib.request
 
+    if web_offline():
+        raise ValueError("Offline mode: in-page AI explanations are disabled.")
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY environment variable is not set.")
@@ -626,7 +629,7 @@ def _load_cs_prediction_rows(
     return obs_date, window_end, confirmed_rows, unconfirmed_rows
 
 
-def _load_rolling_backtests() -> list[dict[str, Any]]:
+def _load_rolling_backtests(root: Path | None = None) -> list[dict[str, Any]]:
     """
     Load every rolling-backtest result under ROLLING_RESULTS_ROOT for the
     Honest-evaluation tab.
@@ -641,7 +644,7 @@ def _load_rolling_backtests() -> list[dict[str, Any]]:
     stored-label (leaky) runs; within each group, best pooled ROC-AUC first.
     """
     runs: list[dict[str, Any]] = []
-    root = ROLLING_RESULTS_ROOT
+    root = ROLLING_RESULTS_ROOT if root is None else root
     if not root.exists():
         return runs
     for run_dir in sorted(root.iterdir()):
@@ -723,12 +726,22 @@ def _load_honest_viz(runs: list[dict[str, Any]]) -> dict[str, Any]:
         + honest_viz.rolling_leakage_pairs(ROLLING_RESULTS_ROOT, "Jenkins")
         + honest_viz.rolling_leakage_pairs(PYPI_ROLLING_RESULTS_ROOT, "PyPI")
     )
+    ladders = [
+        {"title": "Jenkins plugins", "items": honest_viz.family_ladder(runs, "Jenkins")},
+        {
+            "title": "PyPI packages",
+            "items": honest_viz.family_ladder(
+                _load_rolling_backtests(PYPI_ROLLING_RESULTS_ROOT), "PyPI"
+            ),
+        },
+    ]
     return {
         "timeline": honest_viz.timeline_series(runs),
         "criterion": H2_ROC_CRITERION,
         "boundary_month": OOT_BOUNDARY_MONTH,
         "curves": curves,
         "pairs": pairs,
+        "ladders": ladders,
     }
 
 
@@ -916,11 +929,11 @@ def render_page(
     if active_tab not in VALID_TABS:
         active_tab = "score"
     tabs = [
-        ("score", "Scoring", "Plugin score and rationale"),
-        ("ml", "Machine learning", "Model results and metrics"),
-        ("honest", "Honest evaluation", "Embargoed rolling backtests"),
+        ("honest", "Honest evaluation", "Embargoed backtests and the pre-registered holdout"),
+        ("score", "Scoring", "Plugin score, rationale and track record"),
+        ("casestudy", "Case study", "Holdout predictions vs. the advisories that followed"),
+        ("ml", "Layer 1 diagnostics", "Time-split models on stored labels"),
         ("about", "About", "What is CANARY and how to use it"),
-        ("casestudy", "Case study", "Validated predictions vs. confirmed advisories"),
     ]
     tab_links = "".join(
         f'<a href="/?tab={_escape(tab_key)}" class="tab-link {"is-active" if tab_key == active_tab else ""}" data-tab-link="{_escape(tab_key)}"><strong>{_escape(title)}</strong><span>{_escape(subtitle)}</span></a>'
@@ -968,6 +981,11 @@ def render_page(
             ml_ai_error=ml_ai_error,
             ml_rate_limited=ml_rate_limited,
         )
+    offline_pill = (
+        ' <span class="pill pill--warn" style="vertical-align:middle;font-size:.7rem">offline mode</span>'
+        if web_offline()
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
   <head>
@@ -987,7 +1005,7 @@ def render_page(
           </div>
           <div>
             <p class="eyebrow">Web interface</p>
-            <h1>CANARY Web Console</h1>
+            <h1>CANARY Web Console{offline_pill}</h1>
           </div>
         </div>
         <p class="hero__copy">

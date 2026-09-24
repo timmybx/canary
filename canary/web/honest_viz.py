@@ -22,6 +22,8 @@ Three views are prepared:
 * ``ranked_index`` — every fold prediction of a configuration's runs ranked
   within its month, for a plugin's track record across forecast dates
   (``plugin_track``) and the top-N of a fold (``fold_top_n``).
+* ``family_ladder`` — the best embargoed development result per feature set
+  in one ecosystem, for the Jenkins-vs-PyPI "which signals survive" chart.
 """
 
 from __future__ import annotations
@@ -510,3 +512,62 @@ def fold_top_n(index: dict[str, Any], fold: str, n_top: int = 25) -> list[dict[s
     for i, row in enumerate(ordered, start=1):
         row["rank"] = i
     return ordered
+
+
+# ---------------------------------------------------------------------------
+# Family ladder per ecosystem: which signal families survive the embargo
+# ---------------------------------------------------------------------------
+
+
+def _family_key(run: dict[str, Any]) -> tuple[str, ...]:
+    prefixes = tuple(str(p).rstrip("_") for p in run.get("include_prefixes") or ())
+    if prefixes:
+        return prefixes
+    # A run with no prefix filter was trained on a pre-filtered family
+    # dataset (plugins.monthly.labeled.<family>_only.jsonl).
+    stem = str(run.get("in_path") or "").replace("\\", "/").rsplit("/", 1)[-1]
+    stem = stem.removesuffix(".jsonl").removeprefix("plugins.monthly.labeled").strip(".")
+    return (stem.removesuffix("_only") or str(run.get("run_name") or ""),)
+
+
+def family_ladder(runs: list[dict[str, Any]], ecosystem: str) -> list[dict[str, Any]]:
+    """
+    The single-family embargoed development results of an ecosystem, best
+    model per family, sorted best first, plus the best multi-family
+    configuration (flagged ``champion``) when one beats every single family.
+    Each entry carries the run's ``include_prefixes``, ``in_path`` and
+    ``model_name`` so the label helper can name it, its ``family`` key,
+    ``roc_auc`` (pooled) and ``n_positive``.
+    """
+    best: dict[tuple[str, ...], dict[str, Any]] = {}
+    for run in runs:
+        if not _is_primary(run, "development"):
+            continue
+        pooled = run.get("pooled") or {}
+        roc = pooled.get("roc_auc")
+        if roc is None:
+            continue
+        key = _family_key(run)
+        entry = {
+            "ecosystem": ecosystem,
+            "run_name": str(run.get("run_name") or ""),
+            "include_prefixes": list(run.get("include_prefixes") or []),
+            "in_path": str(run.get("in_path") or ""),
+            "model_name": str(run.get("model_name") or ""),
+            "family": key,
+            "champion": False,
+            "roc_auc": float(roc),
+            "n_positive": pooled.get("n_positive"),
+        }
+        if key not in best or entry["roc_auc"] > best[key]["roc_auc"]:
+            best[key] = entry
+    singles = sorted(
+        (e for e in best.values() if len(e["family"]) == 1), key=lambda e: -e["roc_auc"]
+    )
+    multis = [e for e in best.values() if len(e["family"]) > 1]
+    if multis:
+        top = max(multis, key=lambda e: e["roc_auc"])
+        if not singles or top["roc_auc"] > singles[0]["roc_auc"]:
+            top["champion"] = True
+            singles.insert(0, top)
+    return singles

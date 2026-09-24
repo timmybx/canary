@@ -14,7 +14,7 @@ from typing import Any, cast
 from canary.scoring.baseline import ScoreResult
 from canary.scoring.ml import MLScoreResult
 from canary.web import charts
-from canary.web.services import _EXPLAIN_RATE_MAX
+from canary.web.services import _EXPLAIN_RATE_MAX, web_offline
 
 CSS = """
 :root {
@@ -582,6 +582,17 @@ def _build_explain_prompt(
     return "\n".join(lines)
 
 
+_OFFLINE_NOTE = (
+    "<span class='pill pill--muted' style='font-size:.8rem'>In-page AI explanation off "
+    "(offline mode)</span>"
+)
+
+
+def _offline_or(button_html: str) -> str:
+    """The in-page AI button, or a muted note when the console runs offline."""
+    return _OFFLINE_NOTE if web_offline() else button_html
+
+
 def _render_explain_card(
     plugin: str,
     score_result: dict[str, Any],
@@ -643,6 +654,7 @@ def _render_explain_card(
         'font-weight:600;font-size:.85rem">Explain now (AI)</button>'
         "</form>"
     )
+    btn_inpage = _offline_or(btn_inpage)
 
     textarea = (
         '<details style="margin-top:.6rem">'
@@ -2891,6 +2903,7 @@ def _render_cs_explain_card(
         'font-weight:600;font-size:.85rem">Explain now (AI)</button>'
         "</form>"
     )
+    btn_inpage = _offline_or(btn_inpage)
     btn_copy = (
         '<button type="button"'
         ' onclick="(function(b){navigator.clipboard.writeText('
@@ -3320,8 +3333,12 @@ def _honest_config_text(run: dict[str, Any]) -> str:
         )
     else:
         dataset = str(run.get("in_path") or "").replace("\\", "/").rsplit("/", 1)[-1]
-        stem = dataset.removesuffix(".jsonl").removeprefix("plugins.monthly.labeled")
-        families = stem.strip(".").replace("_", " ").replace(".", " ") or "all features"
+        stem = dataset.removesuffix(".jsonl").removeprefix("plugins.monthly.labeled").strip(".")
+        family = stem.removesuffix("_only")
+        if stem.endswith("_only") and family in _HONEST_FAMILY_TIPS:
+            families = _HONEST_FAMILY_TIPS[family][0]
+        else:
+            families = stem.replace("_", " ").replace(".", " ") or "all features"
     return f"{families} · {model_label}"
 
 
@@ -3453,6 +3470,47 @@ def _render_honest_holdout_curves_card(curve_sets: list[dict[str, Any]]) -> str:
         f"<div style='flex:3 1 420px;min-width:300px'>{gain_svg}</div>"
         f"<div style='flex:2 1 300px;min-width:260px'>{roc_svg}</div>"
         "</div></div>"
+    )
+
+
+def _render_honest_ladder_card(viz: dict[str, Any]) -> str:
+    """Which feature families survive the embargo, Jenkins beside PyPI."""
+    ladders = [c for c in viz.get("ladders") or [] if c.get("items")]
+    shared: set[tuple[str, ...]] = set()
+    if len(ladders) > 1:
+        keys = [{tuple(e["family"]) for e in c["items"]} for c in ladders]
+        shared = set.intersection(*keys)
+    columns = []
+    for col in ladders:
+        items = [
+            {
+                "label": _honest_config_text(e).split(" · ")[0],
+                "sublabel": _MODEL_LABELS.get(
+                    str(e.get("model_name") or "").lower(), (str(e.get("model_name") or ""), "")
+                )[0]
+                + (" · best combination" if e.get("champion") else ""),
+                "value": e["roc_auc"],
+                "highlight": tuple(e["family"]) in shared,
+            }
+            for e in col["items"]
+        ]
+        columns.append({"title": col.get("title", ""), "items": items})
+    if not columns:
+        return ""
+    svg = charts.svg_family_ladder(
+        columns, criterion=float(viz.get("criterion") or 0.55), width=1140
+    )
+    return (
+        "<div class='card' style='margin-bottom:1rem'>"
+        "<p class='eyebrow'>Which signals survive, by ecosystem</p>"
+        "<h3 style='margin:.1rem 0 .4rem'>Pooled embargoed ROC-AUC per feature set</h3>"
+        "<p style='color:var(--muted);font-size:.92rem;margin:0 0 .8rem'>Best model per feature "
+        "set on the thirteen development folds, training labels rebuilt at every fold. Bars at "
+        "or below chance are shown on purpose: knowing which signals do not carry forward is part "
+        "of the result. The same advisory-history features sit at the bottom of the Jenkins "
+        "ladder and at the top of the PyPI one (outlined bars are the family present in both), "
+        "which is why the method is the contribution rather than any one feature family.</p>"
+        f"{svg}</div>"
     )
 
 
@@ -3590,6 +3648,7 @@ def _render_honest_tab(runs: list[dict[str, Any]], viz: dict[str, Any] | None = 
         + _render_honest_timeline_card(viz)
         + _render_honest_oot_card(runs)
         + _render_honest_holdout_curves_card(viz.get("curves") or [])
+        + _render_honest_ladder_card(viz)
         + table
         + caveats
     )
@@ -3946,6 +4005,7 @@ def _render_ml_explain_card(
         'font-weight:600;font-size:.85rem">Explain now (AI)</button>'
         "</form>"
     )
+    btn_inpage = _offline_or(btn_inpage)
     btn_copy = (
         '<button type="button"'
         ' onclick="(function(b){navigator.clipboard.writeText('
@@ -4342,7 +4402,20 @@ def _render_ml_tab(
 
     right_col = '<div class="score-output">' + "".join(output_parts) + "</div>"
 
-    return '<div class="grid--score">' + left_col + right_col + "</div>"
+    return _LAYER1_BANNER + '<div class="grid--score">' + left_col + right_col + "</div>"
+
+
+_LAYER1_BANNER = (
+    "<div class='card' style='margin-bottom:1rem;border-color:rgba(230,160,30,.35)'>"
+    "<p class='eyebrow' style='color:#e6a01e'>Layer 1 · stored labels · diagnostic</p>"
+    "<p style='color:var(--muted);font-size:.92rem;margin:.2rem 0 0'>These models were trained "
+    "and scored with the standard chronological split, where a training label can be set by an "
+    "advisory published inside the test window. The headline numbers here do not survive the "
+    "label embargo (the official configuration falls from ROC-AUC 0.93 to 0.48 on the same test "
+    "months) and are kept as the historical record of how the leak was found. The deployment-"
+    "honest results are on the <a href='/?tab=honest' style='color:var(--accent)'>Honest "
+    "evaluation</a> tab.</p></div>"
+)
 
 
 # ---------------------------------------------------------------------------

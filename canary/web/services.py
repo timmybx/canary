@@ -8,6 +8,7 @@ from __future__ import annotations
 import collections
 import json
 import logging
+import os
 import re
 import threading
 from pathlib import Path
@@ -24,6 +25,16 @@ _EXPLAIN_RATE_LIMIT: dict[str, list[float]] = collections.defaultdict(list)
 _EXPLAIN_RATE_WINDOW = 3600  # 1 hour window
 
 _EXPLAIN_RATE_MAX = 3  # max requests per IP per window
+
+# CANARY_WEB_OFFLINE=1 makes the console self-contained for a demo on an
+# untrusted network: no live GitHub lookup on the Scoring tab and no in-page
+# AI explanation calls. Everything else reads local files only.
+OFFLINE_ENV_VAR = "CANARY_WEB_OFFLINE"
+
+
+def web_offline() -> bool:
+    """True when the console must not make any outbound request."""
+    return os.environ.get(OFFLINE_ENV_VAR, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _load_registry_plugin_choices_cached(registry_path: str, mtime_ns: int) -> tuple[str, ...]:
@@ -131,6 +142,8 @@ def _inject_live_commit_signal(
     directly from the GitHub API.  If the fetch fails the original reasons
     are returned unchanged.
     """
+    if web_offline():
+        return score_result
     live_date = _fetch_live_commit_date(plugin_id)
     if not live_date:
         return score_result
