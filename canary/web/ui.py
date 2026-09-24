@@ -774,6 +774,8 @@ def _render_score_section(
     ai_error: str | None = None,
     rate_limited: bool = False,
     plugin_track: dict[str, Any] | None = None,
+    forecast: dict[str, Any] | None = None,
+    forecast_available: bool = False,
 ) -> str:
     # ── Left column: form card ────────────────────────────────────────────────
     form_card = "".join(
@@ -789,21 +791,16 @@ def _render_score_section(
             '<div style="display:grid;gap:.9rem">',
             _plugin_picker("plugin", "Plugin ID", values["plugin"], plugin_options),
             "</div>",
-            '<div style="margin-top:.8rem">',
-            '<label style="font-size:.85rem;font-weight:600;color:var(--muted);display:block;margin-bottom:.3rem">ML model (optional)</label>',
-            _render_model_picker(
-                {"model_out_dir": values.get("score_model_dir", "")},
-                model_dir_options or [],
+            (
+                f'<input type="hidden" name="score_model_dir" value="{_escape(values.get("score_model_dir", ""))}">'
+                if values.get("score_model_dir")
+                else ""
             ),
-            "</div>",
-            "<script>"
-            'document.currentScript.closest("form").addEventListener("submit",function(e){'
-            'var md=document.getElementById("pick-model-dir");'
-            'if(md&&md.value){var h=document.createElement("input");'
-            'h.type="hidden";h.name="score_model_dir";h.value=md.value;'
-            "e.target.appendChild(h);}});"
-            "</script>",
             '<button type="submit" style="margin-top:.8rem">Score plugin</button></form>',
+            "<p style='color:var(--muted);font-size:.82rem;margin:.6rem 0 0'>The forecast comes "
+            "from the frozen champion configuration applied to the newest panel month; the "
+            "signals beneath it describe the plugin's current state and are not part of the "
+            "validated forecast.</p>",
             f'<div class="notice">{_escape(score_error)}</div>' if score_error else "",
             "</section>",
             # Explain card always shown in left column after scoring
@@ -823,45 +820,42 @@ def _render_score_section(
     output_parts: list[str] = []
 
     if score_result:
-        # ── CANARY score card FIRST (primary output) ─────────────────────────
+        # ── The forecast FIRST: frozen champion on the newest panel month ────
+        output_parts.append(
+            _render_forecast_card(score_result["plugin"], forecast, forecast_available)
+        )
+
+        # ── Legacy Layer 1 model score, only when a model was named ─────────
         ml = score_result.get("ml")
         if ml:
             output_parts.append(
                 '<section class="card">'
                 '<div class="card__header"><div>'
-                '<p class="eyebrow">CANARY score</p>'
+                '<p class="eyebrow">Layer 1 model score</p>'
                 f"<h2>{_escape(score_result['plugin'])}</h2>"
-                '<p class="kicker">Estimated probability of a Jenkins security advisory within the next 180 days.</p>'
-                '</div><span class="pill pill--muted">Experimental</span></div>'
+                '<p class="kicker">Probability from the single-split model named in the query. '
+                "Stored labels unless the model is an embargoed retrain; not the validated "
+                "forecast.</p>"
+                '</div><span class="pill pill--warn">Stored labels · diagnostic</span></div>'
                 + _render_ml_score_panel(ml)
                 + "</section>"
-            )
-        else:
-            output_parts.append(
-                '<section class="card">'
-                '<div class="card__header"><div>'
-                '<p class="eyebrow">CANARY score</p>'
-                "<h2>Advisory risk score</h2>"
-                '</div><span class="pill pill--muted">Select a model</span></div>'
-                '<p class="muted" style="padding:.6rem 0">'
-                "Select an algorithm, feature set, and evaluation strategy on the left.</p>"
-                "</section>"
             )
 
         # ── Honest track record (rolling-backtest ranks) ─────────────────────
         if plugin_track:
             output_parts.append(_render_plugin_track_card(plugin_track))
 
-        # ── Risk context card (supporting signals) ───────────────────────────
+        # ── Current-state signals (heuristic, not validated) ─────────────────
         reasons_html = "".join(f"<li>{_escape(r)}</li>" for r in score_result["reasons"])
         output_parts.append(
             '<section class="card">'
             '<div class="card__header"><div>'
-            '<p class="eyebrow">Risk context</p>'
+            '<p class="eyebrow">Current-state context</p>'
             "<h2>Supporting signals</h2>"
-            '<p class="kicker">Maintenance history, governance, and dependency '
-            "risk indicators for this plugin.</p>"
-            "</div></div>"
+            '<p class="kicker">Maintenance history, governance artifacts, SLSA provenance and '
+            "known advisories in dependencies, read from the plugin's current public state. "
+            "A practitioner's dashboard, not part of the validated forecast.</p>"
+            '</div><span class="pill pill--muted">Heuristic · not validated</span></div>'
             f'<div class="panel" style="margin-top:.8rem">'
             "<h4>Key risk signals</h4>"
             f'<ul class="bullet-list">{reasons_html}</ul></div>'
@@ -877,7 +871,8 @@ def _render_score_section(
         output_parts.append(
             '<section class="card">'
             '<p class="muted" style="padding:.4rem 0">Choose a plugin and click '
-            "<strong>Score plugin</strong> to see results here.</p>"
+            "<strong>Score plugin</strong> to see its forecast, its honest track record and "
+            "its current-state signals here.</p>"
             "</section>"
         )
 
@@ -886,6 +881,105 @@ def _render_score_section(
     left_col = '<div class="score-output">' + form_card + "</div>"
 
     return '<div class="grid--score">' + left_col + right_col + "</div>"
+
+
+def _render_forecast_card(
+    plugin: str, forecast: dict[str, Any] | None, forecast_available: bool
+) -> str:
+    """
+    The headline of the Score tab: the frozen champion fold model applied to
+    the newest month of the panel. Rank and share-of-panel are the honest
+    units (the model's probabilities are not calibrated to the base rate);
+    the drivers are coefficient × value contributions for this plugin.
+    """
+    if forecast is None:
+        body = (
+            f"<p class='muted' style='padding:.6rem 0'>No forecast entry for "
+            f"<code>{_escape(plugin)}</code> in the latest forecast month"
+            + (
+                "."
+                if forecast_available
+                else ": no forecast file has been generated yet. Run "
+                "<code>tools/latest_forecast.py</code> and refresh."
+            )
+            + "</p>"
+        )
+        return (
+            '<section class="card">'
+            '<div class="card__header"><div>'
+            '<p class="eyebrow">CANARY forecast</p>'
+            f"<h2>{_escape(plugin)}</h2>"
+            '</div><span class="pill pill--muted">Not available</span></div>'
+            f"{body}</section>"
+        )
+    pct = float(forecast.get("percentile") or 0.0)
+    rank = int(forecast.get("rank") or 0)
+    n = int(forecast.get("n") or forecast.get("n_plugins") or 0)
+    share = _top_share(pct)
+    label = _honest_config_text(forecast)
+    drivers = forecast.get("drivers") or []
+
+    def _driver(d: dict[str, Any]) -> str:
+        feat = str(d.get("feature") or "")
+        contrib = float(d.get("contribution") or 0.0)
+        color = "var(--warn)" if contrib > 0 else "var(--accent)"
+        arrow = "▲" if contrib > 0 else "▼"
+        tip = _FEATURE_TIPS.get(feat, "")
+        name = (
+            f'<span class="tip tip--below" data-tip="{_escape(tip)}"><code>{_escape(feat)}</code></span>'
+            if tip
+            else f"<code>{_escape(feat)}</code>"
+        )
+        value = _fmt_driver_value(d.get("value"), feat)
+        return (
+            f"<li style='margin:.2rem 0'><span style='color:{color};font-weight:700'>{arrow}</span> "
+            f"{name} <span style='color:var(--muted);font-size:.85rem'>= {_escape(value)}</span></li>"
+        )
+
+    drivers_html = (
+        "<div class='panel' style='margin-top:.8rem'><h4>What drives this forecast</h4>"
+        "<p style='color:var(--muted);font-size:.82rem;margin:.2rem 0 .4rem'>Largest "
+        "contributions to this plugin's score (▲ raises, ▼ lowers), from the model's "
+        "coefficients and this plugin's feature values.</p>"
+        f"<ul style='list-style:none;padding:0;margin:0'>{''.join(_driver(d) for d in drivers)}</ul></div>"
+        if drivers
+        else ""
+    )
+    trained = (
+        f"trained on months before {_escape(forecast.get('train_end_month'))}"
+        if forecast.get("train_end_month")
+        else "trained under the pre-registered protocol"
+    )
+    labels = (
+        f", labels as known {_escape(forecast.get('label_as_of_month'))}"
+        if forecast.get("label_as_of_month")
+        else ""
+    )
+    return (
+        '<section class="card">'
+        '<div class="card__header"><div>'
+        f'<p class="eyebrow">CANARY forecast · as of {_escape(forecast.get("month"))}</p>'
+        f"<h2>{_escape(plugin)}</h2>"
+        f'<p class="kicker">{_escape(label)}: the frozen champion fold model '
+        f"(<code>{_escape(forecast.get('run_name'))}/fold_{_escape(forecast.get('fold'))}</code>, "
+        f"{trained}{labels}) applied to the newest month of the panel. Inference only; no "
+        "outcome for this month is known yet.</p>"
+        '</div><span class="pill pill--good">Validated lineage</span></div>'
+        "<div class='metrics-row'>"
+        f"<div class='metric'><span class='metric__label'>Share of panel</span>"
+        f"<span class='metric__value'>top {_escape(share)}</span></div>"
+        f"<div class='metric'><span class='metric__label'>Rank</span>"
+        f"<span class='metric__value'>{rank:,} of {n:,}</span></div>"
+        f"<div class='metric'><span class='metric__label'>{_tip('Score')}</span>"
+        f"<span class='metric__value'>{float(forecast.get('prob') or 0.0):.1%}</span></div>"
+        "</div>"
+        f"{drivers_html}"
+        "<p style='color:var(--muted);font-size:.82rem;margin:.8rem 0 0'>Read the rank, not the "
+        "probability: the model's scores are not calibrated to the 1 percent base rate. Across the "
+        "pre-registered holdout, reviewing the top fifth of plugins by this ranking caught about "
+        "half of the advisories that followed.</p>"
+        "</section>"
+    )
 
 
 def _top_share(percentile: float) -> str:
@@ -3667,32 +3761,6 @@ def _render_about_tab() -> str:
     """Render the About / Help tab — lightweight context for new visitors."""
     github_url = "https://github.com/timmybx/canary"
 
-    risk_rows = "".join(
-        f"<tr><td style='padding:.5rem .75rem'><span class='pill {cls}'>{label}</span></td>"
-        f"<td style='padding:.5rem .75rem;color:var(--muted);font-size:.9rem'>{threshold}</td>"
-        f"<td style='padding:.5rem .75rem;font-size:.9rem'>{action}</td></tr>"
-        for label, cls, threshold, action in [
-            (
-                "Low",
-                "pill--muted",
-                "Score &lt; 0.05",
-                "Normal patch hygiene — no special action needed.",
-            ),
-            (
-                "Medium",
-                "pill--warn",
-                "0.05 – 0.20",
-                "Monitor advisories; include in scheduled patch cycles.",
-            ),
-            (
-                "High",
-                "pill--danger",
-                "Score &ge; 0.20",
-                "Prioritize review; consider alternatives for new pipelines.",
-            ),
-        ]
-    )
-
     signal_rows = "".join(
         f"<tr><td style='padding:.4rem .75rem;font-size:.88rem'><code>{sig}</code></td>"
         f"<td style='padding:.4rem .75rem;font-size:.88rem;color:var(--muted)'>{desc}</td></tr>"
@@ -3767,21 +3835,22 @@ def _render_about_tab() -> str:
         '<section class="card">'
         '<div class="card__header"><div>'
         '<p class="eyebrow">Interpreting results</p>'
-        "<h2>What the scores mean</h2>"
+        "<h2>What the forecast means</h2>"
         "</div></div>"
         '<p style="margin-top:.4rem;font-size:.9rem;color:var(--muted)">'
-        "The <strong>CANARY score</strong> (0.0\u20131.0) is the model's estimated probability of "
-        "a Jenkins security advisory within the next 180 days. "
-        "Supporting signals — including maintenance history, governance artifacts, and dependency risk — "
-        "are shown alongside the score to provide interpretable context.</p>"
-        '<table style="width:100%;border-collapse:collapse;margin-top:.8rem">'
-        "<thead><tr>"
-        "<th style='text-align:left;padding:.5rem .75rem;color:var(--muted);font-size:.85rem'>Risk level</th>"
-        "<th style='text-align:left;padding:.5rem .75rem;color:var(--muted);font-size:.85rem'>ML score</th>"
-        "<th style='text-align:left;padding:.5rem .75rem;color:var(--muted);font-size:.85rem'>Suggested action</th>"
-        "</tr></thead>"
-        f"<tbody>{risk_rows}</tbody>"
-        "</table>"
+        "The <strong>CANARY forecast</strong> is the frozen champion configuration applied to "
+        "the newest month of the panel. Read it as a <strong>rank</strong>: where the plugin "
+        "sits among every scored plugin, and what share of the panel scores above it. The raw "
+        "probability is shown for completeness but is not calibrated to the roughly 1 percent "
+        "monthly base rate. Across the pre-registered holdout, reviewing the top fifth of "
+        "plugins by this ranking would have caught about half of the advisories that followed, "
+        "so a high rank is a reason to look, not a finding that something is wrong.</p>"
+        '<p style="margin-top:.6rem;font-size:.9rem;color:var(--muted)">'
+        "Beneath the forecast, the <strong>honest track record</strong> shows the plugin's rank "
+        "at every past forecast date and whether an advisory followed, and the "
+        "<strong>current-state signals</strong> (maintenance, governance, SLSA, dependency "
+        "advisories) describe the plugin today. Those signals are a practitioner's dashboard "
+        "and are not part of the validated forecast.</p>"
         "</section>"
         # ── Signals ───────────────────────────────────────────────────────────
         '<section class="card">'

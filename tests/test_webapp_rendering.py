@@ -884,7 +884,8 @@ def test_render_page_shows_errors():
         score_error="boom",
     )
     assert "boom" in html
-    assert "ML model" in html
+    # The Layer 1 model picker no longer sits on the Score tab.
+    assert "ML model (optional)" not in html
 
 
 def test_render_page_includes_plugin_autocomplete_and_readonly_fields():

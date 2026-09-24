@@ -101,6 +101,8 @@ H2_ROC_CRITERION = 0.55
 # (tools/run_monthly_ablation_experiments.sh --embargo) are charted as the
 # before-and-after of the label leak. Only listed stems are drawn.
 PYPI_ROLLING_RESULTS_ROOT = Path("data/pypi/processed/results/rolling_backtest").resolve()
+# The frozen champion applied to the newest panel month (tools/latest_forecast.py).
+LATEST_FORECAST_PATH = Path("data/processed/results/latest_forecast.json").resolve()
 HONEST_VIZ_TIME_SPLIT_STEMS: dict[str, str] = {
     "xgb_6m_advisory_swh_no_window_time": "Advisory + Software Heritage (official config)",
 }
@@ -771,6 +773,53 @@ def _champion_run_dirs(runs: list[dict[str, Any]]) -> tuple[list[Path], dict[str
     return [ROLLING_RESULTS_ROOT / name for name in lead["run_names"] if name], lead
 
 
+@lru_cache(maxsize=4)
+def _load_latest_forecast_cached(path: str, mtime_ns: int, size: int) -> dict[str, Any] | None:
+    del mtime_ns, size  # part of the cache key only
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return (
+        payload if isinstance(payload, dict) and isinstance(payload.get("scores"), dict) else None
+    )
+
+
+def _load_latest_forecast() -> dict[str, Any] | None:
+    """The forecast file written by tools/latest_forecast.py, if present."""
+    path = LATEST_FORECAST_PATH
+    if not path.is_file():
+        return None
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return _load_latest_forecast_cached(str(path), st.st_mtime_ns, st.st_size)
+
+
+def _load_plugin_forecast(plugin_id: str) -> dict[str, Any] | None:
+    """One plugin's entry from the latest forecast, with the run's context."""
+    payload = _load_latest_forecast()
+    if not payload:
+        return None
+    entry = payload["scores"].get(plugin_id)
+    if not isinstance(entry, dict):
+        return None
+    return {
+        "plugin_id": plugin_id,
+        "month": str(payload.get("month") or ""),
+        "run_name": str(payload.get("run_name") or ""),
+        "fold": str(payload.get("fold") or ""),
+        "model_name": str(payload.get("model_name") or ""),
+        "include_prefixes": list(payload.get("include_prefixes") or []),
+        "train_end_month": payload.get("train_end_month"),
+        "label_as_of_month": payload.get("label_as_of_month"),
+        "generated_at": str(payload.get("generated_at") or ""),
+        "n_plugins": int(payload.get("n_plugins") or 0),
+        **entry,
+    }
+
+
 def _load_plugin_track(plugin_id: str) -> dict[str, Any] | None:
     """
     A plugin's honest track record: its percentile rank at every forecast
@@ -1200,6 +1249,7 @@ def render_page(
     active_panel_html = ""
     if active_tab == "score":
         plugin_track = _load_plugin_track(score_result["plugin"]) if score_result else None
+        forecast = _load_plugin_forecast(score_result["plugin"]) if score_result else None
         active_panel_html = _render_score_section(
             values,
             plugin_options,
@@ -1210,6 +1260,8 @@ def render_page(
             ai_error=ai_error,
             rate_limited=rate_limited,
             plugin_track=plugin_track,
+            forecast=forecast,
+            forecast_available=_load_latest_forecast() is not None,
         )
     elif active_tab == "about":
         active_panel_html = _render_about_tab()
@@ -1489,9 +1541,9 @@ def _handle_get_scoring(values: dict[str, Any]) -> tuple[dict[str, Any] | None, 
     try:
         if not _plugin_known(plugin, values["registry_path"]):
             raise ValueError("Please choose a plugin ID from the current registry list.")
-        score_model_dir = (
-            values.get("score_model_dir") or values.get("model_dir") or DEFAULT_MODEL_DIR
-        )
+        # A Layer 1 model attaches only when the query names one; the forecast
+        # card (frozen champion, latest panel month) is the default headline.
+        score_model_dir = values.get("score_model_dir") or values.get("model_dir") or ""
         score_result = _score_with_ml(plugin, score_model_dir)
     except ValueError as exc:
         logger.warning("Rejected GET score request for %s: %s", plugin, exc)
