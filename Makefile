@@ -26,11 +26,15 @@ security: bandit audit
 pyright:
 	docker compose run --rm canary pyright
 
+# The lockfiles are compiled with the image's own hash-pinned pip
+# (requirements-build.txt); the container runs as a non-root user, so
+# installing a different pip into /usr/local would fail and, more to the
+# point, the locks should be resolved by the same pip the image installs with.
 reqs:
-	docker compose run --rm canary sh -lc "export PIP_RETRIES=5 PIP_DEFAULT_TIMEOUT=120 && python -m pip install --quiet --retries 5 --timeout 120 'pip>=26,<26.2' && pip-compile --no-config --allow-unsafe --generate-hashes -o requirements-build.txt requirements-build.in"
-	docker compose run --rm canary sh -lc "export PIP_RETRIES=5 PIP_DEFAULT_TIMEOUT=120 && python -m pip install --quiet --retries 5 --timeout 120 'pip>=26,<26.2' && pip-compile --no-config --generate-hashes -o requirements-ci.txt requirements-ci.in"
-	docker compose run --rm canary sh -lc "export PIP_RETRIES=5 PIP_DEFAULT_TIMEOUT=120 && python -m pip install --quiet --retries 5 --timeout 120 'pip>=26,<26.2' && pip-compile --no-config --allow-unsafe --generate-hashes -o requirements.txt pyproject.toml"
-	docker compose run --rm canary sh -lc "export PIP_RETRIES=5 PIP_DEFAULT_TIMEOUT=120 && python -m pip install --quiet --retries 5 --timeout 120 'pip>=26,<26.2' && pip-compile --no-config --allow-unsafe --generate-hashes -o requirements-dev.txt requirements-dev.in"
+	docker compose run --rm canary sh -lc "export PIP_RETRIES=5 PIP_DEFAULT_TIMEOUT=120 && pip-compile --no-config --allow-unsafe --generate-hashes -o requirements-build.txt requirements-build.in"
+	docker compose run --rm canary sh -lc "export PIP_RETRIES=5 PIP_DEFAULT_TIMEOUT=120 && pip-compile --no-config --generate-hashes -o requirements-ci.txt requirements-ci.in"
+	docker compose run --rm canary sh -lc "export PIP_RETRIES=5 PIP_DEFAULT_TIMEOUT=120 && pip-compile --no-config --allow-unsafe --generate-hashes -o requirements.txt pyproject.toml"
+	docker compose run --rm canary sh -lc "export PIP_RETRIES=5 PIP_DEFAULT_TIMEOUT=120 && pip-compile --no-config --allow-unsafe --generate-hashes -o requirements-dev.txt requirements-dev.in"
 
 all: ruff security pyright reqs test
 
