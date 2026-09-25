@@ -5742,3 +5742,42 @@ def _render_pypi_tab(view: dict[str, Any] | None) -> str:
         + case_study
         + _render_pypi_reading_card(view)
     )
+
+
+# ---------------------------------------------------------------------------
+# Provenance footer
+# ---------------------------------------------------------------------------
+
+
+def _render_data_footer(info: dict[str, Any]) -> str:
+    """One muted line under every tab saying how far the data reaches."""
+    parts: list[str] = []
+    if info.get("panel_start") and info.get("panel_end"):
+        parts.append(f"Jenkins panel {info['panel_start']} to {info['panel_end']}")
+    if info.get("holdout_start") and info.get("holdout_end"):
+        parts.append(
+            f"pre-registered holdout folds {info['holdout_start']} to {info['holdout_end']} "
+            f"(development months through {info.get('boundary_month') or '?'})"
+        )
+    if info.get("jenkins_advisories_through"):
+        parts.append(f"Jenkins advisories through {info['jenkins_advisories_through']}")
+    if info.get("forecast_month"):
+        gen = f", generated {info['forecast_generated']}" if info.get("forecast_generated") else ""
+        parts.append(f"forecast month {info['forecast_month']}{gen}")
+    if info.get("pypi_advisories_through"):
+        n_pkg = (
+            f"{int(info.get('pypi_packages') or 0):,} packages, "
+            if info.get("pypi_packages")
+            else ""
+        )
+        parts.append(
+            f"PyPI snapshot {n_pkg}OSV advisories through {info['pypi_advisories_through']}"
+        )
+    if not parts:
+        return ""
+    return (
+        "<footer style='margin:1.2rem 0 .4rem;padding:.6rem 0;border-top:1px solid var(--line);"
+        "color:var(--muted);font-size:.78rem;line-height:1.5'>"
+        f"<strong style='color:var(--muted)'>Data as of</strong> · {_escape(' · '.join(parts))}. "
+        "Recorded results are read from disk and never recomputed for the page.</footer>"
+    )

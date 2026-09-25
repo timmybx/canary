@@ -83,10 +83,10 @@ def test_each_tab_renders():
 
 
 @pytest.mark.parametrize("tab", ["nonsense", "data"])
-def test_unknown_tab_falls_back_to_score(tab: str):
+def test_unknown_tab_falls_back_to_results(tab: str):
     status, _, body = _run("GET", "/", query=f"tab={tab}")
     assert status == "200 OK"
-    assert 'data-tab-panel="score"' in body.decode("utf-8")
+    assert 'data-tab-panel="honest"' in body.decode("utf-8")
 
 
 # ---------------------------------------------------------------------------

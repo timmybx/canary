@@ -368,6 +368,9 @@ def test_fold_top_n_keeps_each_plugin_once_with_its_best_month(tmp_path: Path) -
         ("b", "2025-12", 0.8, 0),
     ]
     assert [r["rank"] for r in top] == [1, 2]
+    # The label month travels with the row so the advisory behind a
+    # December label is looked up in December's window, not November's.
+    assert [r["label_month"] for r in top] == ["2025-12", ""]
     assert honest_viz.fold_top_n(index, "2099-01") == []
 
 

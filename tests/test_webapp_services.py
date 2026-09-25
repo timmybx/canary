@@ -63,7 +63,7 @@ def test_optional_str_empty():
 
 def test_merge_defaults_returns_defaults_with_no_form():
     result = _merge_defaults()
-    assert result["active_tab"] == "score"
+    assert result["active_tab"] == "honest"  # a bare URL opens on the results
     assert result["real"] is True
 
 

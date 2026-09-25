@@ -61,6 +61,7 @@ from canary.web.ui import (
     _render_command_result,  # noqa: F401
     _render_confusion_matrix,  # noqa: F401
     _render_cs_explain_card,  # noqa: F401
+    _render_data_footer,  # noqa: F401
     _render_explain_card,  # noqa: F401
     _render_explore_tab,  # noqa: F401
     _render_feature_columns_panel,  # noqa: F401
@@ -118,10 +119,13 @@ HONEST_VIZ_TIME_SPLIT_STEMS: dict[str, str] = {
 ADVISORY_DATA_ROOT = Path("data/raw/advisories").resolve()
 MODEL_OUTPUTS_ROOT_PARTS = Path("data/processed/models").parts
 VALID_TABS = frozenset({"score", "ml", "about", "casestudy", "honest", "explore", "pypi"})
+# The tab a bare URL opens: the results, so a visitor sees the validated
+# numbers first and scoring is one click away.
+LANDING_TAB = "honest"
 MODEL_OUTPUT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 DEFAULTS: dict[str, Any] = {
-    "active_tab": "score",
+    "active_tab": LANDING_TAB,
     "plugin": "",
     "real": True,
     "overwrite": False,
@@ -934,9 +938,16 @@ def _case_study_folds(
         top = honest_viz.fold_top_n(index, fold)
         if not top:
             continue
+        # The window closes at the end of the label month's horizon: a
+        # positive label can come from the fold's second month while the
+        # higher score, and the row's date, came from the first.
         enriched = [
             _enrich_prediction_row(
-                row, row["rank"], row["month"], _label_window_end(row["month"]), lookup
+                row,
+                row["rank"],
+                row["month"],
+                _label_window_end(row.get("label_month") or row["month"]),
+                lookup,
             )
             for row in top
         ]
@@ -1471,6 +1482,69 @@ def _load_case_study_view(values: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+@lru_cache(maxsize=2)
+def _jenkins_advisories_through_cached(root: str, mtime_ns: int, n_files: int) -> str:
+    del mtime_ns, n_files  # part of the cache key only
+    latest = ""
+    for path in Path(root).glob("*.advisories.real.jsonl"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            date = str((rec or {}).get("published_date") or "")[:10]
+            if date > latest:
+                latest = date
+    return latest
+
+
+def _jenkins_advisories_through() -> str:
+    """Newest publication date across the local Jenkins advisory files
+    (cached on the directory's modification time and file count)."""
+    root = ADVISORY_DATA_ROOT
+    try:
+        st = root.stat()
+        n_files = sum(1 for _ in root.glob("*.advisories.real.jsonl"))
+    except OSError:
+        return ""
+    return _jenkins_advisories_through_cached(str(root), st.st_mtime_ns, n_files)
+
+
+def _data_as_of() -> dict[str, Any]:
+    """
+    The provenance line at the foot of every page: how far the Jenkins
+    panel, the recorded holdout, the local advisory files, the forecast and
+    the PyPI snapshot reach. Every field is optional; the footer prints the
+    ones that exist.
+    """
+    forecast = _load_latest_forecast() or {}
+    runs = _load_rolling_backtests()
+    oot = _primary_oot_runs(runs)
+    pypi_index = _pypi_advisory_index()
+    pypi_through = max(
+        (r["published_date"] for recs in pypi_index.values() for r in recs), default=""
+    )
+    panel = forecast.get("panel_months") or []
+    return {
+        "panel_start": str(panel[0]) if len(panel) == 2 else "",
+        "panel_end": str(panel[1]) if len(panel) == 2 else "",
+        "forecast_month": str(forecast.get("month") or ""),
+        "forecast_generated": str(forecast.get("generated_at") or "")[:10],
+        "holdout_start": str(oot[0].get("start") or "") if oot else "",
+        "holdout_end": str(oot[0].get("end") or "") if oot else "",
+        "jenkins_advisories_through": _jenkins_advisories_through(),
+        "pypi_advisories_through": pypi_through,
+        "pypi_packages": len(_pypi_universe()),
+        "boundary_month": OOT_BOUNDARY_MONTH,
+    }
+
+
 def render_page(
     values: dict[str, Any],
     *,
@@ -1492,9 +1566,9 @@ def render_page(
     values = {**DEFAULTS, **values}
     plugin_options = plugin_options or []
     model_dir_options = model_dir_options or []
-    active_tab = values.get("active_tab") or "score"
+    active_tab = values.get("active_tab") or LANDING_TAB
     if active_tab not in VALID_TABS:
-        active_tab = "score"
+        active_tab = LANDING_TAB
     tabs = [
         ("honest", "Results", "The leak, the embargoed backtests, the holdout"),
         ("score", "Score a plugin", "Score, rationale and honest track record"),
@@ -1596,6 +1670,7 @@ def render_page(
       <section class="tab-panel is-active" data-tab-panel="{_escape(active_tab)}">
         {active_panel_html}
       </section>
+      {_render_data_footer(_data_as_of())}
     </main>
     {_validation_script(plugin_options, active_tab)}
   </body>
@@ -1630,9 +1705,9 @@ def parse_form(environ: dict[str, Any]) -> dict[str, str]:
 def _prepare_request_state(
     values: dict[str, Any],
 ) -> tuple[list[str], dict[str, Any] | None, list[str]]:
-    active_tab = values.get("active_tab") or "score"
+    active_tab = values.get("active_tab") or LANDING_TAB
     if active_tab not in VALID_TABS:
-        active_tab = "score"
+        active_tab = LANDING_TAB
         values["active_tab"] = active_tab
     plugin_options = _load_plugin_choices(values["registry_path"]) if active_tab == "score" else []
     latest_metrics = None

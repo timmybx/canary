@@ -296,13 +296,13 @@ def test_render_page_score_result_shown():
 
 
 def test_render_page_score_error_shown():
-    html = render_page({}, score_error="Something went wrong")
+    html = render_page({"active_tab": "score"}, score_error="Something went wrong")
     assert "Something went wrong" in html
 
 
 def test_render_page_score_error_escaped():
     # XSS: error message should be HTML-escaped
-    html = render_page({}, score_error='<script>alert("xss")</script>')
+    html = render_page({"active_tab": "score"}, score_error='<script>alert("xss")</script>')
     # The error should appear HTML-escaped, not raw
     assert "&lt;script&gt;" in html
     # The unescaped XSS payload should not appear in the notice element
@@ -310,7 +310,7 @@ def test_render_page_score_error_escaped():
 
 
 def test_render_page_contains_csrf_free_form():
-    html = render_page({})
+    html = render_page({"active_tab": "score"})
     assert "<form" in html
 
 
@@ -860,6 +860,7 @@ def test_fmt_driver_value_and_prompt_builder():
 def test_render_page_shows_errors():
     html = render_page(
         {
+            "active_tab": "score",
             "plugin": "",
             "data_dir": "data/raw",
             "real": True,
@@ -891,6 +892,7 @@ def test_render_page_shows_errors():
 def test_render_page_includes_plugin_autocomplete_and_readonly_fields():
     html = render_page(
         {
+            "active_tab": "score",
             "plugin": "cucumber-reports",
             "data_dir": "data/raw",
             "real": True,

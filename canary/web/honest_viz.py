@@ -519,16 +519,27 @@ def fold_top_n(index: dict[str, Any], fold: str, n_top: int = 25) -> list[dict[s
     The top ``n_top`` plugins of a fold by their best month score, one row per
     plugin (a two-month fold scores each plugin twice; the higher score and
     its month are kept). ``y_true`` is 1 when either month's label was
-    positive. Rows carry ``rank`` re-numbered 1..n_top within the fold.
+    positive, and ``label_month`` is the latest month whose label was, so
+    the advisory behind the label can be looked up in that month's window
+    even when the higher score came earlier. Rows carry ``rank`` re-numbered
+    1..n_top within the fold.
     """
     best: dict[str, dict[str, Any]] = {}
     for row in index.get("by_fold", {}).get(fold, []):
         pid = row["plugin_id"]
         current = best.get(pid)
+        label_month = row["month"] if row["y_true"] else ""
+        if current is not None and current.get("label_month"):
+            label_month = max(label_month, current["label_month"])
         if current is None or row["y_prob"] > current["y_prob"]:
-            best[pid] = dict(row, y_true=max(row["y_true"], (current or row)["y_true"]))
-        elif row["y_true"] and not current["y_true"]:
-            current["y_true"] = 1
+            best[pid] = dict(
+                row,
+                y_true=max(row["y_true"], (current or row)["y_true"]),
+                label_month=label_month,
+            )
+        else:
+            current["y_true"] = max(current["y_true"], row["y_true"])
+            current["label_month"] = label_month
     ordered = sorted(best.values(), key=lambda r: (-r["y_prob"], r["plugin_id"]))[:n_top]
     for i, row in enumerate(ordered, start=1):
         row["rank"] = i
