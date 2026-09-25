@@ -3,12 +3,12 @@
 pytest>=9.1.1
 pytest-cov>=7.1.0
 Pygments>=2.21.0
-ruff>=0.16.5
+ruff>=0.16.9
 bandit>=1.9.4
 pip-audit>=2.10.1
 pip-tools>=7.6.1
-pyright>=1.1.411
+pyright>=1.1.414
 pre-commit>=4.6.2
 atheris>=3.1.0
-mutmut==3.7.0
-matplotlib>=3.11.1
+mutmut==3.8.0
+matplotlib>=3.11.2
