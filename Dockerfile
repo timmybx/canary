@@ -56,9 +56,14 @@ CMD ["python", "-m", "canary.webapp"]
 # other repository tooling, but is not needed by the shipped runtime. Its
 # vendored dependencies are independently indexed by container scanners and
 # can retain vulnerabilities even when application packages are securely
-# pinned.
+# pinned. The same applies to virtualenv (a pre-commit dependency), which
+# embeds whole pip wheels for seeding new environments: scanners open those
+# wheels and report the urllib3, msgpack and setuptools copies vendored
+# inside them, whatever the image's own pinned versions are. Neither tool
+# is used at runtime, so both leave with pip.
 FROM development AS runtime
 
 USER root
-RUN python -m pip uninstall --yes pip
+RUN python -m pip uninstall --yes pre-commit virtualenv \
+ && python -m pip uninstall --yes pip
 USER appuser

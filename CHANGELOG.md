@@ -8,6 +8,7 @@ This project follows a lightweight adaptation of “Keep a Changelog”.
 ## [Unreleased]
 
 ### Fixed
+- **Docker Scout: the runtime image no longer carries virtualenv's embedded pip wheels.** Scout reported urllib3 1.26.20, msgpack 1.1.2 and setuptools 70.3.0 in `canary:ci` although every lockfile pins fixed versions (urllib3 2.8.0, msgpack 1.2.2, setuptools 84.0.0). The copies are the ones vendored inside the `pip-26.0.1` wheel that `virtualenv` (a `pre-commit` dependency from `requirements-dev.txt`) embeds for seeding new environments; the scanner opens embedded wheels. The `runtime` stage now uninstalls `pre-commit` and `virtualenv` alongside `pip`; the `development` stage that Compose uses is unchanged. No dependency was downgraded.
 - **Case study: a positive label from a fold's second month is joined with that month's advisory window.** `fold_top_n` keeps each plugin's higher-scoring month, but the positive label could come from the fold's other month; the advisory look-up used the shown month's 180-day window and so missed advisories that fell just after it, rendering the row as "label only". Rows now carry `label_month` and the look-up closes at that month's horizon. On the PyPI development folds this resolved every such row (ten, e.g. `werkzeug` in fold 2025-05, whose GHSA-hgf8-39gv-g3f2 of 2025-12-02 sits inside the 2025-06 window); the Jenkins holdout had none. Display only; no metric changes.
 
 ### Added
