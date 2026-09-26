@@ -554,7 +554,7 @@ def _build_explain_prompt(
             prob_pct = str(prob)
         lines.append(
             f"ML ADVISORY RISK SCORE: {prob} ({prob_pct} probability of "
-            "a security advisory within 180 days)"
+            "a security advisory within six months)"
         )
         lines.append(f"Risk category: {risk_cat}")
         if model_nm:
@@ -1025,9 +1025,9 @@ def _render_plugin_track_card(
         )
         + ". "
         + (
-            f"An advisory followed within 180 days of {n_pos} of those dates."
+            f"An advisory followed within six months of {n_pos} of those dates."
             if n_pos
-            else "No advisory followed any of those dates within 180 days."
+            else "No advisory followed any of those dates within six months."
         )
     )
 
@@ -1040,9 +1040,9 @@ def _render_plugin_track_card(
                     f" <span style='color:var(--muted)'>{_escape(r.get('adv_date') or '')}</span>"
                 )
             else:
-                outcome = "<span style='color:var(--warn)'>advisory within 180 days</span>"
+                outcome = "<span style='color:var(--warn)'>advisory within six months</span>"
         else:
-            outcome = "<span style='color:var(--muted)'>none within 180 days</span>"
+            outcome = "<span style='color:var(--muted)'>none within six months</span>"
         return (
             "<tr>"
             f"<td style='padding:.35rem .6rem;white-space:nowrap'>{_escape(r['month'])}</td>"
@@ -3826,7 +3826,7 @@ def _render_about_tab() -> str:
         "Near-term Advisory Risk Yardstick</em>) predicts near-term security advisory risk for "
         "Jenkins plugins using publicly observable project signals. Rather than waiting for a "
         "vulnerability to be disclosed, CANARY estimates the likelihood that a plugin will "
-        "appear in a Jenkins security advisory within the next 180 days — giving security "
+        "appear in a Jenkins security advisory within the next six months — giving security "
         "teams a proactive prioritization signal.</p>"
         '<p style="margin-top:.6rem;line-height:1.7">This is a research prototype developed '
         "as part of a Doctor of Engineering praxis at "
@@ -4932,9 +4932,10 @@ def _case_study_method(window_word: str, unit: str = "plugin") -> str:
 
 _JENKINS_CASE_STUDY_NOTE = (
     "Advisory details come from the local Jenkins advisory dataset; a confirmed row without "
-    "details is one whose stored label was positive. Lead time = days from the scored month to "
-    "publication. Plugin names link to their score page, which shows the plugin's rank at every "
-    "forecast date."
+    "details is one whose stored label was positive. Lead time = days from the first of the "
+    "scored month to publication; the window is the six calendar months that follow, so it can "
+    "exceed 180 days. Plugin names link to their score page, which shows the plugin's rank at "
+    "every forecast date."
 )
 
 
@@ -5009,7 +5010,7 @@ def _render_honest_case_study(
             outcome = (
                 "<td style='padding:.4rem .6rem;text-align:center'><span style='color:var(--muted)'>–</span></td>"
                 "<td colspan='4' style='padding:.4rem .6rem;color:var(--muted);font-size:.82rem;font-style:italic'>"
-                "no advisory in the 180-day window</td>"
+                "no advisory in the six-month window</td>"
             )
         return (
             "<tr>"
@@ -5092,7 +5093,7 @@ def _render_honest_case_study(
         )
     overall = (
         f"Across the {window_word} folds shown, {total_hits} of the {total_rows} top-25 slots "
-        "were followed by an advisory within 180 days. That is the honest precision at 25 for "
+        "were followed by an advisory within six months. That is the honest precision at 25 for "
         "this configuration: a ranking signal with real lift over the base rate, not an "
         "operational triage list."
     )
@@ -5161,7 +5162,7 @@ def _render_case_study_tab(
             '<p class="eyebrow">Case study</p>',
             "<h2>Validated predictions</h2>",
             '<p class="kicker">The top-ranked plugins at each forecast date, compared with the '
-            "advisories Jenkins published in the 180 days that followed. Confirmed rows are "
+            "advisories Jenkins published in the six months that followed. Confirmed rows are "
             "plugins CANARY flagged that received a real advisory inside the window.</p>",
             '</div><span class="pill pill--muted">Live validation</span></div>',
             oot_picker,
@@ -5380,7 +5381,7 @@ def _render_case_study_tab(
             '<div class="panel" style="margin-top:.6rem">'
             + f'<h4>Confirmed predictions <span style="color:#5ce0a0">({n_confirmed} of {n_total})</span></h4>'
             + '<p style="font-size:.82rem;color:var(--muted);margin:.2rem 0 .5rem">Plugins CANARY ranked '
-            + f"in its top {n_total} that received a Jenkins security advisory within the 180-day window. "
+            + f"in its top {n_total} that received a Jenkins security advisory within the six-month window. "
             "Plugin names link to their CANARY score page.</p>"
             + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
             + thead
@@ -5469,7 +5470,8 @@ def _render_case_study_tab(
 _PYPI_CASE_STUDY_NOTE = (
     "Advisory details come from OSV's PyPI advisory database (PYSEC and GHSA records); a "
     "confirmed row without details is one whose stored label was positive. Lead time = days "
-    "from the scored month to publication. Package names link to their look-up on this tab."
+    "from the first of the scored month to publication; the window is the six calendar months "
+    "that follow, so it can exceed 180 days. Package names link to their look-up on this tab."
 )
 _PYPI_LABEL = "Advisory history"
 
@@ -5558,7 +5560,7 @@ def _render_pypi_intro_card(view: dict[str, Any]) -> str:
         '<p class="kicker">Every number on this tab comes from the embargoed rolling backtest '
         "re-run on PyPI: the download-ranked packages with a GitHub repository, OSV advisories "
         "as the outcome, and only each package's own advisory history as input. Same folds, "
-        "same 180-day horizon, same label embargo at every forecast date.</p>"
+        "same six-month horizon, same label embargo at every forecast date.</p>"
         '</div><span class="pill pill--good">Embargoed labels at every fold</span></div>'
         f"{metrics}"
         '<form method="get" action="/" style="display:grid;grid-template-columns:'

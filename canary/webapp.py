@@ -529,8 +529,10 @@ AdvisoryLookup = Callable[[str, str, str], list[dict[str, Any]]]
 
 
 def _label_window_end(obs_month: str) -> str:
-    """Last day of the 180-day label window that opens at ``obs_month``
-    (``YYYY-MM``): the end of the sixth month after it. Empty on bad input."""
+    """Last day of the label window that opens at ``obs_month`` (``YYYY-MM``):
+    the end of the sixth calendar month after it, matching the positional
+    ``label_advisory_within_6m`` label (months t+1 to t+6). Empty on bad
+    input."""
     from datetime import datetime as _dt
     from datetime import timedelta as _td
 

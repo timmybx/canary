@@ -495,7 +495,7 @@ def svg_plugin_track(
         hit = bool(r.get("y_true"))
         color = STORED_COLOR if hit else EMBARGOED_COLOR
         radius = 5.5 if hit else 3.5
-        outcome = "advisory followed within 180 days" if hit else "no advisory within 180 days"
+        outcome = "advisory followed within six months" if hit else "no advisory within six months"
         out.append(
             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius}" fill="{color}" stroke="var(--bg)" '
             f'stroke-width="1.5"><title>{_esc(r["month"])} · rank {_esc(r.get("rank"))} of '
@@ -504,7 +504,7 @@ def svg_plugin_track(
         )
     ly = height - 10
     out.append(f'<circle cx="{left + 6}" cy="{ly - 4}" r="5.5" fill="{STORED_COLOR}"/>')
-    out.append(_text(left + 18, ly, "advisory followed within 180 days", size=11, fill=_TEXT))
+    out.append(_text(left + 18, ly, "advisory followed within six months", size=11, fill=_TEXT))
     out.append(f'<circle cx="{left + 236}" cy="{ly - 4}" r="3.5" fill="{EMBARGOED_COLOR}"/>')
     out.append(_text(left + 248, ly, "no advisory in window", size=11, fill=_TEXT))
     out.append("</svg>")

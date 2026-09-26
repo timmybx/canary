@@ -446,7 +446,7 @@ def test_svg_plugin_track_marks_hits_and_holdout() -> None:
     ]
     svg = charts.svg_plugin_track(rows, boundary_month="2025-06")
     assert svg.count("<circle") == 4  # two points + two legend swatches
-    assert "out-of-time holdout" in svg and "advisory followed within 180 days" in svg
+    assert "out-of-time holdout" in svg and "advisory followed within six months" in svg
     assert charts.svg_plugin_track([], boundary_month="2025-06") == ""
 
 
