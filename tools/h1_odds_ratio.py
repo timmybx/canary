@@ -18,6 +18,16 @@ Factors tested (each as exposed vs. unexposed):
     commits     swh_days_since_last_commit >= --commit-days (default 365)
                 (supplementary: commit staleness is not literally in H1 but is
                 the maintenance signal SHAP ranks highest)
+    weekend     swh_weekend_commit_fraction > --offhours-min (default 0), over
+                rows with at least one archived commit (supplementary: the
+                stored label SHAP analysis read off hours commit fractions as
+                protective; this tests that association on the panel itself,
+                without a model, so it does not depend on the label embargo)
+    late night  swh_late_night_commit_fraction > --offhours-min, same rows
+
+The off hours factors are computed only where swh_commit_count > 0, so a
+plugin with no archived commits (fraction undefined) is counted as missing
+rather than as "no off hours commits".
 
 Rows where a factor's value is missing (None) are excluded from that factor's
 table and counted in the output, so "not observed" is never treated as
@@ -36,6 +46,7 @@ Usage
 
     # custom thresholds or dataset
     python tools/h1_odds_ratio.py --release-months 6 --team-size 1
+    python tools/h1_odds_ratio.py --offhours-min 0.1
     python tools/h1_odds_ratio.py --json data/processed/results/h1_odds.json
 
 Output
@@ -61,6 +72,9 @@ H1_CRITERION = 1.5
 RELEASE_COL = "gharchive_months_since_release_tag"
 TEAM_COL = "gharchive_unique_human_actors_trailing_6m"
 COMMIT_COL = "swh_days_since_last_commit"
+WEEKEND_COL = "swh_weekend_commit_fraction"
+LATE_NIGHT_COL = "swh_late_night_commit_fraction"
+COMMIT_COUNT_COL = "swh_commit_count"
 
 
 class Table:
@@ -98,6 +112,22 @@ def _odds_ratio(a: int, b: int, c: int, d: int) -> tuple[float, float, float]:
     return or_, lo, hi
 
 
+def _offhours_exposures(row: dict[str, Any], minimum: float) -> tuple[bool | None, bool | None]:
+    """Weekend and late night exposures, or (None, None) when the plugin has no
+    archived commits, so an undefined fraction is never read as zero."""
+    count = row.get(COMMIT_COUNT_COL)
+    try:
+        if count is None or float(count) <= 0:
+            return None, None
+    except (TypeError, ValueError):
+        return None, None
+    out: list[bool | None] = []
+    for col in (WEEKEND_COL, LATE_NIGHT_COL):
+        value = row.get(col)
+        out.append(None if value is None else float(value) > minimum)
+    return out[0], out[1]
+
+
 def _summarize(name: str, window: str, t: Table, n_rows: int) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "factor": name,
@@ -119,8 +149,14 @@ def _summarize(name: str, window: str, t: Table, n_rows: int) -> dict[str, Any]:
         odds_ratio=round(or_, 3),
         ci_low=round(lo, 3),
         ci_high=round(hi, 3),
-        h1_criterion_met=bool(lo >= 1.0 and or_ >= H1_CRITERION),
-        note="criterion: OR >= 1.5 with CI excluding 1.0",
+        h1_criterion_met=(
+            bool(lo >= 1.0 and or_ >= H1_CRITERION) if "supplementary" not in name else None
+        ),
+        note=(
+            "criterion: OR >= 1.5 with CI excluding 1.0"
+            if "supplementary" not in name
+            else "supplementary factor: not part of H1, criterion not applied"
+        ),
     )
     return entry
 
@@ -132,6 +168,12 @@ def main() -> None:
     parser.add_argument("--release-months", type=float, default=12.0)
     parser.add_argument("--team-size", type=float, default=2.0)
     parser.add_argument("--commit-days", type=float, default=365.0)
+    parser.add_argument(
+        "--offhours-min",
+        type=float,
+        default=0.0,
+        help="exposed when the weekend / late night commit fraction exceeds this (default 0)",
+    )
     parser.add_argument("--json", default=None, help="optional JSON output path")
     args = parser.parse_args()
 
@@ -140,6 +182,8 @@ def main() -> None:
         f"team (<= {args.team_size:g} human actors, trailing 6m)",
         "either (H1 disjunction, both factors observable)",
         f"commits (>= {args.commit_days:g} days since last commit, supplementary)",
+        f"weekend (weekend commit fraction > {args.offhours_min:g}, supplementary)",
+        f"late night (late night commit fraction > {args.offhours_min:g}, supplementary)",
     ]
     tables: dict[str, list[Table]] = {w: [Table() for _ in factor_names] for w in ("train", "test")}
     n_rows = {"train": 0, "test": 0}
@@ -162,9 +206,12 @@ def main() -> None:
             team_exp = None if team is None else float(team) <= args.team_size
             either_exp = None if rel is None or team is None else bool(rel_exp) or bool(team_exp)
             com_exp = None if com is None else float(com) >= args.commit_days
+            wk_exp, ln_exp = _offhours_exposures(r, args.offhours_min)
 
             for t, exp in zip(
-                tables[window], (rel_exp, team_exp, either_exp, com_exp), strict=True
+                tables[window],
+                (rel_exp, team_exp, either_exp, com_exp, wk_exp, ln_exp),
+                strict=True,
             ):
                 t.add(exp, positive)
 
@@ -185,19 +232,19 @@ def main() -> None:
         results.append(_summarize(name, "all", combined, sum(n_rows.values())))
 
     header = (
-        f"{'window':<6} {'factor':<52} {'OR':>7} {'95% CI':>16} "
+        f"{'window':<6} {'factor':<62} {'OR':>7} {'95% CI':>16} "
         f"{'exp rate':>9} {'unexp':>7} {'H1?':>4}"
     )
     print(header)
     print("-" * len(header))
     for e in results:
         if "error" in e:
-            print(f"{e['window']:<6} {e['factor']:<52} {e['error']}")
+            print(f"{e['window']:<6} {e['factor']:<62} {e['error']}")
             continue
         ci = f"[{e['ci_low']}, {e['ci_high']}]"
-        met = "yes" if e["h1_criterion_met"] else "no"
+        met = {True: "yes", False: "no"}.get(e["h1_criterion_met"], "n/a")
         print(
-            f"{e['window']:<6} {e['factor']:<52} {e['odds_ratio']:>7} {ci:>16} "
+            f"{e['window']:<6} {e['factor']:<62} {e['odds_ratio']:>7} {ci:>16} "
             f"{e['exposed_rate']:>9} {e['unexposed_rate']:>7} {met:>4}"
         )
     print(

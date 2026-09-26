@@ -32,6 +32,10 @@ Usage
     # commit staleness instead of release staleness
     python tools/simpson_stratified.py --factor commits
 
+    # off hours commit presence (is the marginal association an attention effect?)
+    python tools/simpson_stratified.py --factor weekend
+    python tools/simpson_stratified.py --factor late_night
+
 Output feeds tools/make_figures.py (figure: simpson).
 """
 
@@ -51,6 +55,11 @@ TEST_START = "2025-05"
 FACTORS = {
     "releases": ("gharchive_months_since_release_tag", 12.0, ">="),
     "commits": ("swh_days_since_last_commit", 365.0, ">="),
+    # Off hours commit presence (tools/h1_odds_ratio.py supplementary factors).
+    # The fraction is missing whenever the plugin has no archived commits, so
+    # "exposed" means "has commits and some of them are off hours".
+    "weekend": ("swh_weekend_commit_fraction", 0.0, ">"),
+    "late_night": ("swh_late_night_commit_fraction", 0.0, ">"),
 }
 
 
@@ -102,7 +111,7 @@ def main() -> None:
     parser.add_argument("--json", default=None, help="optional JSON output path")
     args = parser.parse_args()
 
-    col, threshold, _ = FACTORS[args.factor]
+    col, threshold, op = FACTORS[args.factor]
 
     # Pass 1 (streaming): keep only the minimal tuple per usable row.
     rows: list[tuple[float, bool, bool]] = []  # (attention, exposed, positive)
@@ -122,7 +131,7 @@ def main() -> None:
                 skipped_missing += 1
                 continue
             attention = float(r.get(ATTENTION_COL) or 0)
-            exposed = float(val) >= threshold
+            exposed = float(val) > threshold if op == ">" else float(val) >= threshold
             positive = int(r.get(TARGET_COL) or 0) == 1
             rows.append((attention, exposed, positive))
 
@@ -142,7 +151,7 @@ def main() -> None:
             cells[s][idx] += 1
 
     results = {
-        "factor": f"{col} >= {threshold:g}",
+        "factor": f"{col} {op} {threshold:g}",
         "attention_col": ATTENTION_COL,
         "median_nonzero_attention": median_nonzero,
         "window": args.window,

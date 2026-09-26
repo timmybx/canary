@@ -58,6 +58,8 @@ FACTOR_LABELS = {
     "team": "Small team\n(<= 2 humans, 6 mo)",
     "either": "Either\n(H1 disjunction)",
     "commits": "Commits stale\n(>= 365 days)",
+    "weekend": "Any weekend commits\n(fraction > 0)",
+    "late night": "Any late night commits\n(fraction > 0)",
 }
 
 
@@ -109,7 +111,7 @@ def fig_h1_forest(out: Path, h1_json: str) -> None:
     ax.set_yticks(list(ys))
     ax.set_yticklabels(names, fontsize=9)
     ax.set_xlabel("Odds ratio for advisory within 6 months (log scale, train window)")
-    ax.set_title("H1 marginal test: every factor is significantly below 1.0")
+    ax.set_title("Marginal odds ratios: H1 factors and supplementary maintenance signals")
     fig.tight_layout()
     fig.savefig(out / "h1_forest.png")
     plt.close(fig)
