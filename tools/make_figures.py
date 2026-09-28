@@ -19,6 +19,13 @@ Figures
                            (from <model>/test_predictions.csv)
     shap_importance.png    Top features by mean |SHAP|
                            (from <model>/feature_selection.json)
+    fold_timeline.png      Per fold ROC-AUC of the declared configurations across
+                           the embargoed development folds and the pre registered
+                           holdout folds (from <run>/rolling_backtest.json)
+    honest_shap.png        Mean |SHAP| per feature over the embargoed folds of the
+                           runner up, development beside holdout, clocks coloured
+                           by the logistic twin's coefficient sign (from
+                           <run>/fold_*/metrics.json)
 
 Usage
 -----
@@ -51,6 +58,55 @@ PC_MODEL = "data/processed/models/xgb_6m_advisory_swh_time"
 H3_MODEL = "data/processed/models/xgb_6m_full_no_time_time"
 SHAP_MODEL = "data/processed/models/xgb_6m_full_cleaned_time"
 OUT_DIR = "data/processed/figures"
+ROLLING_ROOT = "data/processed/results/rolling_backtest"
+# (label, development run, out of time run, colour) for the fold timeline.
+TIMELINE_SERIES = (
+    (
+        "Clocks + contributor dynamics, logistic (champion)",
+        "ghclock_ghdyn_logistic",
+        "oot_champion",
+        "#b03a7a",
+    ),
+    (
+        "Clocks + install base, XGBoost (runner up)",
+        "ghclock_installs_xgb",
+        "oot_runnerup",
+        "#1f3b73",
+    ),
+    (
+        "Clocks alone, logistic (baseline)",
+        "ghclock_only_logistic",
+        "oot_ghclock_logistic",
+        "#3d8f6b",
+    ),
+)
+H2_CRITERION = 0.55
+# Honest SHAP figure: the tree model whose folds carry mean |SHAP|, its holdout
+# run, and the logistic run of the same configuration that supplies signs.
+HONEST_SHAP_DEV = "ghclock_installs_xgb"
+HONEST_SHAP_OOT = "oot_runnerup"
+HONEST_SHAP_LOGISTIC = "ghclock_installs_logistic"
+FEATURE_LABELS = {
+    "installs_months_of_data": "Install base: months of data",
+    "installs_growth_12m": "Install base: 12 month growth",
+    "installs_growth_3m": "Install base: 3 month growth",
+    "installs_count": "Install count",
+    "installs_log10_count": "Install count (log10)",
+    "installs_pct": "Share of all Jenkins installs",
+    "installs_rank_pct": "Install rank (percentile)",
+    "installs_rank_delta_12m": "Install rank change, 12 months",
+    "installs_peak_ratio": "Installs, ratio to own peak",
+    "installs_has_data": "Has install data",
+    "ghclock_days_since_human_push": "Days since last human push",
+    "ghclock_days_since_any_push": "Days since any push (bots included)",
+    "ghclock_days_since_release": "Days since last release",
+    "ghclock_days_since_pr_opened": "Days since last pull request opened",
+    "ghclock_days_since_pr_merged": "Days since last pull request merged",
+    "ghclock_days_since_pr_review": "Days since last pull request review",
+    "ghclock_days_since_issue_opened": "Days since last issue opened",
+    "ghclock_days_since_tag_create": "Days since last tag",
+    "ghclock_has_events": "Has any GitHub Archive events",
+}
 K_MARKS = (10, 25, 50, 100)
 
 FACTOR_LABELS = {
@@ -91,7 +147,7 @@ def fig_h1_forest(out: Path, h1_json: str) -> None:
         lows.append(e["ci_low"])
         highs.append(e["ci_high"])
     ys = range(len(names))[::-1]
-    fig, ax = plt.subplots(figsize=(7, 3.6))
+    fig, ax = plt.subplots(figsize=(7, 4.0))
     for y, o, lo, hi in zip(ys, ors, lows, highs, strict=True):
         ax.plot([lo, hi], [y, y], color="#1f4e79", linewidth=2)
         ax.plot(o, y, "o", color="#1f4e79", markersize=7)
@@ -105,13 +161,14 @@ def fig_h1_forest(out: Path, h1_json: str) -> None:
     ax.set_xscale("log")
     ax.set_xticks([0.25, 0.5, 1.0, 1.5, 2.0])
     ax.set_xticklabels(["0.25", "0.5", "1.0", "1.5", "2.0"])
+    ax.set_xlim(0.22, 2.3)
     ax.minorticks_off()
-    ax.set_ylim(-0.6, len(names) - 0.2)
-    ax.legend(loc="lower right", fontsize=8, framealpha=1.0)
+    ax.set_ylim(-0.7, len(names) - 0.2)
+    ax.legend(loc="lower left", fontsize=8, framealpha=1.0)
     ax.set_yticks(list(ys))
     ax.set_yticklabels(names, fontsize=9)
     ax.set_xlabel("Odds ratio for advisory within 6 months (log scale, train window)")
-    ax.set_title("Marginal odds ratios: H1 factors and supplementary maintenance signals")
+    ax.set_title("Marginal odds ratios: H1 factors and supplementary signals", fontsize=11)
     fig.tight_layout()
     fig.savefig(out / "h1_forest.png")
     plt.close(fig)
@@ -457,6 +514,169 @@ def fig_simpson(out: Path, simpson_json: str) -> None:
     plt.close(fig)
 
 
+def _fold_points(rolling_root: Path, run: str) -> list[tuple[str, float]]:
+    payload = json.loads((rolling_root / run / "rolling_backtest.json").read_text(encoding="utf-8"))
+    return [(str(f["test_start_month"]), float(f["roc_auc"])) for f in payload["folds"]]
+
+
+def fig_fold_timeline(out: Path, rolling_root: str) -> None:
+    """Per fold ROC-AUC, development sweep then holdout, for the declared configurations."""
+    root = Path(rolling_root)
+    series = [
+        (label, _fold_points(root, dev), _fold_points(root, oot), colour)
+        for label, dev, oot, colour in TIMELINE_SERIES
+    ]
+    months = sorted({m for _, dev, oot, _ in series for m, _ in dev + oot})
+    x = {m: i for i, m in enumerate(months)}
+    first_holdout = min(m for _, _, oot, _ in series for m, _ in oot)
+    boundary = x[first_holdout] - 0.5
+    fig, ax = plt.subplots(figsize=(7.0, 3.6))
+    ax.axvspan(boundary, len(months) - 0.5, color="#e9f3ee", zorder=0)
+    ax.axvline(boundary, color="#3d8f6b", linestyle="--", linewidth=1)
+    ax.text(boundary + 0.15, 0.845, "pre registered holdout", fontsize=8, color="#2a6b4d", va="top")
+    ax.text(
+        boundary - 0.15, 0.845, "development sweep", fontsize=8, color="#555", va="top", ha="right"
+    )
+    ax.axhline(H2_CRITERION, color="#c00000", linestyle="--", linewidth=1)
+    ax.text(
+        0.1, H2_CRITERION + 0.006, f"H2 criterion {H2_CRITERION:.2f}", fontsize=8, color="#c00000"
+    )
+    ax.axhline(0.5, color="#888", linestyle=":", linewidth=1)
+    ax.text(0.1, 0.506, "chance 0.50", fontsize=8, color="#666")
+    for label, dev, oot, colour in series:
+        pts = dev + oot
+        ax.plot(
+            [x[m] for m, _ in pts],
+            [v for _, v in pts],
+            color=colour,
+            linewidth=1.6,
+            marker="o",
+            markersize=3.5,
+            label=label,
+        )
+        ax.plot(
+            [x[m] for m, _ in oot],
+            [v for _, v in oot],
+            color=colour,
+            linestyle="none",
+            marker="o",
+            markersize=6,
+        )
+    ax.set_xticks(range(len(months)))
+    ax.set_xticklabels(months, rotation=45, ha="right", fontsize=7.5)
+    ax.set_ylim(0.44, 0.86)
+    ax.set_ylabel("ROC-AUC per fold", fontsize=9)
+    ax.set_xlabel("Fold test start month (two month test windows)", fontsize=9)
+    ax.tick_params(axis="y", labelsize=8)
+    ax.grid(axis="y", color="#e6e8ef", linewidth=0.8)
+    ax.set_axisbelow(True)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    ax.legend(fontsize=7.5, loc="upper left", frameon=False)
+    fig.tight_layout()
+    fig.savefig(out / "fold_timeline.png")
+    plt.close(fig)
+
+
+def _fold_shap(rolling_root: Path, run: str) -> dict[str, list[float]]:
+    """Per feature list of mean |SHAP| across a run's fold metrics."""
+    values: dict[str, list[float]] = {}
+    fold_files = sorted((rolling_root / run).glob("fold_*/metrics.json"))
+    if not fold_files:
+        raise FileNotFoundError(f"no fold_*/metrics.json under {rolling_root / run}")
+    for path in fold_files:
+        metrics = json.loads(path.read_text(encoding="utf-8"))
+        for key in ("top_positive_features", "top_negative_features"):
+            for entry in metrics.get(key, []):
+                if entry.get("mean_abs_shap") is not None:
+                    values.setdefault(entry["feature"], []).append(float(entry["mean_abs_shap"]))
+    return values
+
+
+def _fold_signs(rolling_root: Path, run: str) -> dict[str, int]:
+    """+1 / -1 when a logistic run's coefficient sign agrees in every fold, else 0."""
+    counts: dict[str, list[int]] = {}
+    for path in sorted((rolling_root / run).glob("fold_*/metrics.json")):
+        metrics = json.loads(path.read_text(encoding="utf-8"))
+        for key in ("top_positive_features", "top_negative_features"):
+            for entry in metrics.get(key, []):
+                coef = entry.get("coefficient")
+                if coef is None:
+                    continue
+                pos_neg = counts.setdefault(entry["feature"], [0, 0])
+                pos_neg[0 if coef > 0 else 1] += 1
+    signs: dict[str, int] = {}
+    for feature, (pos, neg) in counts.items():
+        signs[feature] = 1 if neg == 0 else (-1 if pos == 0 else 0)
+    return signs
+
+
+def fig_honest_shap(out: Path, rolling_root: str) -> None:
+    """Mean |SHAP| over embargoed folds for the runner up, development beside holdout."""
+    root = Path(rolling_root)
+    dev = _fold_shap(root, HONEST_SHAP_DEV)
+    oot = _fold_shap(root, HONEST_SHAP_OOT)
+    signs = _fold_signs(root, HONEST_SHAP_LOGISTIC)
+    feats = [
+        f for f in sorted(dev, key=lambda f: -sum(dev[f]) / len(dev[f])) if f != "installs_has_data"
+    ]
+    navy, magenta, grey, green = "#1f3b73", "#b03a7a", "#8a8fa3", "#3d8f6b"
+
+    def colour(feature: str) -> str:
+        if not feature.startswith("ghclock_"):
+            return navy
+        return {-1: magenta, 1: green}.get(signs.get(feature, 0), grey)
+
+    fig, axes = plt.subplots(
+        1, 2, figsize=(7.0, 5.0), sharey=True, gridspec_kw={"width_ratios": [1.1, 1]}
+    )
+    ys = list(range(len(feats)))[::-1]
+    panels = (
+        (axes[0], dev, f"{len(next(iter(dev.values())))} embargoed development folds"),
+        (axes[1], oot, f"{len(next(iter(oot.values())))} pre registered holdout folds"),
+    )
+    for ax, data, title in panels:
+        for y, feature in zip(ys, feats, strict=True):
+            vals = data.get(feature, [])
+            if not vals:
+                continue
+            ax.barh(y, sum(vals) / len(vals), color=colour(feature), height=0.62)
+            ax.plot([min(vals), max(vals)], [y, y], color="#333333", linewidth=0.9)
+            ax.plot([min(vals), max(vals)], [y, y], "|", color="#333333", markersize=5)
+        ax.set_title(title, fontsize=9.5)
+        ax.tick_params(axis="x", labelsize=8)
+        ax.grid(axis="x", color="#e6e8ef", linewidth=0.8)
+        ax.set_axisbelow(True)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+    axes[0].set_yticks(ys)
+    axes[0].set_yticklabels([FEATURE_LABELS.get(f, f) for f in feats], fontsize=8)
+    fig.supxlabel(
+        "Mean |SHAP| in each fold: bar = mean over folds, whisker = range across folds",
+        fontsize=8.5,
+        y=0.115,
+    )
+    from matplotlib.patches import Patch  # pyright: ignore[reportMissingImports]
+
+    handles = [
+        Patch(color=magenta, label="Clock, negative coefficient: more recent raises risk"),
+        Patch(color=green, label="Clock, positive coefficient: larger value raises risk"),
+        Patch(color=grey, label="Clock, coefficient sign not stable across folds"),
+        Patch(color=navy, label="Install base family (direction not read from tree SHAP)"),
+    ]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        ncol=2,
+        fontsize=7.5,
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.0),
+    )
+    fig.tight_layout(rect=(0, 0.1, 1, 1))
+    fig.savefig(out / "honest_shap.png")
+    plt.close(fig)
+
+
 FIGURES = {
     "shap_profiles": lambda out, a: fig_shap_profiles(out, a.shap_single_json),
     "shap_single": lambda out, a: fig_shap_single(out, a.shap_single_json),
@@ -467,6 +687,8 @@ FIGURES = {
     "h3_retention": lambda out, a: fig_h3_retention(out, a.h3_model),
     "calibration": lambda out, a: fig_calibration(out, a.pc_model),
     "shap_importance": lambda out, a: fig_shap_importance(out, a.shap_model),
+    "fold_timeline": lambda out, a: fig_fold_timeline(out, a.rolling_root),
+    "honest_shap": lambda out, a: fig_honest_shap(out, a.rolling_root),
 }
 
 
@@ -483,6 +705,9 @@ def main() -> None:
     parser.add_argument("--h3-model", default=H3_MODEL, help="model dir for the H3 retention curve")
     parser.add_argument(
         "--shap-model", default=SHAP_MODEL, help="model dir for the SHAP importance chart"
+    )
+    parser.add_argument(
+        "--rolling-root", default=ROLLING_ROOT, help="rolling backtest results root"
     )
     parser.add_argument("--dpi", type=int, default=300)
     parser.add_argument("--only", nargs="+", choices=sorted(FIGURES), default=None)

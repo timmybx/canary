@@ -144,6 +144,35 @@ and partially right-censored; the train window is authoritative. H1 is
 therefore **not supported as stated**; see praxis Section 4.6, and
 `simpson_stratified.py` below for a direct test of the mechanism.
 
+### Supplementary off hours factors (added September 2026)
+
+Two supplementary factors test the off hours commit fractions that the
+stored-label SHAP analysis had read as protective: any weekend commits
+(`swh_weekend_commit_fraction` > `--offhours-min`, default 0) and any late
+night commits. Both are computed only over rows with at least one archived
+commit (`swh_commit_count` > 0), so an undefined fraction is never read as
+zero. They are not part of H1, so the H1 criterion column prints `n/a` for
+them.
+
+Results (container run, September 2026, 102 month panel; the train-window
+values of the four original factors are unchanged from July, the test window
+now extends to 2026-06):
+
+| Window | Factor | OR | 95% CI | Exposed rate | Unexposed rate |
+|---|---|---|---|---|---|
+| train | weekend commit fraction > 0 | 1.470 | [1.355, 1.595] | 3.87% | 2.67% |
+| train | late night commit fraction > 0 | 1.658 | [1.552, 1.771] | 4.36% | 2.68% |
+| test | weekend commit fraction > 0 | 1.137 | [0.766, 1.687] | 0.70% | 0.62% |
+| test | late night commit fraction > 0 | 2.368 | [1.640, 3.421] | 0.88% | 0.37% |
+
+The direction is the **opposite** of the stored-label SHAP reading: off hours
+commits are associated with higher advisory odds, the same attention
+direction as every other factor in the table (a sign that somebody is working
+on a plugin raises the odds that an advisory is published for it). The
+conditional protective sign from the leaky model is withdrawn; the family
+carries no forward signal under the embargo. See the stratified check below
+for how much of this is attention.
+
 ---
 
 ## simpson_stratified.py — attention-stratified test of the H1 reversal
@@ -180,6 +209,28 @@ stratum. A single activity proxy captures attention only coarsely (the top
 stratum still spans a wide attention range), which is consistent with the
 residual protective association within strata. Mechanism supported; textbook
 label withheld.
+
+### Off hours factors (container run, September 2026; train window)
+
+`--factor weekend` and `--factor late_night` stratify the supplementary
+factors of `h1_odds_ratio.py` the same way (exposed = fraction > 0, over rows
+with at least one archived commit; median nonzero attention = 2 actors).
+
+| Stratum | n | Weekend OR | 95% CI | Late night OR | 95% CI |
+|---|---|---|---|---|---|
+| No observed activity | 73,358 | 1.232 | [1.109, 1.368] | 1.302 | [1.187, 1.428] |
+| Lower activity | 23,225 | 0.933 | [0.795, 1.094] | 1.093 | [0.956, 1.248] |
+| Higher activity | 16,018 | 1.244 | [0.920, 1.681] | 1.309 | [1.078, 1.590] |
+| **All pooled** | 112,601 | **1.470** | [1.355, 1.595] | **1.658** | [1.552, 1.771] |
+
+Stratifying by attention removes most of the pooled association: within
+strata the weekend ratio is 0.93 to 1.24 and only the unwatched stratum is
+clear of 1.0; late night keeps a modest residual (1.09 to 1.31) in two of
+three strata. The off hours signal is therefore mostly a marker of maintained
+projects, with a small late night residual that this check cannot separate
+from historical attention (the fraction is cumulative over the archived
+history while the attention proxy is monthly). Neither the protective reading
+nor the "careless code" reading is supported as stated.
 
 ---
 
@@ -579,6 +630,8 @@ experiments). Requires matplotlib (dev dependency).
 | `shap_profiles.png` | `results/shap_single_model.json` (dependence small-multiples) |
 | `shap_consistency.png` | `results/shap_consistency.json` (stability check) |
 | `shap_importance.png` | `<model>/feature_selection.json` (superseded by shap_single) |
+| `fold_timeline.png` | `rolling_backtest/<run>/rolling_backtest.json` for the three declared configurations (`TIMELINE_SERIES`): per fold ROC-AUC across the 13 embargoed development folds and the 3 pre registered holdout folds |
+| `honest_shap.png` | `rolling_backtest/ghclock_installs_xgb/fold_*/metrics.json` and `oot_runnerup/fold_*/metrics.json` (mean \|SHAP\| per fold); clock colours from the coefficient signs in `ghclock_installs_logistic/fold_*/metrics.json` |
 
 ```bash
 # everything
@@ -589,4 +642,11 @@ docker compose run --rm canary python tools/make_figures.py \
     --only shap_single shap_profiles \
     --shap-single-json data/processed/results/shap_full_model.json \
     --out-dir data/processed/figures/praxis
+
+# honest-layer figures (rolling backtest files only; --rolling-root overrides the root)
+docker compose run --rm canary python tools/make_figures.py \
+    --only fold_timeline honest_shap h1_forest
 ```
+
+`h1_forest.png` now carries six rows (the four H1 factors plus the two
+supplementary off hours factors) with the legend at lower left.
