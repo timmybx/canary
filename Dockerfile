@@ -52,18 +52,63 @@ USER appuser
 
 CMD ["python", "-m", "canary.webapp"]
 
-# pip remains available in the development stage for lockfile generation and
-# other repository tooling, but is not needed by the shipped runtime. Its
-# vendored dependencies are independently indexed by container scanners and
-# can retain vulnerabilities even when application packages are securely
-# pinned. The same applies to virtualenv (a pre-commit dependency), which
-# embeds whole pip wheels for seeding new environments: scanners open those
-# wheels and report the urllib3, msgpack and setuptools copies vendored
-# inside them, whatever the image's own pinned versions are. Neither tool
-# is used at runtime, so both leave with pip.
-FROM development AS runtime
+# ---------------------------------------------------------------------------
+# Runtime stage: the image Render deploys and CI scans.
+#
+# Built from the base image rather than from the development stage so that
+# only the application's locked runtime dependencies (requirements.txt) are
+# present. The development stage additionally carries requirements-dev.txt
+# (pytest, ruff, pyright, bandit, pip-audit, pip-tools, pre-commit, mutmut,
+# atheris, matplotlib and their transitive dependencies), the test suite and
+# jq; none of that is needed to serve the web console or run the CLI, and
+# every package shipped is attack surface a container scanner has to track.
+#
+# pip is needed to perform the hash-checked install and is removed afterwards:
+# its vendored dependencies are indexed by scanners and can carry findings
+# independent of the application's pins.
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f AS runtime
 
-USER root
-RUN python -m pip uninstall --yes pre-commit virtualenv \
- && python -m pip uninstall --yes pip
+WORKDIR /app
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    XDG_CACHE_HOME=/tmp/.cache \
+    PYTHONNOUSERSITE=1
+
+# Pinned build tooling (hash-locked), so the runtime install is verified by
+# the same pip/setuptools/wheel versions as the development stage.
+COPY requirements-build.txt /app/
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --require-hashes -r requirements-build.txt
+
+# OS deps: libatomic1/libgomp1 for xgboost and lightgbm; rsync for the data
+# synchronisation to the Render persistent disk (see DEPLOYMENT.md). jq is a
+# Makefile convenience and stays in the development stage only.
+RUN apt-get update \
+ && apt-get upgrade -y \
+ && apt-get install -y --no-install-recommends libatomic1 libgomp1 rsync \
+ && rm -rf /var/lib/apt/lists/*
+
+# Locked runtime deps only.
+COPY requirements.txt /app/
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --resume-retries 5 --require-hashes -r requirements.txt
+
+# Application source (no tests), installed without dependency resolution.
+COPY canary/ /app/canary/
+COPY data/ /app/data/
+COPY pyproject.toml README.md /app/
+RUN python -m pip install --no-cache-dir -e . --no-deps
+
+# Drop the installer now that the environment is final.
+RUN python -m pip uninstall --yes pip wheel
+
+RUN addgroup --system appgroup \
+ && adduser --system --ingroup appgroup --home /app --shell /bin/sh appuser \
+ && chown -R appuser:appgroup /app
 USER appuser
+
+CMD ["python", "-m", "canary.webapp"]

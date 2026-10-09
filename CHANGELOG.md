@@ -7,6 +7,9 @@ This project follows a lightweight adaptation of “Keep a Changelog”.
 
 ## [Unreleased]
 
+### Changed
+- **Docker: the runtime image carries only the application's locked runtime dependencies.** The `runtime` stage (the image Render deploys and CI scans) is now built from the base image rather than from the `development` stage, so it installs `requirements.txt` only. The development stage is unchanged and still carries `requirements-dev.txt` (pytest, ruff, pyright, bandit, pip-audit, pip-tools, pre-commit, mutmut, atheris, matplotlib and their transitive dependencies), the test suite and `jq`; none of that is needed to serve the web console or run the CLI, and every shipped package is surface a container scanner has to track. The runtime stage keeps `libatomic1`/`libgomp1` (xgboost, lightgbm) and `rsync` (Render disk synchronisation), performs the hash-checked install with the pinned build tooling, and uninstalls `pip` and `wheel` afterwards. The CI smoke tests (`canary --help`, `import canary.webapp`) exercise this image. No application behaviour changes.
+
 ## [0.1.18] - 2026-09-29
 
 ### Fixed

@@ -77,11 +77,11 @@ RUN addgroup --system appgroup \
 USER appuser
 ```
 
-The image also needs `rsync` installed so data can be synchronized to the Render persistent disk:
+Render builds the Dockerfile's final stage, `runtime`, which installs only the locked runtime dependencies (`requirements.txt`) and the application; the test suite, the development tooling in `requirements-dev.txt` and `jq` exist only in the `development` stage that `compose.yaml` targets. The runtime image also needs `rsync` installed so data can be synchronized to the Render persistent disk:
 
 ```dockerfile
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libatomic1 libgomp1 jq rsync \
+ && apt-get install -y --no-install-recommends libatomic1 libgomp1 rsync \
  && rm -rf /var/lib/apt/lists/*
 ```
 
