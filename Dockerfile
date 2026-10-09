@@ -1,4 +1,4 @@
-FROM python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f AS development
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS development
 
 WORKDIR /app
 
@@ -67,7 +67,7 @@ CMD ["python", "-m", "canary.webapp"]
 # its vendored dependencies are indexed by scanners and can carry findings
 # independent of the application's pins.
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f AS runtime
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS runtime
 
 WORKDIR /app
 
