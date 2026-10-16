@@ -18,7 +18,7 @@ dependencies = [
   "waitress>=3.0.2",
   "xgboost>=3.4.1",
   "lightgbm>=4.7.0",
-  "shap>=0.53.0",
+  "shap>=0.54.1",
 ]
 
 [project.scripts]
