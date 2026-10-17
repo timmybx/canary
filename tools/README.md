@@ -24,6 +24,14 @@ docker compose run --rm canary python tools/<script>.py
 | `rolling_backtest.py` | How stable is the honest (embargoed) result across many test windows, not just 2025-05/06? |
 | `enrich_monthly_features.py` | Tier-1 feature families (`advhist_*`, `ghclock_*`) added to the labeled dataset from data already on disk. |
 | `make_figures.py` | Renders praxis/defense figures from the saved artifacts above. |
+| `survivorship_audit.py` | How many advisories in the study window name plugins that are outside the fixed registry snapshot (sampling frame bound)? |
+| `oot_migration_sensitivity.py` | Does the third out-of-time fold hold when the plugins hit by the Dec 2025 JIRA-to-GitHub issue migration are excluded (descriptive, per the panel extension protocol)? |
+| `latest_forecast.py` | Scores the newest panel month with the frozen champion fold model for the web console (inference only). |
+| `run_second_wave_backtests.sh` | (driver) The declared 14-run rolling backtest grid for the second-wave enrichment families. |
+| `filter_monthly_labeled_features.py` | Writes the per-family feature files the ablation driver trains on. |
+| `collect_canary_results.py` | Zips the small per-model result files (metrics, predictions, feature lists) for sharing. |
+| `make_zenodo_bundle.sh` | Builds the reproducibility bundle (datasets, models, results) for the Zenodo upload. |
+| `extract_jenkins_swh_subset.py`, `repartition_swh_tables.py`, `create_swh_athena_tables.py`, `test_athena_connection.py` | One-time Software Heritage / Athena ETL and connectivity checks used during collection; not analysis tools. |
 
 ---
 
@@ -611,6 +619,81 @@ severity columns from every family file — the advisory-family suites were
 trained without them. Fixed to union columns across all rows; the driver's
 advisory family is now `advisory_,advisories_`. Old family files reproduce
 the frozen suites; regenerate (section 0) to get the full columns.
+
+---
+
+## survivorship_audit.py — sampling frame bound (advisories outside the registry snapshot)
+
+*Dataset-level; reads the public advisory archive, not the panel.*
+
+The panel observes one registry snapshot (`data/raw/registry/plugins.jsonl`,
+2,053 plugins, collected 2026-02-28) at every month from 2018-01 to 2026-06.
+Jenkins does not publish historical registry snapshots, so plugins delisted
+or suspended before the snapshot date are outside the sampling frame, and any
+advisories they received are positives the panel never contains. This tool
+bounds that gap. It downloads the advisory index at
+`https://www.jenkins.io/security/advisories/` and each advisory page in the
+window (cached under `data/cache/advisory_pages/`), extracts the
+`plugins.jenkins.io/<id>` links inside each advisory's main content, and
+counts advisory/plugin pairs whose plugin is not in the snapshot. It also
+cross-checks the Update Center feed
+(`https://updates.jenkins.io/update-center.actual.json`), the
+machine-readable list of plugin security warnings, as an independent route
+to the same set of plugins.
+
+```bash
+python tools/survivorship_audit.py
+python tools/survivorship_audit.py --start 2018-01-01 --end 2026-06-30 --skip-update-center
+```
+
+Outputs: `data/processed/results/survivorship_audit.json` (summary, per-year
+breakdown, the outside-frame plugin list, advisories with no plugin links)
+and `survivorship_audit_pairs.csv` (one row per advisory/plugin pair with an
+in-frame flag). Network access is required on the first run; later runs use
+the page cache.
+
+### Results (October 2026, registry snapshot 2026-02-28)
+
+142 advisories in the window name 1,179 advisory/plugin pairs across 731
+distinct plugins. 88 pairs (7.5%) name a plugin outside the snapshot: 70
+distinct plugins, appearing in 52 advisories.
+
+| Year | Pairs | Outside frame |
+|---|---|---|
+| 2018 | 106 | 11 |
+| 2019 | 250 | 23 |
+| 2020 | 173 | 19 |
+| 2021 | 63 | 2 |
+| 2022 | 271 | 24 |
+| 2023 | 165 | 7 |
+| 2024 | 48 | 0 |
+| 2025 | 66 | 2 |
+| 2026 | 37 | 0 |
+
+22 advisories in the window link no plugin at all (core-only advisories, to
+be confirmed by hand) and one (2018-12-05) links only a wiki page. The Update
+Center cross-check finds 1,360 plugin warnings in the window, 115 of them
+(74 distinct plugins) on plugins outside the snapshot; 69 of the 70 plugins
+found from the advisory pages are also in the Update Center set, so the two
+routes agree.
+
+### Interpretation
+
+The excluded set is small (7.5% of pairs) and concentrated in 2018-2023
+(86 of 88), which is consistent with delisting after unresolved advisories.
+It is not a random sample of plugins: a plugin removed after an advisory is,
+by construction, one that had an advisory, so the missing rows are enriched
+for the quiet-with-advisory profile that the H1 reversal and the
+surveillance-bias reading depend on. Including them would most likely
+weaken the protective-looking marginal association of staleness slightly
+rather than strengthen it. The fix is a monthly registry frame rebuilt from
+the installation statistics archive (`stats.jenkins.io`) and Maven release
+history; that is future work (praxis Chapter 5), not a change to the frozen
+v0.1.16 results. Separately, 16% of panel rows (33,700 plugin-months,
+169 of them positive) precede the plugin's first observed GH Archive or
+Software Heritage activity; those rows stay in the panel under the imputation
+rules in `canary/train/baseline.py` and are a coverage issue, not a frame
+issue.
 
 ---
 
