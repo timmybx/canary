@@ -38,6 +38,9 @@ From the registry, CANARY fans out into source-specific collections:
 - `data/raw/jenkins_stats/<plugin_id>.stats.json` — monthly installation trends from stats.jenkins.io, true history to 2008 (`collect installstats`)
 - `data/raw/gharchive/windows/<start>_<end>.gharchive.jsonl` — historical GH Archive window outputs (`collect gharchive`)
 - `data/raw/gharchive/plugins/<plugin_id>.gharchive.jsonl` — per-plugin historical GH Archive timelines (`collect gharchive`)
+- `data/raw/software_heritage_athena/<plugin_id>.swh_athena_{index.json,visits.jsonl}` — Software Heritage visits from the 2025-10-08 graph export via Athena (`collect enrich --only software-heritage`); the reported panel's SWH inputs
+- `data/raw/software_heritage_athena_2026/` — the same extraction from the 2026-06-04 export (archival record; the reported results keep SWH at the 2025-10-08 values, per `docs/panel_extension_protocol.md`)
+- `data/raw/software_heritage_api/` — the earlier REST-API backend's outputs (superseded by the Athena backend)
 
 ## Processed datasets
 
@@ -84,6 +87,19 @@ Column-level documentation lives beside each source: advisory features in
 `data/raw/gharchive/README.md`, Software Heritage features in
 `data/raw/software_heritage_athena/README.md`.
 
+## Models and results
+
+- `data/processed/models/<run>/` — one directory per single-split configuration (Layers 1 and 2
+  and their `_embargo` twins). Naming, file inventory and the model registry's hyperparameters are
+  in `data/processed/models/README.md`.
+- `data/processed/results/rolling_backtest/<run>/` — the embargoed rolling-origin runs (Layer 3
+  development sweep, Layer 4 pre-registered holdout, sensitivity runs), each with a
+  `rolling_backtest.json` and a `fold_<YYYY-MM>/` directory per fold.
+- `data/processed/results/*.json|csv` — analysis outputs written by the scripts in `tools/`
+  (H1 odds ratios, stratified check, Brier scores, SHAP, embargo comparison, survivorship audit,
+  latest forecast). `tools/README.md` documents each one.
+- `data/processed/figures/` — figures rendered by `tools/make_figures.py`.
+
 ## Current integrated workflow
 
 A typical end-to-end flow now looks like this:
@@ -102,10 +118,15 @@ canary build advisories-events
 canary build features \
   --data-raw-dir data/raw \
   --registry data/raw/registry/plugins.jsonl
-canary build monthly-features --start 2024-01 --end 2025-12
+canary collect installstats
+canary build monthly-features --start 2018-01 --end 2026-06
 canary build monthly-labels
 python tools/enrich_monthly_features.py   # attach the enrichment families (--families to subset)
 ```
+
+The reported panel is 2018-01 to 2026-06 (102 months, 2,053 plugins, 209,406 plugin-months),
+built from the registry snapshot collected 2026-02-28. Months whose six-month label window runs
+past the panel end (2026-01 onward) carry no label.
 
 ## Notes on GH Archive collection
 
@@ -115,18 +136,12 @@ python tools/enrich_monthly_features.py   # attach the enrichment families (--fa
 
 ## Notes on feature bundles
 
-The unified feature bundle joins plugin-level signals from:
-
-- registry
-- plugin snapshots
-- advisories
-- healthscore
-- GitHub enrichment
-- GH Archive history
-
-The current feature bundle is a **plugin-level dataset** designed to support
-analysis and to serve as the foundation for a later **time-sliced / ML-ready**
-dataset builder.
+The static feature bundle (`plugins.features.*`) joins plugin-level signals from the
+registry, plugin snapshots, advisories, healthscore, GitHub API enrichment and GH Archive
+history. It feeds the web console's current-state context and the heuristic scorer only;
+no reported model is trained on it, because its GitHub API and healthscore inputs are
+present-day values that would leak into historical rows. The monthly bundle
+(`plugins.monthly.*`) is the modeling dataset.
 
 ## Obsolete material
 
@@ -136,7 +151,7 @@ path for historical collection and dataset building.
 
 ## Plugin alias overrides
 
-Use `data/raw/registry/plugin_aliases.json` to map historical plugin IDs to the current canonical ID when a plugin has been renamed.
+Use `data/raw/registry/plugin_aliases.json` to map historical plugin IDs to the current canonical ID when a plugin has been renamed. The file is currently an empty object: no renames were found among the 2,053 registry plugins (Jenkins plugin IDs are Maven artifact IDs, and a successor plugin such as `warnings-ng` replacing `warnings` is a new ID, handled by the sampling frame rather than by aliasing).
 
 Example:
 

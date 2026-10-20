@@ -16,12 +16,15 @@ for the CANARY prediction task.
 
 Advisory data serves two distinct roles in CANARY:
 
-- **Label source:** Whether a plugin appears in a Jenkins-published advisory within
-  the 180-day window following the observation date determines its ground-truth label
-  (`had_advisory_this_month` / `advisory_count_this_month`).
+- **Label source:** Whether a plugin is named in a Jenkins-published advisory in any
+  of the six calendar months after the observation month (months t+1 through t+6)
+  determines its label (`label_advisory_within_6m`, built positionally from
+  `had_advisory_this_month` / `advisory_count_this_month`).
 - **Predictive features:** Prior advisory history — how many advisories a plugin has
-  received, how severe they were, and how recently they occurred — is among the
-  strongest predictive signals for near-term advisory risk. The intuition is
+  received, how severe they were, and how recently they occurred — is a strong
+  forward signal in most published studies and in PyPI, but not in Jenkins: under the
+  embargoed protocol the advisory-history and advisory-recurrence families score at or
+  below chance there (praxis Chapter 4). The intuition is
   straightforward: plugins that have been vulnerable before tend to carry underlying
   technical debt or maintenance weaknesses that persist over time.
 
@@ -109,8 +112,9 @@ which for this feed-complete source genuinely means zero.
 **Panel-start boundary:** advisories published before the first panel month
 (2018-01) are invisible to the panel calendar, so a plugin whose only
 advisories predate the panel reads as no-history until its first in-panel
-advisory. On the current dataset this affects 3,105 of 197,088 rows (1.6%),
-all in the early panel years; the `advisory_days_since_latest_to_date` column
+advisory. Measured on the 96-month development panel (2018-01 to 2025-12) this
+affected 3,105 of 197,088 rows (1.6%), concentrated in the early panel years (the
+102-month panel adds months at the end only, so the share is of the same order); the `advisory_days_since_latest_to_date` column
 above carries pre-panel recency, so models trained with both see the full
 picture.
 

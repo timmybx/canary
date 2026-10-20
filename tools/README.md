@@ -51,10 +51,13 @@ Consequences for the results in this README:
 - **Dataset-level analyses are unaffected** (`h1_odds_ratio.py`,
   `simpson_stratified.py`): they read the labeled JSONL directly and never
   touch a model. Their result tables below remain current.
-- **Model-derived results predate the correction** (`heuristic_baseline.py`
-  results table, all SHAP outputs) and regenerate after the suite retrain.
-  Use `compare_model_metrics.py` against the pre-correction snapshot to
-  quantify the change.
+- **Model-derived results were regenerated after the July 28 retrain**:
+  `shap_full_model.json` (July 29), `heuristic_baseline.json` and
+  `shap_single_model.json` (July 31), `brier_scores.json` (August 1).
+  `imputation_fix_deltas.json` (`compare_model_metrics.py`) records the
+  before/after change across the suite. The one exception is
+  `shap_consistency.json` (July 27), which predates the retrain; it is the
+  cross-model stability check, not a source of record, and was not rerun.
 
 ---
 
@@ -259,7 +262,7 @@ docker compose run --rm canary python tools/heuristic_baseline.py \
     --json data/processed/results/heuristic_baseline.json
 ```
 
-### Results (July 2026, `xgb_6m_full_cleaned_time` — PRE-CORRECTION; regenerate after retrain)
+### Results (container run, July 31 2026, `xgb_6m_full_cleaned_time`, post zero-fill retrain)
 
 Snapshot 2025-05: 2,053 plugins, 37 positive (component base rate 1.80%).
 (37 is the distinct advisory plugins for this single observation month's
@@ -275,8 +278,8 @@ Ranked comparison at fixed review sizes:
 | k | Heuristic P@k | Heuristic coverage | CANARY P@k | CANARY coverage |
 |---|---|---|---|---|
 | 10 | 0.000 | 0% | 1.000 | 27% |
-| 25 | 0.000 | 0% | 0.920 | 62% |
-| 50 | 0.000 | 0% | 0.620 | 84% |
+| 25 | 0.000 | 0% | 0.880 | 59% |
+| 50 | 0.000 | 0% | 0.640 | 86% |
 | 100 | 0.060 | 16% | 0.350 | 95% |
 
 ### Interpretation
@@ -287,8 +290,11 @@ than random review selection. At the same 629-plugin budget the model
 achieves 3.3x lift and 100% coverage. Ranked by advisory count, the heuristic
 finds **zero** true positives in the top 10, 25, and 50. Advisory history is
 a *feature*; it is a weak *policy*. The multivariate model is what converts
-signals into a useful ranking. The rule itself is model-independent, so only
-the CANARY columns change with the retrain.
+signals into a useful ranking. The rule itself is model-independent; the CANARY
+columns are from the retrained (zero-fill) model and moved by at most 0.04 at any
+k from the pre-correction run. This comparison is on stored labels (Layer 1);
+under the embargo the model columns fall to the base rate and the rule is no
+worse than the model (`embargo_backtest.py`).
 
 ---
 

@@ -19,9 +19,9 @@
 
 CANARY is a research prototype that predicts near-term security advisory risk for Jenkins plugins using publicly observable project signals — commit patterns, governance artifacts, advisory history, and ecosystem metadata.
 
-A live demo is available at **[canary-score.com](https://canary-score.com)**, where you can score any Jenkins plugin, explore pre-trained ML model results across 64 model configurations, compare them with the embargoed **honest evaluation** layer (rolling backtests and the pre-registered out-of-time result), and view validated predictions alongside confirmed security advisories.
+A live demo is available at **[canary-score.com](https://canary-score.com)**. The console is organized by validation layer: the pre-registered out-of-time holdout is the default view, the embargoed rolling backtests and the diagnostic single-split suites sit behind it, every recorded configuration can be explored fold by fold, and the Score tab applies the frozen holdout champion to the newest month of the panel.
 
-The project includes a Docker-based CLI, a publicly deployed web console, collectors for registry/snapshot/advisory/healthscore/GitHub/GHArchive/Software Heritage data, an ML scoring pipeline trained on seven years of historical data, feature selection analysis, operational precision@k evaluation, and an AI-powered explanation feature.
+The project includes a Docker-based CLI, a publicly deployed web console, collectors for registry/snapshot/advisory/install-statistics/healthscore/GitHub/GHArchive/Software Heritage data, a monthly panel of 2,053 plugins from January 2018 to June 2026 (102 months), a four-layer evaluation protocol with a label embargo and a pre-registered holdout, and an AI-powered explanation feature.
 
 > **Dependency source of truth:** `pyproject.toml` is the source of dependency declarations.
 > `requirements*.txt` files are generated lockfiles used for reproducible installs.
@@ -43,34 +43,34 @@ The project includes a Docker-based CLI, a publicly deployed web console, collec
 - ✅ Batch-enriches plugins from the registry with snapshot + advisories + GitHub + healthscore + Software Heritage
 - ✅ Collects historical GitHub activity windows from GH Archive via BigQuery
 - ✅ Collects Software Heritage archival origin/visit/snapshot metadata
+- ✅ Collects per-plugin monthly installation statistics from stats.jenkins.io
 - ✅ Builds a static current-point feature bundle for scoring and reporting
 - ✅ Builds a separate monthly time-bounded feature bundle for modeling
 - ✅ Labels monthly feature rows with future advisory horizons
 - ✅ Builds normalized advisory events for downstream analytics / ML
-- ✅ Trains baseline ML models on labeled monthly rows
-- ✅ Scores a plugin with an ML-backed advisory risk score and interpretable SHAP-based feature drivers
+- ✅ Trains baseline ML models on labeled monthly rows, with an optional label embargo
+- ✅ Attaches seven second-generation feature families to the panel from data already on disk (`tools/enrich_monthly_features.py`)
+- ✅ Runs embargoed rolling-origin backtests and the pre-registered out-of-time holdout (`tools/rolling_backtest.py`)
+- ✅ Scores the newest panel month with the frozen holdout champion (`tools/latest_forecast.py`) and shows drivers per plugin
 - ✅ Provides AI-powered plain-English explanations of scores via Claude or ChatGPT
-- ✅ Validates predictions against confirmed Jenkins security advisories in the case study tab
+- ✅ Shows, for each holdout fold, the top-ranked plugins against the advisories that followed
 - ✅ Runs tests, linting, fuzzing, and security checks in a consistent Docker environment
 
 ---
 
 ## 📌 Current Status
 
-Recent milestones:
-
-- Integrated GH Archive collection into the main `canary collect gharchive` workflow
-- Integrated Software Heritage collection into `collect enrich` and the feature pipeline
-- Split generated features into two clean paths:
-  - `plugins.features.*` for current-point scoring and reporting
-  - `plugins.monthly.features.*` for time-bounded modeling
-- Restricted the monthly dataset to time-bounded feature families only
-- Added future advisory labeling with configurable horizons
-- Added baseline model training outputs and an ML scoring CLI / web-console path
-- Validated historical collection at full-registry scale
-- Successfully collected Software Heritage data for the large majority of registry plugins
-
-That means CANARY now has a cleaner separation between present-day scoring/reporting and historical modeling, with the monthly dataset intentionally limited to time-bounded inputs and the labeled dataset feeding repeatable baseline model runs.
+- Modeling is frozen at **v0.1.16**: no feature, threshold or hyperparameter of the reported
+  configurations has changed since. v0.1.17 recorded the pre-registered out-of-time runs against
+  that frozen code; v0.1.18 and v0.1.19 carry the web console reorganization, figures and
+  sensitivity tooling, documentation, dependency bumps and a runtime-image refactor. The recorded
+  results are the ones reported in the praxis and archived on Zenodo.
+- The panel covers 2,053 plugins over 102 months (January 2018 to June 2026; 209,406 plugin-months),
+  built from one registry snapshot collected 2026-02-28. `tools/survivorship_audit.py` bounds what
+  that fixed frame misses (7.5% of advisory/plugin pairs in the window name delisted plugins).
+- The web console is organized by validation layer (Results / Score a plugin / Explore / PyPI cross-check / About);
+  the stored-label diagnostics remain reachable at `?tab=ml`.
+- Research status and the two-layer reading of the results are in the section of that name below.
 
 ---
 
@@ -153,6 +153,7 @@ flowchart TB
 │   ├── webapp.py                   # Web console WSGI app + routing (serves canary-score.com; runs locally via `canary-web`)
 │   ├── web/                        # Web console internals
 │   │   ├── ui.py                   # CSS and HTML renderers (presentation layer)
+│   │   ├── charts.py / honest_viz.py # Server-rendered SVG charts for the validation-layer views
 │   │   └── services.py             # Plugin-choice cache, live-commit lookup, rate-limit state
 │   ├── plugin_aliases.py           # Canonical plugin-id aliasing used by CLI, scoring, and webapp
 │   ├── collectors/                 # Data collectors
@@ -160,6 +161,7 @@ flowchart TB
 │   │   ├── github_repo.py
 │   │   ├── gharchive_history.py
 │   │   ├── healthscore.py
+│   │   ├── install_stats.py                # stats.jenkins.io monthly installation history
 │   │   ├── jenkins_advisories.py
 │   │   ├── plugin_snapshot.py
 │   │   ├── plugins_registry.py
@@ -168,32 +170,43 @@ flowchart TB
 │   │   └── software_heritage_backend.py    # Backend dispatch (athena | api)
 │   ├── build/                      # Dataset builders / normalizers
 │   │   ├── advisories_events.py
+│   │   ├── enrich_monthly.py        # Second-generation feature families (as-of each month)
 │   │   ├── features_bundle.py
 │   │   ├── monthly_labels.py
 │   │   └── monthly_features.py
 │   ├── train/
-│   │   ├── baseline.py              # Baseline model training
+│   │   ├── baseline.py              # Model training; label embargo; window-feature exclusion
 │   │   ├── feature_selection.py     # SHAP-based feature selection (H3 analysis)
-│   │   └── registry.py              # Model registry
+│   │   ├── forecast.py              # Apply a frozen fold model to the newest panel month
+│   │   └── registry.py              # Model registry (hyperparameters: data/processed/models/README.md)
 │   └── scoring/
 │       ├── baseline.py              # Heuristic scorer (explainable)
 │       └── ml.py                    # ML-backed scorer
+├── tools/                          # Analysis scripts and drivers (see tools/README.md)
+├── crossval/pypi/                  # PyPI cross-ecosystem check (see crossval/pypi/README.md)
+├── docs/
+│   └── panel_extension_protocol.md # Pre-registered out-of-time protocol and its changelog
 ├── fuzzers/
 │   └── jenkins_url_fuzzer.py
 ├── tests/
-├── data/
+├── data/                           # Layout: data/README.md
 │   ├── raw/                        # Collected raw artifacts (generated)
 │   │   ├── registry/
 │   │   ├── plugins/
 │   │   ├── advisories/
 │   │   ├── github/
 │   │   ├── healthscore/
+│   │   ├── jenkins_stats/
 │   │   ├── gharchive/
-│   │   └── software_heritage/
+│   │   ├── software_heritage_api/
+│   │   ├── software_heritage_athena/       # 2025-10-08 export (the reported panel)
+│   │   └── software_heritage_athena_2026/  # 2026-06-04 export (archival record; not in the reported results)
 │   └── processed/                  # Derived datasets / features (generated)
 │       ├── events/
 │       ├── features/
-│       └── models/
+│       ├── models/                 # Single-split runs (see data/processed/models/README.md)
+│       ├── results/                # Analysis outputs; rolling_backtest/<run>/ holds the honest-layer runs
+│       └── figures/
 ├── .github/
 │   └── workflows/
 ├── DEPLOYMENT.md                   # Production deployment notes (canary-score.com)
@@ -215,6 +228,7 @@ Raw:
 - `data/raw/gharchive/windows/<start>_<end>.gharchive.jsonl` — historical GH Archive features by window
 - `data/raw/gharchive/plugins/<plugin>.gharchive.jsonl` — historical GH Archive timeline per plugin
 - `data/raw/gharchive/gharchive_index.json` — GH Archive collection run summary
+- `data/raw/jenkins_stats/<plugin>.stats.json` — monthly installation history from stats.jenkins.io
 - `data/raw/software_heritage_api/<plugin>.swh_{index|origin|visits|latest_visit|snapshot}.json` and `data/raw/software_heritage_athena/<plugin>.swh_athena_index.json` + `data/raw/software_heritage_athena/<plugin>.swh_athena_visits.jsonl` — Software Heritage metadata from API and Athena backends
 
 Processed:
@@ -228,6 +242,9 @@ Processed:
 - `data/processed/features/plugins.monthly.labeled.jsonl` — monthly features with future advisory labels
 - `data/processed/features/plugins.monthly.labeled.csv` — CSV export of labeled monthly rows
 - `data/processed/features/plugins.monthly.labeled.summary.json` — labeled monthly summary
+- `data/processed/features/plugins.monthly.labeled.enriched.jsonl` (+ `.summary.json`) — the panel with the second-generation families attached (`tools/enrich_monthly_features.py`); input to the honest layer
+- `data/processed/results/rolling_backtest/<run>/` — one directory per embargoed rolling-origin run (`rolling_backtest.json` plus a `fold_<YYYY-MM>/` directory per fold with the artifacts below)
+- `data/processed/results/latest_forecast.json` — the frozen champion applied to the newest panel month (Score tab)
 - `data/processed/models/<run>/metrics.json` — model metrics and selected feature columns
 - `data/processed/models/<run>/model.joblib` — trained sklearn pipeline
 - `data/processed/models/<run>/feature_columns.json` — ordered feature contract used by ML scoring
@@ -341,10 +358,13 @@ canary-web
 ```
 
 The web console is publicly deployed at **[canary-score.com](https://canary-score.com)** and can also be run locally. It provides:
-- **Scoring tab** — score any Jenkins plugin with an ML advisory risk score, SHAP-based feature drivers, supporting signals, and an AI-powered plain-English explanation
-- **Machine learning tab** — explore 64 pre-trained model configurations across four algorithms, eight feature sets, and two evaluation strategies — the complete 4×8×2 experiment matrix; includes operational precision@k analysis and feature selection (H3) results
-- **Case study tab** — see top-ranked predictions validated against confirmed Jenkins security advisories with CVE details, severity, and lead time
-- **About tab** — quick-start guide and background on the CANARY methodology
+- **Results** — the four validation layers, with the pre-registered out-of-time holdout as the default view: leaky-versus-embargoed comparison, the 16-fold ROC timeline against the 0.55 criterion, the holdout gain curve, and per-fold top-25 lists against the advisories that followed
+- **Score a plugin** — the CANARY forecast for any plugin from the frozen holdout champion applied to the newest panel month (rank and share of the panel, the uncalibrated score, feature drivers), its honest track record across every forecast date, and current-state context signals labelled as not validated
+- **Explore** — pick a layer, configuration and fold; metrics, fold-aggregated feature drivers with sign agreement, gain and ROC curves, and the top-25 case study for that run
+- **PyPI cross-check** — the second-ecosystem replication of the advisory-history family under the same embargoed protocol
+- **About** — how the layers relate and how to read a rank
+
+The stored-label diagnostics (the 64-configuration single-split suite and its legacy case study) remain reachable at `?tab=ml` and `?tab=casestudy`. `CANARY_WEB_OFFLINE=1` runs the console without live GitHub lookups or AI explanations, for demos.
 
 You can also run it directly inside the container with:
 
@@ -490,7 +510,9 @@ The default target is `label_advisory_within_6m`, and the default output directo
 - `data/processed/models/baseline_6m`
 
 Available model names are `logistic`, `random_forest`, `xgboost`, and `lightgbm`.
-`xgboost` and `lightgbm` require their optional packages to be installed.
+`xgboost` and `lightgbm` require their optional packages to be installed. Hyperparameters are
+fixed in `canary/train/registry.py` and listed in `data/processed/models/README.md`; `--embargo`
+rebuilds training labels as of the forecast date (the honest protocol).
 
 ### 14) Score a plugin with the heuristic scorer
 
@@ -674,23 +696,21 @@ CANARY aims to be reproducible and supply-chain aware:
 
 ## 🧠 How Scoring Works
 
-The primary CANARY score is an ML-backed advisory risk score estimating relative near-term risk: whether a plugin is more or less likely than its peers to appear in a Jenkins security advisory within the next 180 days. The score is produced by gradient-boosted tree models (XGBoost, LightGBM) trained on six years of monthly plugin observations. Scores are model probability outputs in [0, 1] but are not formally calibrated; the validated use is ranking, and risk tiers are a presentation convenience rather than probability thresholds.
+The CANARY score ranks plugins by near-term advisory risk: whether a plugin is more or less likely than its peers to be named in a Jenkins security advisory in the six calendar months after the observation month. The label is a *published advisory*, which is not the same as a vulnerability being present; advisories are written where people are looking, so the score forecasts where advisories will be published.
 
-**Key input signals:**
+**The validated forecast (Score tab).** `tools/latest_forecast.py` applies the frozen holdout champion (logistic regression over the activity-recency clocks and contributor-dynamics families, trained on months before 2025-11 with labels as known 2025-12) to the newest month of the panel. Nothing is retrained and no label is read. The output per plugin is its rank and share of the 2,053-plugin panel, the model's raw score (a probability output in [0, 1] that is **not calibrated**; the validated use is the ranking), and the feature drivers with their direction. The Score tab also shows the plugin's honest track record: its percentile at every recorded forecast date.
 
-- **Software Heritage** — commit staleness, security-fix commit patterns, governance artifacts (`SECURITY.md`, changelogs, CI config), repository age, and revision-history signals
-- **GH Archive** — historical release cadence, pull request activity, contributor diversity, and maintenance regularity
-- **Advisory history** — prior advisory count, recency, and maximum observed CVSS severity
-- **Plugin ecosystem** — dependency risk, Jenkins core version requirements, health score, and security warnings
+**Key input signals of the honest-layer models** (all as-of the observation month):
 
-**Model output:**
+- **Activity recency clocks** (GH Archive) — days since the last human push, any push, release, pull request opened/merged/reviewed, issue opened, tag created
+- **Contributor dynamics** (GH Archive) — active humans in trailing windows, newcomers, departures, turnover, top-contributor share
+- **Install base** (stats.jenkins.io) — scale, trend and ecosystem rank, one-month publication lag respected
 
-- Advisory risk score (0.0–1.0) with Low / Medium / High risk category
-- Top contributing features with SHAP-based direction and value
-- Supporting signals including dependency risk and governance indicators
-- AI-powered plain-English explanation (via Claude or ChatGPT)
+The first-generation families (advisory history, GH Archive monthly counts, Software Heritage snapshot and revision signals, registry metadata) are the inputs to the stored-label diagnostic layer; under the embargo they fall to the base rate (see Research Status).
 
-The `canary score-ml` CLI path loads a trained model from `data/processed/models/<run>/`, builds a current feature vector from collected raw data, and returns an advisory-risk score, category, top drivers, and the aligned feature vector.
+**Current-state context.** The Score tab also shows present-day heuristic signals (dependency advisories, governance files, security warnings). These are labelled *not validated*: they come from the static current-point feature bundle, which no reported model uses.
+
+The `canary score-ml` CLI path loads any trained model from `data/processed/models/<run>/`, builds a current feature vector from collected raw data, and returns the score, top drivers, and the aligned feature vector.
 
 ---
 
@@ -732,7 +752,11 @@ kept as the **historical / diagnostic layer**; the **honest layer** below is the
 - The full 64-model suite and its `_embargo` twin are retained so the inflation can be reproduced
   configuration by configuration (`data/processed/results/embargo_suite_comparison.csv`).
 - Case-study validation (23 of 25 top-ranked predictions confirmed) and the 92.4% feature-selection
-  retention (H3) belong to this layer and are reported as such.
+  retention (H3) belong to this layer and are reported as such. At the honest layer the compression
+  question is answered without the leaky denominator: the 9-feature clock family alone matches or
+  exceeds the 45-feature all-families model (pooled AP ratio 1.05 logistic, 1.30 XGBoost), so the
+  compact model is the better one. The holdout case study (top-25 per fold against the advisories
+  that followed) confirms 5 of 75 slots, consistent with the ~1% base rate and a 4-12% top-25 precision.
 
 ---
 
@@ -753,9 +777,19 @@ kept as the **historical / diagnostic layer**; the **honest layer** below is the
 - [x] Operational precision@k analysis and scenario evaluation
 - [x] Deploy publicly accessible web console (canary-score.com)
 - [x] AI-powered plain-English score explanations (Claude / ChatGPT)
-- [x] Case study tab — validated predictions vs. confirmed advisories
+- [x] Case study: top-ranked predictions vs. the advisories that followed (stored-label layer, then per holdout fold)
 - [x] Complete 64-model experiment matrix across 4 algorithms × 8 feature sets × 2 evaluation strategies
-- [ ] Generalization to OSS ecosystems beyond Jenkins
+- [x] Label-leakage audit; label embargo in the core training path; embargoed twin of the full suite
+- [x] Second-generation feature families from data already on disk; embargoed rolling-origin backtests (13 folds)
+- [x] Pre-registered out-of-time holdout (three folds, July to December 2025) with disclosed sensitivity runs
+- [x] Panel extended to June 2026 (102 months); install-statistics collector
+- [x] Web console reorganized by validation layer; frozen-champion forecast on the newest month
+- [x] Dataset and model artifacts archived on Zenodo (two versions, two-layer reading guide)
+- [x] PyPI cross-ecosystem check of the advisory-history family under the embargoed protocol
+- [x] Survivorship audit of the fixed registry frame against the public advisory archive
+- [ ] PyPI with the activity, contributor and install-base families (the ecosystem-inversion test)
+- [ ] Monthly registry frame (delisted plugins inside the sampling frame)
+- [ ] Probability calibration (reliability analysis, threshold justification)
 - [ ] Longitudinal drift analysis as new advisories are published
 - [ ] Severity-aware scoring (weight predictions by expected CVSS)
 

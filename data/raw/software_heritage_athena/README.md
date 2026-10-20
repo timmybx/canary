@@ -21,9 +21,13 @@ and `revision` all have the same column names and types), so the extraction pipe
 requires no changes beyond pointing at the new database name.
 
 The 2025-10-08 dataset was chosen to support a **longitudinal study spanning
-2018–2025**. The CANARY prediction task observes Jenkins plugins at monthly
-intervals and labels them based on whether a security advisory is published in the
-subsequent 180 days. Using a seven-year observation window rather than a single year
+2018–2025** (the panel was later extended to 2026-06 under
+`docs/panel_extension_protocol.md`, with the Software Heritage inputs held at this
+export's values; a parallel extraction from the 2026-06-04 export lives in
+`data/raw/software_heritage_athena_2026/` as an archival record). The CANARY
+prediction task observes Jenkins plugins at monthly intervals and labels them based
+on whether a security advisory is published in the six calendar months that follow.
+Using a multi-year observation window rather than a single year
 provides substantially more labeled examples, supports temporal cross-validation
 across multiple eras of the Jenkins ecosystem, and allows the study to assess whether
 predictive signals remain stable as development practices evolve (e.g., the
@@ -123,10 +127,10 @@ The script runs four sequential Athena CTAS jobs:
 > environments). It only needs to be run once. All future collector queries scan
 > kilobytes from the extracted tables.
 
-The date window for `jenkins_visits` is **2018-01-01 to 2025-10-01**, covering the
-full seven-year longitudinal study period. Earlier years (2018–2022) provide the
-primary training data; later years (2023–2025) serve as held-out evaluation windows
-for temporal generalizability assessment.
+The date window for `jenkins_visits` is **2018-01-01 to 2025-10-01**, the development-era
+extraction that the reported results use (`--visit-start` / `--visit-end` override it; the
+2026-06-04 export was extracted separately for 2025-10-01 to 2026-06-01). Training and test
+windows are assigned by the evaluation layers, not by this extraction.
 
 ### Important: Athena CTAS and S3 data
 
@@ -244,7 +248,7 @@ WHERE r.directory IS NOT NULL;
 ```
 
 Expected scan: ~200–400 GB (~$1–2). Expected output: substantially more rows than
-the previous ~7,000 given the seven-year observation window.
+the original 2018–2019 extraction's ~7,000 given the multi-year observation window.
 
 > **Note:** The `author` and `committer` identity fields in the SWH ORC export are
 > stored as opaque binary blobs (a custom git-object encoding), not as readable JSON.
@@ -287,21 +291,16 @@ Each query against the extracted tables scans roughly **700 KB** and completes i
 After collection, rebuild the monthly feature bundle covering the full study period:
 
 ```bash
-canary build monthly-features --start 2018-01 --end 2025-09
+canary build monthly-features --start 2018-01 --end 2026-06
 ```
 
-Then retrain using a temporal cross-validation design. A suggested split for the
-longitudinal study:
-
-| Split | Period | Role |
-|-------|--------|------|
-| Train | 2018-01 – 2022-12 | Primary training window |
-| Validation | 2023-01 – 2023-12 | Hyperparameter tuning / threshold selection |
-| Test | 2024-01 – 2025-06 | Final held-out evaluation |
-
-This design allows assessment of whether the model generalizes across a meaningful
-shift in ecosystem practices (pre- vs. post-widespread Dependabot/GitHub Actions
-adoption).
+Evaluation then follows the four-layer protocol (chronological time split, group time
+split, embargoed rolling-origin backtest over 13 development folds 2023-05 to 2025-05,
+and the pre-registered out-of-time holdout 2025-07 to 2025-12). The run commands are in
+`tools/README.md` and the protocol in `docs/panel_extension_protocol.md`. Under the
+embargo the Software Heritage families (`swh_*` levels and `swhdelta_*` deltas) score at
+or below chance; the visit cadence (roughly monthly archive visits) is the likely
+reason, and it is discussed in the praxis.
 
 ---
 
@@ -318,9 +317,9 @@ All tables live in the `swh_jenkins` Glue database.
 | `jenkins_revision` | Minimal `id → directory` join table used by the collector's snapshot directory query |
 | `jenkins_revision_meta` | Commit dates, timezone offsets, and decoded commit messages for all Jenkins revisions |
 
-> **Note on row counts:** Actual row counts will be significantly larger than the
-> previous 2018–2019 extraction due to the seven-year window. Run the sanity check
-> queries in Step 2 after extraction to confirm coverage.
+> **Note on row counts:** Row counts are far larger than the original 2018–2019
+> extraction because of the multi-year window. Run the sanity check queries in
+> Step 2 after extraction to confirm coverage.
 
 ---
 
