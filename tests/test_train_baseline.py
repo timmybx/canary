@@ -290,7 +290,7 @@ def test_rows_to_matrix_basic():
     rows = [{"feat_a": 1.0, "feat_b": 2.0}, {"feat_a": 3.0, "feat_b": None}]
     df = _rows_to_matrix(rows, ["feat_a", "feat_b"])
     assert df.shape == (2, 2)
-    assert df["feat_a"][0] == 1.0
+    assert df.iat[0, 0] == 1.0
     assert bool(pd.isna(df["feat_b"].iloc[1]))
 
 
