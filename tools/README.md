@@ -721,6 +721,8 @@ experiments). Requires matplotlib (dev dependency).
 | `shap_importance.png` | `<model>/feature_selection.json` (superseded by shap_single) |
 | `fold_timeline.png` | `rolling_backtest/<run>/rolling_backtest.json` for the three declared configurations (`TIMELINE_SERIES`): per fold ROC-AUC across the 13 embargoed development folds and the 3 pre registered holdout folds |
 | `honest_shap.png` | `rolling_backtest/ghclock_installs_xgb/fold_*/metrics.json` and `oot_runnerup/fold_*/metrics.json` (mean \|SHAP\| per fold); clock colours from the coefficient signs in `ghclock_installs_logistic/fold_*/metrics.json` |
+| `leakage_timeline.png` | none (schematic): one plugin's training and test rows around the reference forecast date, stored labels beside embargoed labels; praxis Section 3.10.3 and the defense deck |
+| `eval_layers.png` | none (schematic): the four validation layers as train/test cuts on the panel calendar (single-split cuts, 13 embargoed rolling folds, 3 holdout folds); praxis Section 3.10 |
 
 ```bash
 # everything

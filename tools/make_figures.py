@@ -26,6 +26,14 @@ Figures
                            runner up, development beside holdout, clocks coloured
                            by the logistic twin's coefficient sign (from
                            <run>/fold_*/metrics.json)
+    leakage_timeline.png   Schematic of the label leakage and the label embargo
+                           (Section 3.10.3): one plugin's training and test rows
+                           around the reference forecast date, stored labels
+                           beside embargoed labels (no data input)
+    eval_layers.png        Schematic of the four validation layers on the panel
+                           calendar (Section 3.10): the single-split cuts, the 13
+                           embargoed rolling-origin folds and the three
+                           pre registered holdout folds (no data input)
 
 Usage
 -----
@@ -677,7 +685,373 @@ def fig_honest_shap(out: Path, rolling_root: str) -> None:
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# Label leakage / embargo schematic (Section 3.10.3)
+# ---------------------------------------------------------------------------
+
+# One plugin around the reference time split: observation months Dec 2024 to
+# Jun 2025, forecast date 1 Jun 2025 (labels as of 2025-06), advisory published
+# 9 Jul 2025 (the batch date that covered 20 of the 41 test positives). Month
+# index 0 = Dec 2024.
+LEAK_MONTHS = [
+    "Dec\n2024",
+    "Jan\n2025",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec\n2025",
+]
+LEAK_ROWS: list[tuple[int, bool]] = [  # (observation month index, is a test row)
+    (0, False),
+    (1, False),
+    (2, False),
+    (3, False),
+    (4, False),
+    (5, True),
+    (6, True),
+]
+LEAK_FORECAST = 6.0  # left edge of the Jun 2025 column = 1 Jun 2025
+LEAK_ADVISORY = 7.3  # 9 Jul 2025
+LEAK_HORIZON = 6
+
+
+def _leak_label(month: int, is_test: bool, embargoed: bool) -> int:
+    """Positional six month label; under the embargo a training row is positive
+    only if its advisory was published before the forecast date."""
+    in_window = month + 1 <= LEAK_ADVISORY < month + LEAK_HORIZON + 1
+    if embargoed and not is_test:
+        return int(in_window and LEAK_ADVISORY < LEAK_FORECAST)
+    return int(in_window)
+
+
+def _leak_panel(ax, title: str, embargoed: bool, show_ylabels: bool) -> None:
+    train_c, test_c, grid = "#4a6fa5", "#c26b2f", "#d0d0d0"
+    n = len(LEAK_ROWS)
+    ax.set_title(title, fontsize=10, loc="left", pad=8)
+    for i, (m, is_test) in enumerate(LEAK_ROWS):
+        y = n - 1 - i
+        colour = test_c if is_test else train_c
+        ax.plot(m + 0.5, y, marker="o", ms=5, color=colour, zorder=4)
+        x0, x1 = m + 1, m + LEAK_HORIZON + 1
+        known_end = min(x1, LEAK_FORECAST)
+        if known_end > x0:
+            ax.barh(
+                y,
+                known_end - x0,
+                left=x0,
+                height=0.5,
+                color=colour,
+                alpha=0.35,
+                edgecolor=colour,
+                linewidth=0.8,
+                zorder=2,
+            )
+        if x1 > LEAK_FORECAST:
+            start = max(x0, LEAK_FORECAST)
+            ax.barh(
+                y,
+                x1 - start,
+                left=start,
+                height=0.5,
+                facecolor="white",
+                edgecolor=colour,
+                hatch="////",
+                linewidth=0.8,
+                zorder=2,
+            )
+        ax.text(
+            len(LEAK_MONTHS) + 0.6,
+            y,
+            str(_leak_label(m, is_test, embargoed)),
+            va="center",
+            ha="center",
+            fontsize=10,
+            fontweight="bold",
+        )
+    ax.axvline(LEAK_FORECAST, color="black", linewidth=1.2, zorder=3)
+    ax.text(
+        LEAK_FORECAST - 0.15,
+        n + 0.05,
+        "forecast date\n1 Jun 2025",
+        ha="right",
+        va="bottom",
+        fontsize=8,
+    )
+    ax.axvline(LEAK_ADVISORY, color="black", linestyle=":", linewidth=1.2, zorder=3)
+    ax.text(
+        LEAK_ADVISORY + 0.15,
+        n + 0.05,
+        "advisory published\n9 Jul 2025",
+        ha="left",
+        va="bottom",
+        fontsize=8,
+    )
+    ax.text(
+        len(LEAK_MONTHS) + 0.6,
+        n - 0.4,
+        "label",
+        ha="center",
+        va="bottom",
+        fontsize=8,
+        fontstyle="italic",
+    )
+    ax.set_xlim(0, len(LEAK_MONTHS) + 1.2)
+    ax.set_ylim(-0.7, n + 1.1)
+    ax.set_xticks([i + 0.5 for i in range(len(LEAK_MONTHS))])
+    ax.set_xticklabels(LEAK_MONTHS, fontsize=7.5)
+    ax.set_yticks([n - 1 - i for i in range(n)])
+    if show_ylabels:
+        ax.set_yticklabels(
+            [
+                ("test row " if t else "training row ") + LEAK_MONTHS[m].replace("\n", " ")
+                for m, t in LEAK_ROWS
+            ],
+            fontsize=8,
+        )
+    else:
+        ax.set_yticklabels([])
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    ax.grid(axis="x", color=grid, linewidth=0.5, zorder=0)
+    ax.tick_params(axis="y", length=0)
+
+
+def fig_leakage_timeline(out: Path) -> None:
+    """Stored labels beside embargoed labels for one plugin around the forecast date."""
+    from matplotlib.patches import Patch  # pyright: ignore[reportMissingImports]
+
+    fig, axes = plt.subplots(1, 2, figsize=(9.6, 3.6))
+    _leak_panel(axes[0], "(a) Stored labels, built from the full advisory feed", False, True)
+    _leak_panel(axes[1], "(b) Embargoed labels, rebuilt as of the forecast date", True, False)
+    handles = [
+        Patch(
+            facecolor="#4a6fa5",
+            alpha=0.35,
+            edgecolor="#4a6fa5",
+            label="training row: six month label window",
+        ),
+        Patch(
+            facecolor="#c26b2f",
+            alpha=0.35,
+            edgecolor="#c26b2f",
+            label="test row: six month label window",
+        ),
+        Patch(
+            facecolor="white",
+            edgecolor="black",
+            hatch="////",
+            label="part of the window after the forecast date",
+        ),
+    ]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        ncol=3,
+        fontsize=8,
+        frameon=False,
+        bbox_to_anchor=(0.5, -0.02),
+    )
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    fig.savefig(out / "leakage_timeline.png", bbox_inches="tight")
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Validation layers on the panel calendar (Section 3.10)
+# ---------------------------------------------------------------------------
+
+
+def _mi(year: int, month: int) -> int:
+    """Month index on the panel calendar, Jan 2018 = 0."""
+    return (year - 2018) * 12 + (month - 1)
+
+
+# Fold design, as recorded: Layer 1 and 2 test on May/Jun 2025; Layer 3 origins
+# May 2023 to May 2025 stepping two months (13 folds); Layer 4 origins Jul, Sep,
+# Nov 2025 (the pre registered holdout). Every fold trains from Jan 2018.
+EVAL_L12_TEST = _mi(2025, 5)
+EVAL_L3_ORIGINS = [_mi(2023, 5) + 2 * k for k in range(13)]
+EVAL_L4_ORIGINS = [_mi(2025, 7), _mi(2025, 9), _mi(2025, 11)]
+EVAL_X_END = _mi(2025, 12) + 1
+
+
+def fig_eval_layers(out: Path) -> None:
+    """The four validation layers as train/test cuts on the panel calendar."""
+    from matplotlib.lines import Line2D  # pyright: ignore[reportMissingImports]
+    from matplotlib.patches import Patch  # pyright: ignore[reportMissingImports]
+
+    train_c, test_c, unused_c, grid = "#4a6fa5", "#c26b2f", "#bfbfbf", "#d9d9d9"
+    prereg = EVAL_L4_ORIGINS[0]
+    # (row label, train end (exclusive), test start or None, kind)
+    rows: list[tuple[str, int, int | None, str]] = [
+        ("Layer 1  chronological time split", EVAL_L12_TEST, EVAL_L12_TEST, "train"),
+        ("Layer 2  group time split, 80% of plugins", EVAL_L12_TEST, None, "train"),
+        ("Layer 2  group time split, 20% held out", EVAL_L12_TEST, EVAL_L12_TEST, "unused"),
+    ]
+    for k, o in enumerate(EVAL_L3_ORIGINS):
+        rows.append((f"Layer 3  fold {k + 1}" if k in (0, 12) else "", o, o, "embargo"))
+    for k, o in enumerate(EVAL_L4_ORIGINS):
+        rows.append((f"Layer 4  holdout fold {k + 1}", o, o, "embargo"))
+
+    fig, ax = plt.subplots(figsize=(9.6, 5.4))
+    n = len(rows)
+    h = 0.62
+    for i, (label, te, xs, kind) in enumerate(rows):
+        y = n - 1 - i
+        if kind == "unused":
+            ax.barh(
+                y,
+                te,
+                left=0,
+                height=h,
+                facecolor="white",
+                edgecolor=unused_c,
+                hatch="////",
+                linewidth=0.6,
+                zorder=2,
+            )
+        else:
+            ax.barh(
+                y,
+                te,
+                left=0,
+                height=h,
+                color=train_c,
+                alpha=0.35,
+                edgecolor=train_c,
+                linewidth=0.6,
+                zorder=2,
+            )
+        if xs is not None:
+            ax.barh(
+                y,
+                2,
+                left=xs,
+                height=h,
+                color=test_c,
+                alpha=0.85,
+                edgecolor=test_c,
+                linewidth=0.6,
+                zorder=3,
+            )
+        if kind == "embargo" and xs is not None:
+            fx = xs + 1  # forecast date: first day of the month after the origin
+            ax.plot(
+                [fx, fx],
+                [y - h / 2 - 0.08, y + h / 2 + 0.08],
+                color="black",
+                linewidth=1.3,
+                zorder=4,
+            )
+        if label:
+            ax.text(-1.2, y, label, ha="right", va="center", fontsize=8)
+
+    def bracket(i0: int, i1: int, text: str, va: str = "center", dy: float = 0.0) -> None:
+        y0, y1 = n - 1 - i1, n - 1 - i0
+        ax.plot(
+            [EVAL_X_END + 1.0] * 2,
+            [y0 - 0.35, y1 + 0.35],
+            color="black",
+            linewidth=0.8,
+            clip_on=False,
+        )
+        ax.text(
+            EVAL_X_END + 2.0,
+            (y0 + y1) / 2 + dy,
+            text,
+            ha="left",
+            va=va,
+            fontsize=7.5,
+            clip_on=False,
+        )
+
+    bracket(
+        0,
+        0,
+        "train Jan 2018 to Apr 2025, test May and Jun 2025\n(4,106 rows, 77 positives)",
+        va="bottom",
+        dy=-0.4,
+    )
+    bracket(1, 2, "same cut; 389 held out plugins\n(778 rows, 17 positives)", va="top", dy=0.2)
+    bracket(
+        3,
+        15,
+        "13 folds, origins May 2023 to May 2025,\nstep 2 months, expanding window,\n"
+        "labels rebuilt as of each origin\n(pooled 53,378 rows, 760 positives)",
+    )
+    bracket(16, 18, "3 folds, Jul to Dec 2025,\nrun once, first result reported\n(127 positives)")
+
+    ax.axvline(prereg, color="black", linestyle="--", linewidth=1.0, zorder=5)
+    ax.text(
+        prereg - 0.6,
+        n + 0.15,
+        "pre registration\nboundary (Jul 2025)",
+        ha="right",
+        va="bottom",
+        fontsize=7.5,
+    )
+    ax.set_title(
+        "Panel months Jan 2018 to Dec 2025 (rows for Jan to Jun 2026 carry no label)",
+        fontsize=8.5,
+        loc="left",
+        color="#444444",
+        pad=22,
+    )
+    ax.set_xlim(-0.5, EVAL_X_END + 0.5)
+    ax.set_ylim(-0.8, n + 1.4)
+    years = list(range(2018, 2026))
+    ax.set_xticks([_mi(y, 1) for y in years])
+    ax.set_xticklabels([str(y) for y in years], fontsize=8)
+    ax.set_xticks([_mi(y, m) for y in years for m in (4, 7, 10)], minor=True)
+    ax.set_yticks([])
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    ax.grid(axis="x", which="major", color=grid, linewidth=0.6, zorder=0)
+    ax.grid(axis="x", which="minor", color=grid, linewidth=0.3, zorder=0)
+    ax.tick_params(axis="x", which="minor", length=0)
+
+    handles = [
+        Patch(facecolor=train_c, alpha=0.35, edgecolor=train_c, label="training months"),
+        Patch(facecolor=test_c, alpha=0.85, edgecolor=test_c, label="test window (two months)"),
+        Patch(
+            facecolor="white",
+            edgecolor=unused_c,
+            hatch="////",
+            label="held out plugins' earlier months (unused)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color="black",
+            linewidth=1.3,
+            label=(
+                "forecast date (first day after the origin month): training labels rebuilt as of it"
+            ),
+        ),
+    ]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        ncol=2,
+        fontsize=7.5,
+        frameon=False,
+        bbox_to_anchor=(0.5, -0.01),
+    )
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
+    fig.savefig(out / "eval_layers.png", bbox_inches="tight")
+    plt.close(fig)
+
+
 FIGURES = {
+    "eval_layers": lambda out, a: fig_eval_layers(out),
+    "leakage_timeline": lambda out, a: fig_leakage_timeline(out),
     "shap_profiles": lambda out, a: fig_shap_profiles(out, a.shap_single_json),
     "shap_single": lambda out, a: fig_shap_single(out, a.shap_single_json),
     "shap_consistency": lambda out, a: fig_shap_consistency(out, a.shap_consistency_json),
