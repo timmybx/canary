@@ -89,10 +89,10 @@ flowchart TB
     %% ---- Public sources ----
     subgraph SOURCES["Public Data Sources"]
         direction LR
-        JENKINS["Jenkins<br/>Registry & Advisories"]:::source
+        JENKINS["Jenkins<br/>Registry, Advisories<br/>& Install Statistics"]:::source
         GH["GitHub Archive"]:::source
         SWH["Software Heritage"]:::source
-        META["Plugin / Repository<br/>Metadata"]:::source
+        META["Plugin Site / GitHub API<br/>Metadata (current state)"]:::source
     end
 
     %% ---- Collection ----
@@ -739,6 +739,12 @@ kept as the **historical / diagnostic layer**; the **honest layer** below is the
   clocks alone 0.638 — every fold above the pre-specified 0.55 criterion. One encoding defect
   found by the reproduction check is disclosed in the protocol with a pre-declared sensitivity
   run (dev +0.005, out-of-time −0.002).
+- Uncertainty and calibration (`tools/honest_uncertainty.py`, recorded predictions only): plugin-level
+  bootstrap intervals clear 0.55 for every declared configuration on the development folds
+  (champion 0.638 [0.585, 0.690]); on the holdout the champion's interval is [0.565, 0.764], the
+  runner-up's [0.552, 0.697] and the baseline's [0.545, 0.723]. The scores are rankings, not
+  probabilities: the logistic champion's mean score is 0.50 against an observed rate of 0.014
+  (Brier skill −18, ECE 0.48), so no honest-layer score should be read as a probability.
 - Interpretation: weak but measurable discrimination, validated out of time — not strong
   operational triage. Top-25 precision stays at 4–12% against a ~1% base rate; CANARY is a triage
   signal, not evidence that a component is vulnerable.
@@ -787,9 +793,10 @@ kept as the **historical / diagnostic layer**; the **honest layer** below is the
 - [x] Dataset and model artifacts archived on Zenodo (two versions, two-layer reading guide)
 - [x] PyPI cross-ecosystem check of the advisory-history family under the embargoed protocol
 - [x] Survivorship audit of the fixed registry frame against the public advisory archive
+- [x] Bootstrap intervals (plugin-level) and reliability analysis for the honest layer from recorded predictions: the scores are rankings, not calibrated probabilities
 - [ ] PyPI with the activity, contributor and install-base families (the ecosystem-inversion test)
 - [ ] Monthly registry frame (delisted plugins inside the sampling frame)
-- [ ] Probability calibration (reliability analysis, threshold justification)
+- [ ] Post-hoc calibration (Platt or isotonic, fitted on development folds) and a declared threshold against a review budget
 - [ ] Longitudinal drift analysis as new advisories are published
 - [ ] Severity-aware scoring (weight predictions by expected CVSS)
 
