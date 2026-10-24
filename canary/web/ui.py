@@ -975,7 +975,8 @@ def _render_forecast_card(
         "</div>"
         f"{drivers_html}"
         "<p style='color:var(--muted);font-size:.82rem;margin:.8rem 0 0'>Read the rank, not the "
-        "probability: the model's scores are not calibrated to the 1 percent base rate. Across the "
+        "score. The score is the model's raw output and is not a probability: on the holdout the "
+        "champion's mean score is about 0.5 against an observed advisory rate of 1 percent. Across the "
         "pre-registered holdout, reviewing the top fifth of plugins by this ranking caught about "
         "half of the advisories that followed.</p>"
         "</section>"
@@ -1135,6 +1136,26 @@ def _render_feature_columns_panel(feature_columns: Any) -> str:
 
 
 _METRIC_TIPS: dict[str, str] = {
+    # --- Score tab ---
+    "Score": (
+        "The model's raw output in [0, 1], used only to rank plugins. It is not a probability: "
+        "on the honest layer the champion's mean score is about 0.5 against an observed advisory "
+        "rate of about 1 percent (negative Brier skill; tools/honest_uncertainty.py). Read the rank."
+    ),
+    "95% interval": (
+        "Percentile interval from a bootstrap that resamples plugins (not rows) with replacement, "
+        "2,000 draws, so a plugin's months stay together. Computed from the recorded predictions "
+        "by tools/honest_uncertainty.py; nothing is retrained."
+    ),
+    "Brier skill": (
+        "1 minus Brier score over the Brier score of always predicting the base rate. Positive "
+        "means the scores carry probability information beyond the base rate; strongly negative "
+        "means the scores are far from the observed rates and must be read as ranks only."
+    ),
+    "ECE": (
+        "Expected calibration error: the average gap between mean score and observed advisory "
+        "rate over ten equal-count score deciles. 0 is perfect calibration."
+    ),
     # --- Honest-evaluation tab (rolling backtests) ---
     "Pooled ROC-AUC": (
         "ROC-AUC computed once over the concatenated test predictions of every fold, rather than "
@@ -3391,6 +3412,71 @@ def _render_honest_oot_card(runs: list[dict[str, Any]]) -> str:
     )
 
 
+def _render_honest_uncertainty_card(
+    runs: list[dict[str, Any]], uncertainty: dict[str, Any] | None
+) -> str:
+    """Bootstrap intervals and calibration for the honest-layer runs, from
+    results/honest_uncertainty.json (tools/honest_uncertainty.py). Nothing here is
+    retrained; the point estimates are the recorded pooled values."""
+    if not uncertainty or not uncertainty.get("runs"):
+        return ""
+    by_name = {str(r.get("run_name")): r for r in runs}
+    rows = []
+    for item in uncertainty["runs"]:
+        run = by_name.get(str(item.get("run")))
+        label = _honest_run_label_html(run) if run else _escape(item.get("run"))
+        model = _honest_model_html(run.get("model_name")) if run else ""
+        kind = "holdout" if str(item.get("run", "")).startswith("oot_") else "development"
+        point = item.get("point") or {}
+        boot = item.get("bootstrap") or {}
+        cal = item.get("calibration") or {}
+        roc_ci = boot.get("roc_auc") or {}
+        lift_ci = boot.get("ap_lift_over_base_rate") or {}
+        rows.append(
+            "<tr>"
+            f"<td style='padding:.4rem .6rem'><strong>{label}</strong> {model}"
+            f"<br><span style='color:var(--muted);font-size:.82rem'>{_escape(item.get('run'))} · {kind}, "
+            f"{int(item.get('n_rows') or 0):,} rows, {int(item.get('n_positive') or 0)} positives</span></td>"
+            f"<td style='padding:.4rem .6rem;text-align:right'><strong>{_fmt_metric(point.get('roc_auc'), 3)}</strong></td>"
+            f"<td style='padding:.4rem .6rem;text-align:right;white-space:nowrap'>{_fmt_metric(roc_ci.get('ci95_low'), 3)} – {_fmt_metric(roc_ci.get('ci95_high'), 3)}</td>"
+            f"<td style='padding:.4rem .6rem;text-align:right'>{_fmt_metric(point.get('ap_lift_over_base_rate'), 2)}×</td>"
+            f"<td style='padding:.4rem .6rem;text-align:right;white-space:nowrap'>{_fmt_metric(lift_ci.get('ci95_low'), 2)} – {_fmt_metric(lift_ci.get('ci95_high'), 2)}</td>"
+            f"<td style='padding:.4rem .6rem;text-align:right;white-space:nowrap'>{_fmt_metric(cal.get('mean_predicted'), 2)} / {_fmt_metric(cal.get('observed_rate'), 3)}</td>"
+            f"<td style='padding:.4rem .6rem;text-align:right'>{_fmt_metric(cal.get('brier_skill_score'), 1)}</td>"
+            f"<td style='padding:.4rem .6rem;text-align:right'>{_fmt_metric(cal.get('ece_quantile_bins'), 2)}</td>"
+            "</tr>"
+        )
+    return (
+        "<div class='card' style='margin-bottom:1rem'>"
+        "<p class='eyebrow'>Uncertainty and calibration</p>"
+        "<p style='color:var(--muted);font-size:.92rem;margin:.1rem 0 .6rem'>Intervals come from a "
+        "bootstrap that resamples plugins with replacement over the recorded test predictions "
+        f"({int(uncertainty.get('resamples') or 0):,} draws); nothing is retrained. On the development "
+        "folds every declared configuration's interval clears the 0.55 criterion. On the holdout, with "
+        "127 positives, the intervals are wide: the champion clears 0.55, the runner-up by a hair, and "
+        "the baseline's interval includes it. The scores themselves are not probabilities: balanced "
+        "class weights put the champion's mean score near 0.5 against an observed rate near 0.01 "
+        "(negative Brier skill), so every number on this site is a rank and the score column is "
+        "shown for completeness only.</p>"
+        "<table style='width:100%;border-collapse:collapse;font-size:.9rem'>"
+        "<thead><tr>"
+        f"<th style='text-align:left;padding:.4rem .6rem'>{_tip('Feature set')}</th>"
+        f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('Pooled ROC-AUC')}</th>"
+        f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('95% interval')}</th>"
+        f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('AP lift')}</th>"
+        f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('95% interval')}</th>"
+        f"<th style='text-align:right;padding:.4rem .6rem'>mean {_tip('Score')} / observed rate</th>"
+        f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('Brier skill')}</th>"
+        f"<th style='text-align:right;padding:.4rem .6rem'>{_tip('ECE')}</th>"
+        "</tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+        "<p style='color:var(--muted);font-size:.82rem;margin:.6rem 0 0'>Produced by "
+        "<code>tools/honest_uncertainty.py</code>; the reliability figure is "
+        "<code>tools/make_figures.py --only honest_reliability</code>.</p>"
+        "</div>"
+    )
+
+
 def _render_honest_fold_table(run: dict[str, Any]) -> str:
     rows = []
     for fold in run.get("folds") or []:
@@ -3770,6 +3856,7 @@ def _render_honest_tab(runs: list[dict[str, Any]], viz: dict[str, Any] | None = 
         + champion_html
         + _render_honest_timeline_card(viz)
         + _render_honest_oot_card(runs)
+        + _render_honest_uncertainty_card(runs, viz.get("uncertainty"))
         + _render_honest_holdout_curves_card(viz.get("curves") or [])
         + _render_honest_ladder_card(viz)
         + table
@@ -3858,9 +3945,10 @@ def _render_about_tab() -> str:
         '<p style="margin-top:.4rem;font-size:.9rem;color:var(--muted)">'
         "The <strong>CANARY forecast</strong> is the frozen champion configuration applied to "
         "the newest month of the panel. Read it as a <strong>rank</strong>: where the plugin "
-        "sits among every scored plugin, and what share of the panel scores above it. The raw "
-        "probability is shown for completeness but is not calibrated to the roughly 1 percent "
-        "monthly base rate. Across the pre-registered holdout, reviewing the top fifth of "
+        "sits among every scored plugin, and what share of the panel scores above it. The score "
+        "itself is the model's raw output, shown for completeness; it is a ranking value and not a "
+        "probability (the honest-layer scores are not calibrated: see the uncertainty and "
+        "calibration card on the Results tab). Across the pre-registered holdout, reviewing the top fifth of "
         "plugins by this ranking would have caught about half of the advisories that followed, "
         "so a high rank is a reason to look, not a finding that something is wrong.</p>"
         '<p style="margin-top:.6rem;font-size:.9rem;color:var(--muted)">'

@@ -34,6 +34,9 @@ Figures
                            calendar (Section 3.10): the single-split cuts, the 13
                            embargoed rolling-origin folds and the three
                            pre registered holdout folds (no data input)
+    honest_reliability.png Observed advisory rate by score decile and the
+                           reliability curve for the honest-layer configurations
+                           (from results/honest_uncertainty.json)
 
 Usage
 -----
@@ -1049,7 +1052,90 @@ def fig_eval_layers(out: Path) -> None:
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# Honest-layer reliability (tools/honest_uncertainty.py output)
+# ---------------------------------------------------------------------------
+
+HONEST_UNCERTAINTY_JSON = "data/processed/results/honest_uncertainty.json"
+RELIABILITY_RUNS = [  # (run name, label, colour)
+    ("oot_champion", "champion: clocks + contributor dynamics (logistic), holdout", "#1f3b73"),
+    ("oot_runnerup", "runner up: clocks + install base (XGBoost), holdout", "#b03a7a"),
+    ("ghclock_ghdyn_logistic", "champion, development folds", "#8a8fa3"),
+]
+
+
+def fig_honest_reliability(out: Path, src: str) -> None:
+    """Left: observed advisory rate per score decile against the base rate (does the
+    ranking carry signal). Right: mean predicted score against observed rate per
+    decile with the diagonal (are the scores probabilities)."""
+    data = json.loads(Path(src).read_text(encoding="utf-8"))
+    runs = {r["run"]: r for r in data["runs"]}
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9.6, 3.8))
+    n_series = len(RELIABILITY_RUNS)
+    width = 0.8 / n_series
+    for i, (name, label, colour) in enumerate(RELIABILITY_RUNS):
+        r = runs.get(name)
+        if r is None:
+            continue
+        bins = r["calibration"]["reliability_bins"]
+        x = [b["bin"] + 1 for b in bins]
+        obs = [100 * b["observed_rate"] for b in bins]
+        pred = [b["mean_predicted"] for b in bins]
+        ax1.bar(
+            [xx + (i - (n_series - 1) / 2) * width for xx in x],
+            obs,
+            width=width,
+            color=colour,
+            alpha=0.85,
+            label=label,
+        )
+        ax2.plot(pred, [o / 100 for o in obs], marker="o", ms=4, color=colour, label=label)
+        base = 100 * r["calibration"]["observed_rate"]
+        ax1.axhline(base, color=colour, linestyle=":", linewidth=1.0)
+    ax1.set_xlabel("score decile (1 = lowest scores, 10 = highest)")
+    ax1.set_ylabel("observed advisory rate in decile (%)")
+    ax1.set_xticks(range(1, 11))
+    ax1.set_title(
+        "(a) Advisory rate by score decile; dotted lines are each run's base rate",
+        fontsize=9,
+        loc="left",
+    )
+    ax1.legend(fontsize=7, frameon=False, loc="upper left")
+    lim = 1.0
+    ax2.plot(
+        [0, lim],
+        [0, lim],
+        color="black",
+        linewidth=0.8,
+        linestyle="--",
+        label="perfect calibration",
+    )
+    ax2.set_xlim(0, lim)
+    ax2.set_ylim(0, 0.06)
+    ax2.set_xlabel("mean predicted score in decile")
+    ax2.set_ylabel("observed advisory rate in decile")
+    ax2.set_title("(b) Reliability: predicted score against observed rate", fontsize=9, loc="left")
+    ax2.text(
+        0.98,
+        0.055,
+        "scores sit far above the observed rates:\n"
+        "the ranking carries signal,\nthe values are not probabilities",
+        ha="right",
+        va="top",
+        fontsize=7.5,
+        color="#444444",
+    )
+    for ax in (ax1, ax2):
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        ax.grid(axis="y", color="#e0e0e0", linewidth=0.5, zorder=0)
+    fig.tight_layout()
+    fig.savefig(out / "honest_reliability.png", bbox_inches="tight")
+    plt.close(fig)
+
+
 FIGURES = {
+    "honest_reliability": lambda out, a: fig_honest_reliability(out, a.honest_uncertainty_json),
     "eval_layers": lambda out, a: fig_eval_layers(out),
     "leakage_timeline": lambda out, a: fig_leakage_timeline(out),
     "shap_profiles": lambda out, a: fig_shap_profiles(out, a.shap_single_json),
@@ -1083,6 +1169,7 @@ def main() -> None:
     parser.add_argument(
         "--rolling-root", default=ROLLING_ROOT, help="rolling backtest results root"
     )
+    parser.add_argument("--honest-uncertainty-json", default=HONEST_UNCERTAINTY_JSON)
     parser.add_argument("--dpi", type=int, default=300)
     parser.add_argument("--only", nargs="+", choices=sorted(FIGURES), default=None)
     args = parser.parse_args()

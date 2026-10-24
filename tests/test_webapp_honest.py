@@ -380,3 +380,76 @@ def test_render_honest_tab_explains_every_pill_and_header() -> None:
         "Positives / rows",
     ):
         assert f">{key}</span>" in html, key
+
+
+def test_render_honest_uncertainty_card() -> None:
+    from canary.web.ui import _render_honest_uncertainty_card
+
+    runs = [
+        {
+            **_run_payload(pooled_roc=0.67, prefixes=["ghclock_", "ghdyn_"]),
+            "run_name": "oot_champion",
+        },
+    ]
+    payload = {
+        "resamples": 2000,
+        "runs": [
+            {
+                "run": "oot_champion",
+                "n_rows": 12318,
+                "n_positive": 127,
+                "point": {
+                    "roc_auc": 0.6703,
+                    "average_precision": 0.0393,
+                    "ap_lift_over_base_rate": 3.81,
+                },
+                "bootstrap": {
+                    "roc_auc": {"ci95_low": 0.565, "ci95_high": 0.764},
+                    "ap_lift_over_base_rate": {"ci95_low": 2.02, "ci95_high": 9.0},
+                },
+                "calibration": {
+                    "mean_predicted": 0.478,
+                    "observed_rate": 0.0103,
+                    "brier_skill_score": -22.4,
+                    "ece_quantile_bins": 0.468,
+                },
+            }
+        ],
+    }
+    html = _render_honest_uncertainty_card(runs, payload)
+    assert "Uncertainty and calibration" in html
+    assert "0.565" in html and "0.764" in html
+    assert "2,000" in html
+    assert "-22.4" in html
+    assert "holdout" in html
+    assert _render_honest_uncertainty_card(runs, None) == ""
+    assert _render_honest_uncertainty_card(runs, {"runs": []}) == ""
+
+
+def test_render_honest_tab_includes_uncertainty_card_from_viz() -> None:
+    runs = [{**_run_payload(pooled_roc=0.62, prefixes=["ghclock_"]), "run_name": "champ"}]
+    viz = {
+        "uncertainty": {
+            "resamples": 10,
+            "runs": [
+                {
+                    "run": "champ",
+                    "n_rows": 10,
+                    "n_positive": 1,
+                    "point": {"roc_auc": 0.62, "ap_lift_over_base_rate": 1.5},
+                    "bootstrap": {
+                        "roc_auc": {"ci95_low": 0.5, "ci95_high": 0.7},
+                        "ap_lift_over_base_rate": {"ci95_low": 1.0, "ci95_high": 2.0},
+                    },
+                    "calibration": {
+                        "mean_predicted": 0.5,
+                        "observed_rate": 0.1,
+                        "brier_skill_score": -1.0,
+                        "ece_quantile_bins": 0.4,
+                    },
+                }
+            ],
+        }
+    }
+    html = _render_honest_tab(runs, viz)
+    assert "Uncertainty and calibration" in html

@@ -25,6 +25,7 @@ docker compose run --rm canary python tools/<script>.py
 | `enrich_monthly_features.py` | Tier-1 feature families (`advhist_*`, `ghclock_*`) added to the labeled dataset from data already on disk. |
 | `make_figures.py` | Renders praxis/defense figures from the saved artifacts above. |
 | `survivorship_audit.py` | How many advisories in the study window name plugins that are outside the fixed registry snapshot (sampling frame bound)? |
+| `honest_uncertainty.py` | How wide are the intervals on the honest-layer pooled metrics (plugin-level bootstrap), and are the scores calibrated probabilities (Brier skill, ECE, reliability table)? |
 | `oot_migration_sensitivity.py` | Does the third out-of-time fold hold when the plugins hit by the Dec 2025 JIRA-to-GitHub issue migration are excluded (descriptive, per the panel extension protocol)? |
 | `latest_forecast.py` | Scores the newest panel month with the frozen champion fold model for the web console (inference only). |
 | `run_second_wave_backtests.sh` | (driver) The declared 14-run rolling backtest grid for the second-wave enrichment families. |
@@ -703,6 +704,64 @@ issue.
 
 ---
 
+## honest_uncertainty.py — intervals and calibration for the honest layer
+
+*Reads recorded predictions only; nothing is retrained and no recorded number
+changes.* For each rolling-backtest run it concatenates the fold
+`test_predictions.csv` files (the pooled test set the praxis reports on) and
+computes (1) a **cluster bootstrap over plugins** — plugins resampled with
+replacement, each drawn plugin bringing all of its test rows, so the dependence
+between a plugin's months is respected — giving 95% percentile intervals for
+pooled ROC-AUC, AP and AP lift; and (2) **calibration**: Brier score and skill
+against the base-rate reference, expected calibration error over ten quantile
+bins of the score, and the per-decile reliability table that
+`make_figures.py --only honest_reliability` draws. ROC-AUC and AP are computed
+in NumPy (rank statistic with tie correction; step-wise PR integral with one
+step per distinct score) and reproduce scikit-learn to machine precision.
+
+```bash
+docker compose run --rm canary python tools/honest_uncertainty.py            # the six praxis runs, 2,000 resamples
+python tools/honest_uncertainty.py data/processed/results/rolling_backtest/oot_champion --resamples 5000
+```
+
+### Results (October 2026, 2,000 resamples, seed 42)
+
+| Run | rows / positives | pooled ROC-AUC | 95% CI | AP lift | 95% CI | mean score / observed rate | Brier skill | ECE |
+|---|---|---|---|---|---|---|---|---|
+| `ghclock_ghdyn_logistic` | 53,378 / 760 | 0.638 | [0.585, 0.690] | 2.16x | [1.66, 2.96] | 0.496 / 0.0142 | -17.7 | 0.48 |
+| `ghclock_installs_xgb` | 53,378 / 760 | 0.632 | [0.590, 0.675] | 1.78x | [1.44, 2.38] | 0.133 / 0.0142 | -2.5 | 0.12 |
+| `ghclock_only_logistic` | 53,378 / 760 | 0.627 | [0.578, 0.677] | 1.92x | [1.48, 2.72] | 0.505 / 0.0142 | -18.4 | 0.49 |
+| `oot_champion` | 12,318 / 127 | 0.670 | [0.565, 0.764] | 3.81x | [2.02, 9.00] | 0.478 / 0.0103 | -22.4 | 0.47 |
+| `oot_runnerup` | 12,318 / 127 | 0.628 | [0.552, 0.697] | 2.03x | [1.23, 5.25] | 0.052 / 0.0103 | -0.7 | 0.04 |
+| `oot_ghclock_logistic` | 12,318 / 127 | 0.638 | [0.545, 0.723] | 1.77x | [1.22, 3.49] | 0.486 / 0.0103 | -23.4 | 0.48 |
+
+### Interpretation
+
+**Intervals.** On the 13 development folds every declared configuration's
+interval clears the H2 criterion of 0.55. On the three holdout folds (127
+positives) the intervals are wide: the champion clears 0.55 (lower bound
+0.565), the runner-up clears it by two thousandths (0.552), and the baseline's
+interval includes it (0.545). AP-lift intervals exclude 1.0 in every run. H2
+as pre-registered (per-fold point values above 0.55) holds as recorded; the
+interval statement is the honest companion to it, and it is the one a reader
+should quote for the holdout.
+
+**Calibration.** The honest-layer scores are rankings, not probabilities.
+Balanced class weights push the logistic champion's mean score to 0.50 against
+an observed rate of 0.014 (Brier skill −18, ECE 0.48); the XGBoost runner-up
+(fixed positive-class weight 18) sits at a mean score of 0.13. The ranking
+still carries the signal — observed advisory rate rises from below the base
+rate in the middle deciles to 4.0% in the top decile on the holdout (3.9× the
+base rate) — but no honest-layer score should be read as a probability, and
+the positive Brier skill recorded for the stored-label models in
+`brier_score.py` does not carry over (their sharpness came from the leaked
+separation). Post-hoc calibration (Platt or isotonic fitted on the development
+folds, applied to the holdout) is the step before any threshold use; it is
+monotone, so it would not change a ranking number. Praxis Sections 3.10.5,
+3.11, 4.6 and 4.7.
+
+---
+
 ## make_figures.py — praxis and defense figures
 
 Renders figures from the saved artifacts above (no retraining, no new
@@ -723,6 +782,7 @@ experiments). Requires matplotlib (dev dependency).
 | `honest_shap.png` | `rolling_backtest/ghclock_installs_xgb/fold_*/metrics.json` and `oot_runnerup/fold_*/metrics.json` (mean \|SHAP\| per fold); clock colours from the coefficient signs in `ghclock_installs_logistic/fold_*/metrics.json` |
 | `leakage_timeline.png` | none (schematic): one plugin's training and test rows around the reference forecast date, stored labels beside embargoed labels; praxis Section 3.10.3 and the defense deck |
 | `eval_layers.png` | none (schematic): the four validation layers as train/test cuts on the panel calendar (single-split cuts, 13 embargoed rolling folds, 3 holdout folds); praxis Section 3.10 |
+| `honest_reliability.png` | `results/honest_uncertainty.json`: observed advisory rate by score decile beside the reliability curve, holdout champion and runner-up plus the development champion |
 
 ```bash
 # everything

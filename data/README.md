@@ -97,7 +97,7 @@ Column-level documentation lives beside each source: advisory features in
   `rolling_backtest.json` and a `fold_<YYYY-MM>/` directory per fold.
 - `data/processed/results/*.json|csv` — analysis outputs written by the scripts in `tools/`
   (H1 odds ratios, stratified check, Brier scores, SHAP, embargo comparison, survivorship audit,
-  latest forecast). `tools/README.md` documents each one.
+  honest-layer bootstrap intervals and calibration, latest forecast). `tools/README.md` documents each one.
 - `data/processed/figures/` — figures rendered by `tools/make_figures.py`.
 
 ## Current integrated workflow

@@ -113,6 +113,7 @@ PYPI_UNIVERSE_PATH = Path("data/pypi/raw/package_universe.jsonl").resolve()
 JENKINS_ADVISORY_ONLY_RUN = "advisory_only_xgb"
 # The frozen champion applied to the newest panel month (tools/latest_forecast.py).
 LATEST_FORECAST_PATH = Path("data/processed/results/latest_forecast.json").resolve()
+HONEST_UNCERTAINTY_PATH = Path("data/processed/results/honest_uncertainty.json").resolve()
 HONEST_VIZ_TIME_SPLIT_STEMS: dict[str, str] = {
     "xgb_6m_advisory_swh_no_window_time": "Advisory + Software Heritage (official config)",
 }
@@ -769,6 +770,12 @@ def _load_honest_viz(runs: list[dict[str, Any]]) -> dict[str, Any]:
             ),
         },
     ]
+    uncertainty: dict[str, Any] | None = None
+    try:
+        if HONEST_UNCERTAINTY_PATH.exists():
+            uncertainty = json.loads(HONEST_UNCERTAINTY_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        uncertainty = None
     return {
         "timeline": honest_viz.timeline_series(runs),
         "criterion": H2_ROC_CRITERION,
@@ -776,6 +783,7 @@ def _load_honest_viz(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "curves": curves,
         "pairs": pairs,
         "ladders": ladders,
+        "uncertainty": uncertainty,
     }
 
 
