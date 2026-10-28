@@ -2,5 +2,7 @@
 # Add words here only when they are deliberate, and say why.
 
 [default.extend-identifiers]
+# Python package that provides CA certificates.
+certifi = "certifi"
 # False-positive rate, the x axis of a ROC curve (paired with `tpr`).
 fpr = "fpr"

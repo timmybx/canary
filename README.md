@@ -62,9 +62,10 @@ The project includes a Docker-based CLI, a publicly deployed web console, collec
 
 - Modeling is frozen at **v0.1.16**: no feature, threshold or hyperparameter of the reported
   configurations has changed since. v0.1.17 recorded the pre-registered out-of-time runs against
-  that frozen code; v0.1.18 and v0.1.19 carry the web console reorganization, figures and
-  sensitivity tooling, documentation, dependency bumps and a runtime-image refactor. The recorded
-  results are the ones reported in the praxis and archived on Zenodo.
+  that frozen code; v0.1.18, v0.1.19 and v0.1.20 carry the web console reorganization, figures,
+  sensitivity tooling, uncertainty and calibration reporting, documentation updates, dependency
+  bumps and a runtime-image refactor. The recorded results are the ones reported in the praxis and
+  archived on Zenodo.
 - The panel covers 2,053 plugins over 102 months (January 2018 to June 2026; 209,406 plugin-months),
   built from one registry snapshot collected 2026-02-28. `tools/survivorship_audit.py` bounds what
   that fixed frame misses (7.5% of advisory/plugin pairs in the window name delisted plugins).

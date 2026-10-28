@@ -7,6 +7,23 @@ This project follows a lightweight adaptation of “Keep a Changelog”.
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-10-28
+
+### Added
+- **`tools/survivorship_audit.py`: a sampling-frame audit for advisory coverage.** The new tool quantifies the registry-snapshot survivorship gap by crawling the Jenkins security advisory archive, extracting plugin mentions, and counting advisory/plugin pairs whose plugin is absent from the fixed 2026 registry frame. It cross-checks against the Update Center warnings feed, writes a JSON summary and per-pair CSV under `data/processed/results/`, caches pages for offline reruns, and restricts fetches to an allowlisted set of jenkins.io hosts.
+- **`tools/make_figures.py`: data-free leakage and validation-layer schematics.** Two new figures were added for the methods narrative: `leakage_timeline.png` (stored-label vs embargoed-label timing around a forecast date) and `eval_layers.png` (the four validation layers as train/test calendar cuts). Both are registered in `FIGURES` and documented in `tools/README.md`.
+- **`tools/honest_uncertainty.py` and honest-layer reliability outputs.** A new post-processing tool computes plugin-level cluster-bootstrap 95% intervals for pooled ROC-AUC, AP and AP lift from recorded predictions (no retraining), plus Brier skill, ECE, and a decile reliability table. It writes `data/processed/results/honest_uncertainty.json`, and `tools/make_figures.py` gains `honest_reliability` to visualize calibration.
+
+### Changed
+- **Web console honest layer: uncertainty and calibration are first-class outputs.** The honest tab now includes an "Uncertainty and calibration" card populated from `honest_uncertainty.json`, with added tooltips for score, confidence interval, Brier skill, and ECE. Forecast/About copy now states explicitly that CANARY scores are ranking values (not calibrated probabilities), matching the observed holdout base-rate context.
+- **Documentation refreshed for the current validation state and tooling.** Project and data READMEs were updated to reflect the 102-month panel, the four-layer embargoed evaluation protocol (including the pre-registered holdout), expanded tooling surface (including survivorship and latest-forecast utilities), model artifact documentation, and the honest-layer uncertainty/calibration interpretation.
+- **Runtime dependency declarations and lockfiles updated.** Direct dependency floors moved to: `boto3` 1.43.114→1.43.120 (#363, #365, #372, #376, #383, #390), `google-cloud-bigquery` 3.46.1→3.46.2 (#357), `pandas` 3.0.6→3.1.0 (#374), `pyasn1` 0.6.4→0.6.5 (#388), and `shap` 0.53.0→0.54.1 (#361). Notable transitive runtime updates include `botocore` 1.43.114→1.43.120, `certifi` 2026.7.22→2026.10.23, `googleapis-common-protos` 1.75.5→1.76.0, `grpcio`/`grpcio-status` 1.84.0→1.84.1, `pycparser` 3.11→3.12, `s3transfer` 0.19.2→0.19.3, and `soupsieve` 3.0.2→3.0.4. Lockfiles were regenerated in #362, #367, #382.
+- **Development and build dependencies updated.** Python's minimum supported patch release is 3.12.15→3.12.16 (#387). Dev/build tooling updates include `pytest` 9.1.1→9.2.0 (#391), `ruff` 0.17.0→0.17.3 (#358, #377, #385), `ruff-pre-commit` 0.17.0→0.17.3 (#359, #379, #386), `validate-pyproject` 0.26→0.27 (#375), `pip` 26.2.1→26.2.2 (#364), `setuptools` 84.0.0→84.2.1 (#366), and `pyinstaller-hooks-contrib` 2026.8→2026.9.
+- **Pinned CI actions and container images updated.** `actions/setup-python` advanced to v7.1.0 (#373), `docker/scout-action` to v1.28.0 (#371, #389), `docker/login-action` digest was refreshed (#381), `github/codeql-action/upload-sarif` moved to v4.39.1 (#370), and `zizmor-action` moved to v0.8.0 (#380). The pinned `python:3.12-slim` digest was refreshed four times (#368, #369, #378, #384), landing on the latest reviewed digest in both Docker stages.
+
+### Fixed
+- **Baseline DataFrame indexing test uses explicit positional access.** `tests/test_train_baseline.py` now uses `df.iat[0, 0]` instead of chained Series indexing in `test_rows_to_matrix_basic`, avoiding label/typing ambiguity with modern pandas/pyright while preserving test intent.
+
 ## [0.1.19] - 2026-10-15
 
 ### Changed
