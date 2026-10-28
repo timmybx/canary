@@ -10,5 +10,5 @@ pip-tools>=7.6.2
 pyright>=1.1.414
 pre-commit>=4.7.0
 atheris>=3.1.0
-mutmut==3.8.0
+mutmut==3.8.1
 matplotlib>=3.11.2
