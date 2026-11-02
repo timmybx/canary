@@ -430,9 +430,9 @@ distlib==0.4.4 \
     --hash=sha256:ca4175b4ac7f71223cc30ed7248c45d2b38c2439d8ee6e498ab67ed63cf3508d \
     --hash=sha256:cf09d55b1e85a89576b036aeb71550bfd68320f3f21761ca329eadadad918638
     # via virtualenv
-filelock==4.2.4 \
-    --hash=sha256:301241438c57936ef93f4243a94f2559022268bfcf9b375a9a72eb0f8db8358e \
-    --hash=sha256:c6d8663535e1650ee430507b4ffbac7b464dd64b7647ea0112a9f406499d163d
+filelock==4.2.6 \
+    --hash=sha256:ee7af8ede36dcaf12e1016d9f7c3a63ecd5497d46f85dab21b8c779b8f944e97 \
+    --hash=sha256:fd7d4fca497bf3e3d0945a13261f8e684f2aef12ce7cf76aef26e13bf7388b88
     # via
     #   cachecontrol
     #   python-discovery
@@ -902,9 +902,9 @@ mutmut==3.8.1 \
     --hash=sha256:9fb7cfc23caabff22a938e33b8d34317f5fa79b1deab82642cd5e014f3f400aa \
     --hash=sha256:e424d72c0557b6a52a721d9b71e2d18eb9590af746db0bbad50b71e8d4d8ed78
     # via -r requirements-dev.in
-nodeenv==1.11.0 \
-    --hash=sha256:3ce8fe5b71d16e8af7039ca65257354100bc772965d6bc549070649e53b1b146 \
-    --hash=sha256:edaa16e6c14d7cf395d75d4bbd5a26390f4dc06501a33b4e76282b02cc688a25
+nodeenv==1.12.0 \
+    --hash=sha256:4ea7f88339310afebc3253f2c7a91b94bacf97d73a36a5c108962abdfaca501e \
+    --hash=sha256:80644d65c10cc2be12e3e4b54b3367ff288c7ad24ae75c2dcc65454fc7449d4d
     # via
     #   pre-commit
     #   pyright
@@ -1096,9 +1096,9 @@ pip-tools==7.6.2 \
     --hash=sha256:04dbe0e25f3b60fbdeee17d0590dac7fe20039876aa410a946fc54dc926c09ba \
     --hash=sha256:f37eb4b736859c2c30230e50977312c61918b7ef931071ff7811fd067715c25f
     # via -r requirements-dev.in
-platformdirs==4.14.0 \
-    --hash=sha256:1dadfc59a8a5d7565b3d9270ae8fa71c065595352c4277b41c11ee6c222c4b91 \
-    --hash=sha256:83f009c1e8c5fc36869b5171755b291887bd2cade7965233cdfabd23d754720b
+platformdirs==4.14.3 \
+    --hash=sha256:021add1ab113483edbcd4694f5fbb2d688b893ea30d35e1155bb371cf4be0be8 \
+    --hash=sha256:cba2d05fe5e18b26b1fa6f376b8e6234c012abe1f8696c486fface7d0054e931
     # via
     #   pip-audit
     #   textual
@@ -1158,9 +1158,9 @@ python-dateutil==2.9.0.post0 \
     # via
     #   -c requirements.txt
     #   matplotlib
-python-discovery==1.6.7 \
-    --hash=sha256:5422f67e5f533bb02d7b73de1c422ed74037536fd869e05156c07565926ec68e \
-    --hash=sha256:7f7c28568c8ec3d988d8bddbdbec8e65f08e8767e52f734e18b8b498549b9b70
+python-discovery==1.9.0 \
+    --hash=sha256:88beb57e51b919c30f303b053ec41359298ca349192035b0a802c76347ae96d7 \
+    --hash=sha256:fb65edfff3541b7ceb3a39be334a0f69f4cb5148287a053e1874748742fda93b
     # via virtualenv
 pyyaml==6.0.3 \
     --hash=sha256:00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \
@@ -1479,9 +1479,9 @@ urllib3==2.8.0 \
     # via
     #   -c requirements.txt
     #   requests
-virtualenv==21.15.1 \
-    --hash=sha256:0d14a991689c67600316880eadc0a37b7690cb632e3b4ac67e2bc05b2b2e24a4 \
-    --hash=sha256:e79c90b8f601701599c25905e02839924fede2c798d52325670d24fbdaab74ee
+virtualenv==21.15.2 \
+    --hash=sha256:dbd886e6e5689eb4dde6a9bbc478ad14b4fc8ed0852690d8273ccfb8c467f635 \
+    --hash=sha256:fb8c62c7c328e0238061c721068f06b7bc6bd10f7a0f5987195cef1008837ee6
     # via pre-commit
 wheel==0.48.0 \
     --hash=sha256:3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab \
