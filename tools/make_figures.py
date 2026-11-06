@@ -663,8 +663,10 @@ def fig_honest_shap(out: Path, rolling_root: str) -> None:
     axes[0].set_yticks(ys)
     axes[0].set_yticklabels([FEATURE_LABELS.get(f, f) for f in feats], fontsize=8)
     fig.supxlabel(
-        "Mean |SHAP| in each fold: bar = mean over folds, whisker = range across folds",
-        fontsize=8.5,
+        "Bars: mean |SHAP| per fold from the XGBoost runner up (bar = mean over folds, "
+        "whisker = range across folds).\nClock colours: coefficient sign in the logistic "
+        "regression on the same columns, across the 13 development folds.",
+        fontsize=8,
         y=0.115,
     )
     from matplotlib.patches import Patch  # pyright: ignore[reportMissingImports]
@@ -673,7 +675,10 @@ def fig_honest_shap(out: Path, rolling_root: str) -> None:
         Patch(color=magenta, label="Clock, negative coefficient: more recent raises risk"),
         Patch(color=green, label="Clock, positive coefficient: larger value raises risk"),
         Patch(color=grey, label="Clock, coefficient sign not stable across folds"),
-        Patch(color=navy, label="Install base family (direction not read from tree SHAP)"),
+        Patch(
+            color=navy,
+            label="Install base: collinear columns, no direction read from either model",
+        ),
     ]
     fig.legend(
         handles=handles,

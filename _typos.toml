@@ -6,3 +6,7 @@
 certifi = "certifi"
 # False-positive rate, the x axis of a ROC curve (paired with `tpr`).
 fpr = "fpr"
+
+[default.extend-words]
+# Surname of Timothy Tunnell, an author in the Hilton et al. (2016) CI citation.
+Tunnell = "Tunnell"

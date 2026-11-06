@@ -162,3 +162,57 @@ Example:
 ```
 
 CANARY will resolve aliases during scoring, feature generation, health score ingestion, and web-console plugin validation so historical data can still roll up under the current plugin ID.
+
+## Literature behind the feature families (praxis Table 3-1)
+
+The praxis summarizes the rationale for each feature family in one table (Chapter 3,
+Table 3-1) and cites one to three representative studies per family. The per-source
+READMEs under `data/raw/` ground individual features in more detail and carry their own
+reference lists; this section mirrors the praxis table so the two stay in step.
+
+**Advisory history.** Past security events provide baseline context for near term advisory risk.
+
+- Shahzad, M., Shafiq, M. Z., & Liu, A. X. (2012). A large scale exploratory analysis of software vulnerability life cycles. *Proceedings of the 34th International Conference on Software Engineering*, 771–781. https://doi.org/10.1109/ICSE.2012.6227141
+
+**Plugin ecosystem and dependency metadata.** Attack surface expands with more dependencies.
+
+- Decan, A., Mens, T., & Grosjean, P. (2019). An empirical comparison of dependency network evolution in seven software packaging ecosystems. *Empirical Software Engineering*, *24*(1), 381–416. https://doi.org/10.1007/s10664-017-9589-y
+- Kula, R. G., German, D. M., Ouni, A., Ishio, T., & Inoue, K. (2018). Do developers update their library dependencies? *Empirical Software Engineering*, *23*(1), 384–417. https://doi.org/10.1007/s10664-017-9521-5
+- Pashchenko, I., Plate, H., Ponta, S. E., Sabetta, A., & Massacci, F. (2018). Vulnerable open source dependencies: counting those that matter. *Proceedings of the 12th ACM/IEEE International Symposium on Empirical Software Engineering and Measurement*, 1–10. https://doi.org/10.1145/3239235.3268920
+
+**GitHub Archive activity and workflow signals.** Repository activity and pull request behavior are public proxies for project health and review discipline.
+
+- Gousios, G., Zaidman, A., Storey, M. A., & van Deursen, A. (2015). Work practices and challenges in pull-based development: The integrator's perspective. *2015 IEEE/ACM 37th IEEE International Conference on Software Engineering*, 358–368. https://doi.org/10.1109/ICSE.2015.55
+- Walden, J., Stuckman, J., & Scandariato, R. (2014). Predicting vulnerable components: Software metrics vs text mining. *2014 IEEE 25th International Symposium on Software Reliability Engineering*, 22–33. https://doi.org/10.1109/ISSRE.2014.32
+
+**Temporal activity patterns.** Weekend and late night work has been associated with rushed or volunteer maintenance.
+
+- Claes, M., Mäntylä, M. V., Kuutila, M., & Adams, B. (2018). Do programmers work at night or during the weekend? *Proceedings of the 40th International Conference on Software Engineering*, 705–715. https://doi.org/10.1145/3180155.3180193
+- Eyolfson, J., Tan, L., & Lam, P. (2011). Do time of day and developer experience affect commit bugginess? *Proceedings of the 8th Working Conference on Mining Software Repositories*, 153–162. https://doi.org/10.1145/1985441.1985464
+
+**Contributor concentration and diversity.** Concentration raises "bus factor" risk and narrows review diversity.
+
+- Ammar, A. E. C., Eraslan, S., & Yesilada, Y. (2025). Predicting the truck factor in a software repository using machine learning. *Information and Software Technology*, *184*, 107765. https://doi.org/10.1016/j.infsof.2025.107765
+- Ferreira, M., Valente, M. T., & Ferreira, K. (2017). A comparison of three algorithms for computing truck factors. *Proceedings of the 25th International Conference on Program Comprehension*, 207–217. https://doi.org/10.1109/ICPC.2017.35
+- Sachdeva, A., Lazarine, B., Zhu, H., & Samtani, S. (2023). User profiling and vulnerability introduction prediction in social coding repositories: A dynamic graph embedding approach. *Proceedings of the 16th Cyber Security Experimentation and Test Workshop*, 19–25. https://doi.org/10.1145/3607505.3607512
+
+**Repository governance and documentation signals.** Governance artifacts (README, SECURITY.md, CONTRIBUTING.md, changelogs, etc.) signal project maturity and maintenance discipline.
+
+- Munaiah, N., Kroh, S., Cabrey, C., & Nagappan, M. (2017). Curating GitHub for engineered software projects. *Empirical Software Engineering*, *22*(6), 3219–3253. https://doi.org/10.1007/s10664-017-9512-6
+- Prana, G. A. A., Treude, C., Thung, F., Atapattu, T., & Lo, D. (2019). Categorizing the content of GitHub README files. *Empirical Software Engineering*, *24*(3), 1296–1327. https://doi.org/10.1007/s10664-018-9660-3
+
+**CI/CD and automation configuration.** CI/CD and dependency automation indicate more regular, disciplined maintenance.
+
+- Hilton, M., Tunnell, T., Huang, K., Marinov, D., & Dig, D. (2016). Usage, costs, and benefits of continuous integration in open-source projects. *Proceedings of the 31st IEEE/ACM International Conference on Automated Software Engineering*, 426–437. https://doi.org/10.1145/2970276.2970358
+- Vasilescu, B., Yu, Y., Wang, H., Devanbu, P., & Filkov, V. (2015). Quality and productivity outcomes relating to continuous integration in GitHub. *Proceedings of the 2015 10th Joint Meeting on Foundations of Software Engineering*, 805–816. https://doi.org/10.1145/2786805.2786850
+- Zhao, Y., Serebrenik, A., Zhou, Y., Filkov, V., & Vasilescu, B. (2017). The impact of continuous integration on other software development practices: A large-scale empirical study. *2017 32nd IEEE/ACM International Conference on Automated Software Engineering (ASE)*, 60–71. https://doi.org/10.1109/ASE.2017.8115619
+
+**Software Heritage archival repository state and revision features.** Archival snapshots capture maintenance recency and governance artifacts as they existed at observation time, not present day repository state.
+
+- Di Cosmo, R., & Zacchiroli, S. (2017). Software Heritage: Why and how to preserve software source code. *iPRES 2017: 14th International Conference on Digital Preservation*. https://phaidra.univie.ac.at/detail/o:931064
+- Pietri, A., Spinellis, D., & Zacchiroli, S. (2019). The Software Heritage graph dataset: Public software development under one roof. *2019 IEEE/ACM 16th International Conference on Mining Software Repositories (MSR)*, 138–142. https://doi.org/10.1109/MSR.2019.00030
+- Rousseau, G., Di Cosmo, R., & Zacchiroli, S. (2020). Software provenance tracking at the scale of public source code. *Empirical Software Engineering*, *25*(4), 2930–2959. https://doi.org/10.1007/s10664-020-09828-5
+
+**Install base and ecosystem popularity.** Widely deployed components attract more security attention and more reports, so usage scale is a proxy for the surveillance channel as well as for exposure.
+
+- Zimmermann, M., Staicu, C. A., Tenny, C., & Pradel, M. (2019). Small world with high risks: A study of security threats in the npm ecosystem. *28th USENIX Security Symposium*, 995–1012. https://www.usenix.org/system/files/sec19-zimmermann.pdf

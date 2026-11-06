@@ -420,7 +420,7 @@ Alfadel, M., Costa, D. E., & Shihab, E. (2023). Empirical analysis of security
 vulnerabilities in Python packages. *Empirical Software Engineering*, *28*(3), 59.
 https://doi.org/10.1007/s10664-022-10278-4
 
-Alexopoulos, P., Iannone, E., Malburg, J., & Zaidman, A. (2022). How long do
+Alexopoulos, N., Brack, M., Wagner, J. P., Grube, T., & Mühlhäuser, M. (2022). How long do
 vulnerabilities live in the code? A large-scale empirical measurement study on
 FOSS vulnerability lifetimes. *Proceedings of the 31st USENIX Security Symposium*,
 4187–4204. https://www.usenix.org/system/files/sec22-alexopoulos.pdf

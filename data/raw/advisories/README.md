@@ -99,7 +99,7 @@ which for this feed-complete source genuinely means zero.
 | Field | Type | Predictive rationale |
 |-------|------|----------------------|
 | `advhist_has_history` | bool | Whether the plugin has any in-panel advisory history as of this month. The explicit companion flag for every capped recency value below. |
-| `advhist_months_since_last` | int | Months since the most recent in-panel advisory (capped at 120 = no history). The month-granularity recurrence clock: prior vulnerability exposure is among the most informative predictors of future vulnerabilities (Walden et al., 2014), and recency sharpens it. |
+| `advhist_months_since_last` | int | Months since the most recent in-panel advisory (capped at 120 = no history). The month-granularity recurrence clock: prior vulnerability exposure is among the most informative predictors of future vulnerabilities (Walden et al., 2014), and recency sharpens it. Large-scale studies of vulnerability life cycles (Shahzad et al., 2012) and of how long vulnerabilities survive in code before disclosure (Alexopoulos et al., 2022) are the basis for treating past advisories as baseline context for near-term risk. |
 | `advhist_months_since_first` | int | Months since the earliest in-panel advisory (capped at 120). How long the plugin has had a known security history. |
 | `advhist_advisory_months_to_date` | int | Number of distinct months with at least one advisory. Distinguishes recurring exposure from a single multi-advisory incident. |
 | `advhist_advisory_count_to_date` | int | Total advisories to date from the panel calendar (a multi-advisory month counts each). |
@@ -217,9 +217,18 @@ sharing the same advisory ID and lead time for this reason.
 
 ## References
 
+Alexopoulos, N., Brack, M., Wagner, J. P., Grube, T., & Mühlhäuser, M. (2022). How long do
+vulnerabilities live in the code? A large-scale empirical measurement study on FOSS
+vulnerability lifetimes. *Proceedings of the 31st USENIX Security Symposium*,
+4187–4204. https://www.usenix.org/system/files/sec22-alexopoulos.pdf
+
 FIRST. (2024). *Common Vulnerability Scoring System (CVSS) v4.0 Specification*.
 Forum of Incident Response and Security Teams.
 https://www.first.org/cvss/
+
+Shahzad, M., Shafiq, M. Z., & Liu, A. X. (2012). A large scale exploratory analysis of
+software vulnerability life cycles. *Proceedings of the 34th International Conference
+on Software Engineering (ICSE 2012)*, 771–781. https://doi.org/10.1109/ICSE.2012.6227141
 
 Walden, J., Stuckman, J., & Scandariato, R. (2014). Predicting vulnerable components:
 Software metrics vs. text mining. *2014 IEEE International Symposium on Software
