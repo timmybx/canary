@@ -825,6 +825,12 @@ docker compose build --no-cache canary
 
 ---
 
+## 🎤 Talks and Coverage
+
+- **SCORED '26** (Software Supply Chain Offensive Research and Ecosystem Defenses, co-located with OpenSSF Community Day Europe, Prague, 6 October 2026): *Canary in the Code Mine: Predictive Risk Scoring for Open-Source Supply Chain Security* — [recording](https://www.youtube.com/watch?v=im2n_blOmoU) (22 min, including Q&A). The talk covers the label-leakage finding (0.93 ROC-AUC to chance under embargoed labels), the four validation layers, and the pre-registered out-of-time result.
+- OpenSSF's [Community Day Europe 2026 recap](https://openssf.org/blog/2026/11/06/openssf-community-day-europe-2026-driving-systemic-security-and-operational-resilience-in-open-source/) lists the talk in its SCORED track summary.
+- Andrew Nesbitt's [This Week in Package Management, 10 October 2026](https://nesbitt.io/2026/10/10/this-week-in-package-management.html) wrote it up in one line: "A ROC-AUC of 0.96 turned out to come from a label leak," with 0.67 out of time under a pre-registered protocol.
+
 ## 📖 How to Cite
 
 If you use CANARY in academic work, please cite it using the metadata in [`CITATION.cff`](CITATION.cff).
