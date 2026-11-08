@@ -7,6 +7,17 @@ This project follows a lightweight adaptation of “Keep a Changelog”.
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-11-08
+
+### Added
+- **Talks and coverage section in the README.** The new section documents the SCORED '26 talk recording (*Canary in the Code Mine: Predictive Risk Scoring for Open-Source Supply Chain Security*, OpenSSF Community Day Europe, Prague) and coverage from OpenSSF's Community Day Europe 2026 recap and This Week in Package Management, including the reported validation findings.
+
+### Changed
+- **Feature-family rationale documented and SHAP figure clarified.** `data/README.md` now mirrors praxis Table 3-1 with the supporting literature behind each feature family, and the advisory-source README grounds its recency features with corrected and extended references (Shahzad et al., 2012; Alexopoulos et al., 2022). The honest-layer SHAP figure caption now states which model the bars come from (the XGBoost runner-up) and what the clock colours mean (coefficient sign in the logistic regression on the same columns), with the install-base family labelled as collinear columns with no direction read from either model.
+- **Runtime dependency declarations and lockfiles updated.** Direct dependency floors moved to: `boto3` 1.43.120→1.43.126 (#394, #398, #399, #406, #413, #416), `google-cloud-bigquery` 3.46.2→3.47.0 (#397), and `pandas` 3.1.0→3.1.1 (#407). Notable transitive runtime updates include `botocore` 1.43.120→1.43.126, `grpcio`/`grpcio-status` 1.84.1→1.85.1, `narwhals` 2.27.1→2.28.0, `opentelemetry-api` 1.45.1→1.45.2, `soupsieve` 3.0.4→4.0.1, and `threadpoolctl` 3.7.0→3.8.0. Lockfiles were regenerated in #396, #400, #411.
+- **Development and build dependencies updated.** Dev/build tooling updates include `ruff` 0.17.3→0.17.4 (#414), `ruff-pre-commit` 0.17.3→0.17.4 (#415), the `typos` pre-commit hook 1.51.1→1.52.0 (#403), and `pip` 26.2.2→26.3 (#402). Notable transitive dev updates include `filelock` 4.2.4→4.2.9, `fonttools` 4.67.0→4.68.0, `msgpack` 1.2.3→1.2.4, `nodeenv` 1.11.0→1.12.0, `platformdirs` 4.13.5→4.14.5, `python-discovery` 1.6.4→1.9.4, and `virtualenv` 21.14.13→21.15.5.
+- **Pinned CI actions and container images updated.** `docker/scout-action` advanced to v1.29.0 (#395), the `docker/login-action` digest was refreshed (#409), `github/codeql-action/upload-sarif` moved to v4.39.3 (#405, #408), and `zizmor-action` moved to v0.8.1 (#404). The pinned `python:3.12-slim` digest was refreshed four times (#401, #410, #412, #417), landing on the latest reviewed digest in both Docker stages.
+
 ## [0.1.20] - 2026-10-28
 
 ### Added
