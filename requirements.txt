@@ -367,9 +367,9 @@ cryptography==50.0.2 \
     # via
     #   canary (pyproject.toml)
     #   google-auth
-google-api-core[grpc]==2.43.2 \
-    --hash=sha256:5a9d21baab97fd3c0547ccfc186a9e64f4227d8d7026f393835316400b29a6d4 \
-    --hash=sha256:5dfc5e9d52982bcc03bd6af380a893365b5fdf907dc527f63d3a372833c33329
+google-api-core[grpc]==2.44.0 \
+    --hash=sha256:5ab9a396965c1227d7dea4581e562b7018aa2bca96d2de0be5eb70dc9c8ab3a1 \
+    --hash=sha256:8cb9ad8af28de9bc75121686d69b697ce0937e21fad2ad80c9a7e89f22b26e1f
     # via
     #   google-cloud-bigquery
     #   google-cloud-core
