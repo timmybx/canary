@@ -9,6 +9,7 @@ test_webapp_main_low_hanging.py.
 
 from __future__ import annotations
 
+import json
 import urllib.error
 import urllib.request
 from email.message import Message
@@ -616,3 +617,86 @@ def test_offline_mode_skips_live_lookup_and_ai_calls(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv(services.OFFLINE_ENV_VAR, "0")
     assert not services.web_offline()
     assert "offline mode" not in webapp.render_page({"active_tab": "about"})
+
+
+# --- live commit date lookup (network boundary: urllib.request.urlopen) ---
+
+
+class _FakeResponse:
+    def __init__(self, payload: Any) -> None:
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self) -> _FakeResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body
+
+
+def _commit_payload(author: str | None, committer: str | None = None) -> list[dict[str, Any]]:
+    commit: dict[str, Any] = {}
+    if author is not None:
+        commit["author"] = {"date": author}
+    if committer is not None:
+        commit["committer"] = {"date": committer}
+    return [{"commit": commit}]
+
+
+def test_fetch_live_commit_date_formats_author_date(monkeypatch: pytest.MonkeyPatch) -> None:
+    requested: list[str] = []
+
+    def fake_urlopen(req: urllib.request.Request, timeout: float) -> _FakeResponse:
+        requested.append(req.full_url)
+        return _FakeResponse(_commit_payload("2026-05-20T10:00:00Z"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    assert webapp._fetch_live_commit_date("git") == "May 20, 2026"
+    assert requested == ["https://api.github.com/repos/jenkinsci/git-plugin/commits?per_page=1"]
+
+
+def test_fetch_live_commit_date_falls_back_to_committer_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _commit_payload("", "2026-01-02T00:00:00+00:00")
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: _FakeResponse(payload))
+    assert webapp._fetch_live_commit_date("git") == "January 2, 2026"
+
+
+def test_fetch_live_commit_date_retries_bare_repo_name_after_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested: list[str] = []
+
+    def fake_urlopen(req: urllib.request.Request, timeout: float) -> _FakeResponse:
+        requested.append(req.full_url)
+        if len(requested) == 1:
+            raise urllib.error.URLError("404")
+        return _FakeResponse(_commit_payload("2026-03-04T00:00:00Z"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    assert webapp._fetch_live_commit_date("widget") == "March 4, 2026"
+    assert requested[1].startswith("https://api.github.com/repos/jenkinsci/widget/commits")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [[], {"message": "Not Found"}, ["not-a-dict"], [{"commit": "bad"}], _commit_payload(None)],
+)
+def test_fetch_live_commit_date_returns_none_for_unusable_payload(
+    monkeypatch: pytest.MonkeyPatch, payload: Any
+) -> None:
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: _FakeResponse(payload))
+    assert webapp._fetch_live_commit_date("git") is None
+
+
+def test_fetch_live_commit_date_rejects_unsafe_plugin_id_without_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(req: urllib.request.Request, timeout: float) -> _FakeResponse:
+        raise AssertionError("network must not be touched for invalid plugin ids")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    assert webapp._fetch_live_commit_date("../evil") is None
